@@ -21,7 +21,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
     /// <summary>The id of the first row of a collection, read off its list as a visitor would.</summary>
     private async Task<string> FirstIdOfAsync(StudioPage studio, string collection)
     {
-        await studio.GoAsync(fixture.Root.StudioUrl("documents/" + collection));
+        await studio.GoAsync(fixture.Root.StudioUrl("marten/documents/" + collection));
 
         ILocator ids = studio.Page.Locator(".ms-doc-table tbody tr.ms-doc-row a.ms-doc-id");
         await ids.First.WaitForAsync();
@@ -46,7 +46,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             string id = await FirstIdOfAsync(studio, "customer");
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             await page.Locator("body").PressAsync("/");
@@ -59,7 +59,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             await page.Locator("#ms-find-input").FillAsync(id);
             await page.Keyboard.PressAsync("Enter");
 
-            await page.WaitForURLAsync(static url => url.Contains("documents/customer/doc", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
+            await page.WaitForURLAsync(static url => url.Contains("marten/documents/customer/doc", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
             HttpUtility.ParseQueryString(new Uri(page.Url).Query)["id"].Should().Be(id);
             (await page.Locator("#ms-find-input").InputValueAsync()).Should().Be(id, "the value stays in the box");
 
@@ -73,7 +73,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             // In the box itself it is the character.
@@ -103,7 +103,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             // An order's summary document and its stream share an id, and both are worth offering.
             string id = await FirstIdOfAsync(studio, "ordersummary");
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
             string before = page.Url;
 
@@ -134,7 +134,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             await page.Keyboard.PressAsync("Enter");
             await hits.First.WaitForAsync();
             await hits.Nth(1).ClickAsync();
-            await page.WaitForURLAsync(static url => url.Contains("events/streams/s", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
+            await page.WaitForURLAsync(static url => url.Contains("marten/events/streams/s", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
             studio.AssertNoPageFetch("following a find result");
             studio.AssertClean("walking the find results");
         });
@@ -145,7 +145,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             await page.Locator("#ms-find-input").FillAsync("no-such-id-anywhere-0001");
@@ -169,7 +169,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             (await page.Locator(".ms-header-find #ms-find-input").IsVisibleAsync()).Should().BeTrue();
@@ -191,7 +191,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(390, 844);
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             (await page.Locator(".ms-find-toggle").IsVisibleAsync()).Should().BeTrue();
@@ -231,7 +231,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             (await FocusIsInTheBoxAsync(page)).Should().BeTrue("/ opens the popover and focuses the box");
 
             string id = await FirstIdOfAsync(studio, "customer");
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await WaitForTheBoxAsync(studio);
 
             await page.Locator(".ms-find-toggle").ClickAsync();
@@ -239,7 +239,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             await page.Locator("#ms-find-input").FillAsync(id);
             await page.Keyboard.PressAsync("Enter");
 
-            await page.WaitForURLAsync(static url => url.Contains("documents/customer/doc", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
+            await page.WaitForURLAsync(static url => url.Contains("marten/documents/customer/doc", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
             await page.WaitForFunctionAsync("() => !document.getElementById('ms-find-popover').matches(':popover-open')", null, Wait);
 
             await studio.AssertNoSidewaysScrollAsync("the page after a find at 390 px");

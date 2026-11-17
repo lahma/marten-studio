@@ -28,25 +28,24 @@ public class KafkaOnlyShellTests
         clusters: [KafkaStudioHarness.Primary]);
 
     [Fact]
-    public async Task The_shell_has_no_root_and_the_first_module_is_Kafkas()
+    public async Task A_kafka_only_shell_has_the_one_module_and_its_rail_is_Kafkas_then_the_shells_own()
     {
         using KafkaStudioHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         StudioShellDescriptor descriptor = harness.Context.Services.GetRequiredService<StudioShellDescriptor>();
 
-        descriptor.Root.Should().BeNull();
-        descriptor.First!.Key.Should().Be("kafka");
+        descriptor.Modules.Should().ContainSingle().Which.Key.Should().Be("kafka");
         descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "System");
     }
 
     [Theory]
-    [InlineData("http://localhost/studio", "http://localhost/kafka")]
-    [InlineData("http://localhost/studio/", "http://localhost/kafka")]
-    [InlineData("http://localhost/studio?cluster=primary", "http://localhost/kafka?cluster=primary")]
-    public async Task The_front_address_is_replaced_by_the_first_modules_home_with_the_query_it_came_with(string front, string home)
+    [InlineData("http://localhost/studio", "http://localhost/studio/kafka")]
+    [InlineData("http://localhost/studio/", "http://localhost/studio/kafka")]
+    [InlineData("http://localhost/studio?cluster=primary", "http://localhost/studio/kafka?cluster=primary")]
+    public async Task The_front_address_is_replaced_by_the_one_modules_home_with_the_query_it_came_with(string front, string home)
     {
-        // The home is the module's route relative to the document base: the harness's base is the host root, where a circuit's is the mount.
+        // The home is the front address's own path and the module's segment, an absolute path, so that it means the same on the prerender and on the circuit.
         using KafkaStudioHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Navigation.Simulate(front, intercepted: false);
@@ -54,8 +53,8 @@ public class KafkaOnlyShellTests
 
         _ = harness.Context.Render<StudioRoutes>();
 
-        (string Uri, Microsoft.AspNetCore.Components.NavigationOptions Options) request = harness.Navigation.Requests.Should().ContainSingle().Which;
-        request.Uri.Should().Be(home);
+        (string Uri, Microsoft.AspNetCore.Components.NavigationOptions Options) request = harness.Navigation.Requests.Should().NotBeEmpty().And.Subject.First();
+        request.Uri.Should().Be(home, "the first thing that happens is the redirect; the cluster page then writes its own cluster into the address, which is its own business");
         request.Options.ReplaceHistoryEntry.Should().BeTrue("the front address is not a page to go Back to");
         request.Options.ForceLoad.Should().BeFalse();
     }
@@ -71,7 +70,7 @@ public class KafkaOnlyShellTests
 
         harness.Navigation.Simulate("http://localhost/studio", intercepted: true);
 
-        harness.Navigation.Requests.Should().ContainSingle().Which.Uri.Should().Be("http://localhost/kafka", "relative to the harness's base, the host root");
+        harness.Navigation.Requests.Should().NotBeEmpty().And.Subject.First().Uri.Should().Be("http://localhost/studio/kafka");
     }
 
     [Fact]

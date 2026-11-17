@@ -78,7 +78,7 @@ public class ShellModuleComponentTests
     // ---- the rail
 
     [Fact]
-    public async Task The_kafka_section_is_drawn_before_System()
+    public async Task Modules_are_drawn_in_key_order_and_the_shells_own_section_closes_the_rail()
     {
         using KafkaStudioHarness harness = new();
         await harness.Context.ReadyAsync();
@@ -86,7 +86,7 @@ public class ShellModuleComponentTests
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
         string[] sections = [.. rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim())];
-        sections.Should().Equal("Data", "Database", "Operations", "Kafka", "System");
+        sections.Should().Equal("Kafka", "Data", "Database", "Operations", "System", "Studio");
         rail.FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain(["Topics", "Cluster settings"]).And.NotContain("Search", "the capability is off");
     }
 
@@ -142,8 +142,11 @@ public class ShellModuleComponentTests
         string kafka = rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Topics").GetAttribute("href")!;
         kafka.Should().EndWith("kafka").And.NotContain("store=").And.NotContain("db=").And.NotContain("tenant=");
 
-        string host = rail.FindAll("a.ms-nav-link").First(static x => x.TextContent.Trim() == "Activity").GetAttribute("href")!;
+        string host = rail.FindAll("a.ms-nav-link").First(static x => x.TextContent.Trim() == "Health").GetAttribute("href")!;
         host.Should().Contain("store=default");
+
+        // The shell's own Activity entry belongs to no module, so it carries no scope of either.
+        rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Activity").GetAttribute("href").Should().Be("activity");
     }
 
     [Fact]
@@ -155,11 +158,12 @@ public class ShellModuleComponentTests
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
         string[] lines = [.. rail.Find(".ms-rail-credit").QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim())];
-        lines.Should().HaveCount(4);
+        lines.Should().HaveCount(5);
         lines[0].Should().StartWith("Data Studio ");
         lines[1].Should().Be("KStudio for Apache Kafka®");
-        lines[2].Should().Be("MIT licensed");
-        lines[3].Should().Be("by Marko Lahma");
+        lines[2].Should().Be("Postgres Studio");
+        lines[3].Should().Be("MIT licensed");
+        lines[4].Should().Be("by Marko Lahma");
     }
 
     // ---- the chip and the banner

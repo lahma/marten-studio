@@ -29,7 +29,7 @@ public class TenantsPageTests
 
         if (query.Length > 0)
         {
-            context.Navigate("studio/tenants" + query);
+            context.Navigate("studio/marten/tenants" + query);
         }
 
         return (context, data);
@@ -69,10 +69,10 @@ public class TenantsPageTests
 
         string[] links = [.. page.FindAll("tr.ms-table-row .ms-tenants-open a").Select(static x => x.GetAttribute("href")!)];
         links.Should().Equal(
-            "documents?store=default&db=localhost.marten&tenant=acme",
-            "events/streams?store=default&db=localhost.marten&tenant=acme",
-            "events/feed?store=default&db=localhost.marten&tenant=acme",
-            "projections?store=default&db=localhost.marten&tenant=acme");
+            "marten/documents?store=default&db=localhost.marten&tenant=acme",
+            "marten/events/streams?store=default&db=localhost.marten&tenant=acme",
+            "marten/events/feed?store=default&db=localhost.marten&tenant=acme",
+            "marten/projections?store=default&db=localhost.marten&tenant=acme");
     }
 
     [Fact]

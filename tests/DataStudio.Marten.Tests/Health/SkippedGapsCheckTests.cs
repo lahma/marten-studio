@@ -66,7 +66,7 @@ public class SkippedGapsCheckTests
         finding.Evidence.Should().Contain(new HealthEvidence("Skips in the last hour", "1"));
         finding.Evidence.Should().Contain(new HealthEvidence("Skips in the last day", "2"));
         finding.Evidence.Should().Contain(static x => x.Label == "Latest skip" && x.Value.StartsWith("#100 to #120 (20 sequence numbers)", StringComparison.Ordinal));
-        finding.Link!.Route.Should().Be("projections", "D01's Explain sits on the projections screen, beside a held mark");
+        finding.Link!.Route.Should().Be("marten/projections", "D01's Explain sits on the projections screen, beside a held mark");
     }
 
     [Fact]

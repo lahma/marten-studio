@@ -49,7 +49,7 @@ public class RelationshipsTablesPageTests
     public void The_documents_view_draws_only_document_types_and_the_keys_between_them()
     {
         using var context = NewContext(out _);
-        context.Navigate("/marten/relationships?view=documents");
+        context.Navigate("studio/postgres/relationships?view=documents");
 
         var page = context.Render<RelationshipsPage>();
 
@@ -63,7 +63,7 @@ public class RelationshipsTablesPageTests
     public void The_tables_view_draws_keys_with_a_table_end_and_lists_the_tables_with_none()
     {
         using var context = NewContext(out _);
-        context.Navigate("/marten/relationships?view=tables");
+        context.Navigate("studio/postgres/relationships?view=tables");
 
         var page = context.Render<RelationshipsPage>();
 
@@ -75,7 +75,7 @@ public class RelationshipsTablesPageTests
         IElement isolated = page.Find(".ms-graph-isolated");
         isolated.TextContent.Should().Contain("audit_log");
         isolated.QuerySelectorAll("a").Should().ContainSingle()
-            .Which.GetAttribute("href").Should().StartWith("database/object?schema=legacy&name=audit_log");
+            .Which.GetAttribute("href").Should().StartWith("postgres/database/object?schema=legacy&name=audit_log");
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class RelationshipsTablesPageTests
     public void A_schema_chip_filters_the_table_nodes_and_says_which_is_chosen()
     {
         using var context = NewContext(out _);
-        context.Navigate("/marten/relationships?schema=quartz");
+        context.Navigate("studio/postgres/relationships?schema=quartz");
 
         var page = context.Render<RelationshipsPage>();
 
@@ -166,7 +166,7 @@ public class RelationshipsTablesPageTests
         node.QuerySelector(".ms-graph-node-type")!.TextContent.Should().Be("quartz", "the schema is the second line");
 
         string href = node.GetAttribute("href") ?? string.Empty;
-        href.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers");
+        href.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_triggers");
         href.Should().Contain("store=default", "a pasted link has to reopen the same scope (D9)");
 
         page.FindAll(".ms-graph-svg .ms-graph-node:not(.ms-graph-node-table) .ms-graph-node-box")
@@ -220,12 +220,12 @@ public class RelationshipsTablesPageTests
 
     [Theory]
     [InlineData("both")]
-    [InlineData("documents")]
+    [InlineData("marten/documents")]
     [InlineData("tables")]
     public void In_every_view_every_edge_drawn_is_a_row_in_the_table_and_the_other_way_round(string view)
     {
         using var context = NewContext(out _);
-        context.Navigate("/marten/relationships?view=" + view);
+        context.Navigate("studio/postgres/relationships?view=" + view);
 
         var page = context.Render<RelationshipsPage>();
 
@@ -250,7 +250,7 @@ public class RelationshipsTablesPageTests
         // which link to object detail too and are, by definition, no node of it.
         List<string> fromTable = [.. page.FindAll(".ms-graph-table .ms-graph-row-link").Select(static x => x.GetAttribute("href") ?? string.Empty)];
 
-        fromTable.Should().Contain(static x => x.StartsWith("database/object", StringComparison.Ordinal));
+        fromTable.Should().Contain(static x => x.StartsWith("postgres/database/object", StringComparison.Ordinal));
         fromTable.Should().BeSubsetOf(fromPicture);
 
         page.FindAll(".ms-graph-row").Single(static x => x.GetAttribute("data-edge")!.StartsWith("legacy.customer_credit", StringComparison.Ordinal))
@@ -315,7 +315,7 @@ public class RelationshipsTablesPageTests
     {
         using var context = NewContext(out FakeRelationshipDataService relationships);
         relationships.Graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
-        context.Navigate("/marten/relationships" + query);
+        context.Navigate("studio/postgres/relationships" + query);
 
         var page = context.Render<RelationshipsPage>();
 
@@ -325,9 +325,9 @@ public class RelationshipsTablesPageTests
         IElement isolated = page.Find(".ms-graph-isolated");
         isolated.QuerySelector(".ms-section-title")!.TextContent.Should().Be("No foreign keys");
         List<string> links = [.. isolated.QuerySelectorAll("a").Select(static x => x.GetAttribute("href") ?? string.Empty)];
-        links.Should().Contain(static x => x.StartsWith("documents/auditnote", StringComparison.Ordinal));
-        links.Should().Contain(static x => x.StartsWith("documents/vehicle", StringComparison.Ordinal));
-        bool auditLog = links.Exists(static x => x.StartsWith("database/object?schema=legacy&name=audit_log", StringComparison.Ordinal));
+        links.Should().Contain(static x => x.StartsWith("marten/documents/auditnote", StringComparison.Ordinal));
+        links.Should().Contain(static x => x.StartsWith("marten/documents/vehicle", StringComparison.Ordinal));
+        bool auditLog = links.Exists(static x => x.StartsWith("postgres/database/object?schema=legacy&name=audit_log", StringComparison.Ordinal));
         auditLog.Should().Be(!query.Contains("quartz", StringComparison.Ordinal),
             "a table with no key is listed too - in the schema chosen, when one is");
 
@@ -340,7 +340,7 @@ public class RelationshipsTablesPageTests
     {
         using var context = NewContext(out FakeRelationshipDataService relationships);
         relationships.Graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
-        context.Navigate("/marten/relationships?view=documents");
+        context.Navigate("studio/postgres/relationships?view=documents");
 
         var page = context.Render<RelationshipsPage>();
 

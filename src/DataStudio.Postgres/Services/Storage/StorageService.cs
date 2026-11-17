@@ -314,7 +314,7 @@ internal sealed class StorageService : IStorageService
             tables.Add(new StorageTableView(
                 named ? table.Table.Schema : null,
                 named ? table.Table.Table : null,
-                named ? DatabaseLinks.ToObject(settings, descriptor, scope, table.Table.Schema, table.Table.Table) : null,
+                named ? DatabaseLinks.ToObject(descriptor, scope, table.Table.Schema, table.Table.Table) : null,
                 named ? table.Table.Ownership : null,
                 named ? table.Table.Library : null,
                 table.TotalBytes,

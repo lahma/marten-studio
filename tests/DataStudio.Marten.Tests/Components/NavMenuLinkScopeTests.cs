@@ -23,7 +23,7 @@ public class NavMenuLinkScopeTests
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
     private static string[] RailHrefs(IRenderedComponent<NavMenu> nav) =>
-        [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty)];
+        [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty).Where(static x => x != "activity")];
 
     /// <summary>
     /// The picker moves the scope to a store whose facts take a while to read: until they are read the active scope is the old one, and
@@ -150,7 +150,7 @@ public class NavMenuLinkScopeTests
     [Fact]
     public async Task During_the_first_load_the_rail_carries_the_scope_the_pasted_address_names_and_a_click_keeps_it()
     {
-        ClickableNavigationManager navigation = new("http://localhost/studio/?store=other&db=db-x");
+        ClickableNavigationManager navigation = new("http://localhost/studio/marten?store=other&db=db-x");
 
         await using StudioComponentContext context = new(services =>
         {
@@ -173,13 +173,13 @@ public class NavMenuLinkScopeTests
         routes.WaitForAssertion(() =>
         {
             context.State.ActiveScope.Should().BeNull("the premise: the listings have not been read");
-            string[] hrefs = [.. routes.FindAll(".ms-sidebar a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty)];
+            string[] hrefs = [.. routes.FindAll(".ms-sidebar a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty).Where(static x => x != "activity")];
             hrefs.Should().NotBeEmpty();
             hrefs.Should().OnlyContain(static x => x.Contains("store=other") && x.Contains("db=db-x"), "the address's scope, not nothing and not the first store's");
         });
 
         // A click on a rail link inside the window.
-        string stores = routes.FindAll(".ms-sidebar a.ms-nav-link").First(static x => (x.GetAttribute("href") ?? string.Empty).StartsWith("stores", StringComparison.Ordinal)).GetAttribute("href")!;
+        string stores = routes.FindAll(".ms-sidebar a.ms-nav-link").First(static x => (x.GetAttribute("href") ?? string.Empty).StartsWith("marten/stores", StringComparison.Ordinal)).GetAttribute("href")!;
         navigation.Click(stores);
 
         // The click inside the window already carries the address's scope: this is what the fix is (the old rail's link had no scope at all
@@ -189,10 +189,10 @@ public class NavMenuLinkScopeTests
         context.Catalog.DescribeGate.SetResult();
 
         routes.WaitForAssertion(() => context.State.ActiveScope.Should().Be(new StudioScope("other", "db-x", null)));
-        routes.WaitForAssertion(() => context.CurrentUri.Should().Contain("store=other").And.Contain("stores"));
+        routes.WaitForAssertion(() => context.CurrentUri.Should().Contain("store=other").And.Contain("marten/stores"));
 
         // And once settled the rail is the active scope's, with nothing left over from the window.
-        routes.WaitForAssertion(() => routes.FindAll(".ms-sidebar a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty)
+        routes.WaitForAssertion(() => routes.FindAll(".ms-sidebar a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty).Where(static x => x != "activity")
             .Should().OnlyContain(static x => x.Contains("store=other") && x.Contains("db=db-x")));
     }
 

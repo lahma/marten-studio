@@ -13,7 +13,6 @@
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
-@inject IShellSettings Settings
 @inject TimeProvider Time
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ILogger<KafkaTailBody> Logger
@@ -315,7 +314,7 @@
 
     private bool busy => starting || running;
 
-    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+    private string TopicsHref => KafkaAddress.Href(KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     private bool CanStart => !busy && selected.Count > 0;
 

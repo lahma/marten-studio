@@ -51,26 +51,18 @@ namespace DataStudio.Internal;
 /// <c>FallbackPolicy</c> — exactly what governs the page that imports those files. At a root mount there is no such endpoint.
 /// </para>
 /// <para>
-/// The hub slot holds the front redirect of a shell whose modules all keep their own segment (there is no page at the mount itself):
-/// it is governed like a page, so the caller's <c>RequireAuthorization()</c> or <c>AllowAnonymous()</c> reaches it. Where the shell has a
-/// root page there is no such endpoint and the slot is empty. There is no SignalR hub (D10): pages poll through a snapshot cache, and if a hub
-/// is ever added it must arrive without changing what this method returns, so that the one statement a caller made about the studio keeps
-/// covering all of it.
+/// There is no SignalR hub (D10): pages poll through a snapshot cache. If one is ever added it must arrive without changing what this method
+/// returns, so that the one statement a caller made about the studio keeps covering all of it. The front page at the mount is a page like any
+/// other, so it is in the components builder.
 /// </para>
 /// </remarks>
 internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
 {
     private readonly IEndpointConventionBuilder components;
-    private readonly IEndpointConventionBuilder? hub;
     private readonly IEndpointConventionBuilder? frameworkFiles;
 
     /// <param name="components">
     /// The Razor components builder the studio's pages and its Blazor circuit live in.
-    /// </param>
-    /// <param name="hub">
-    /// The shell's front redirect, or <see langword="null" /> where the shell has a root page and needs none. There is no live-events hub: pages
-    /// poll through a snapshot cache rather than opening a second host-visible endpoint (D10), and the slot is also where a hub would go, because
-    /// adding one later must not change what <c>MapDataStudio</c> returns.
     /// </param>
     /// <param name="frameworkFiles">
     /// The forward of the host's own <c>_framework</c> files under the mount path: host-owned content, so it is governed
@@ -79,25 +71,21 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
     /// </param>
     public StudioConventionBuilder(
         IEndpointConventionBuilder components,
-        IEndpointConventionBuilder? hub,
         IEndpointConventionBuilder? frameworkFiles)
     {
         this.components = components;
-        this.hub = hub;
         this.frameworkFiles = frameworkFiles;
     }
 
     public void Add(Action<EndpointBuilder> convention)
     {
         components.Add(convention);
-        hub?.Add(convention);
         frameworkFiles?.Add(convention);
     }
 
     public void Finally(Action<EndpointBuilder> finallyConvention)
     {
         components.Finally(finallyConvention);
-        hub?.Finally(finallyConvention);
         frameworkFiles?.Finally(finallyConvention);
     }
 }

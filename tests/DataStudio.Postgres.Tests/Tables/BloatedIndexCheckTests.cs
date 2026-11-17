@@ -85,7 +85,7 @@ public class BloatedIndexCheckTests
         finding.Variant.Should().Be("key-width");
         finding.Caveat.Should().Contain("An estimate from the catalog").And.Contain("pgstatindex");
         finding.Remedy!.Code.Should().Be("REINDEX INDEX CONCURRENTLY \"app\".\"orders_pkey\";");
-        finding.Link!.Route.Should().Be("maintenance");
+        finding.Link!.Route.Should().Be("postgres/maintenance");
     }
 
     [Fact]

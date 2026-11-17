@@ -141,7 +141,7 @@ public class EventShapePanelTests
             page.WaitForAssertion(() => page.FindAll("a.ms-id-text").Should().NotBeEmpty());
             string href = page.Find("a.ms-id-text").GetAttribute("href")!;
 
-            href.Should().Contain("events/streams/s").And.Contain("id=stream-9").And.Contain("v=4").And.Contain("store=default");
+            href.Should().Contain("marten/events/streams/s").And.Contain("id=stream-9").And.Contain("v=4").And.Contain("store=default");
 
             foreach (IElement table in page.FindAll(".ms-shape-table"))
             {

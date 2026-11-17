@@ -43,7 +43,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("query?store=tenants&db=tenant_b"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/query?store=tenants&db=tenant_b"));
 
             ILocator editor = page.Locator("#ms-query-sql");
             await editor.WaitForAsync();
@@ -66,7 +66,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("plan?store=tenants&db=tenant_b&sql="
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/plan?store=tenants&db=tenant_b&sql="
                 + Uri.EscapeDataString("select c.name from public.customers c order by c.name")));
             await page.Locator("#ms-plan-sql").WaitForAsync();
 
@@ -91,7 +91,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("relationships"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/relationships"));
             await page.Locator("svg.ms-graph-svg").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             ILocator chips = page.Locator(".ms-graph-schema-chip");
@@ -117,7 +117,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database"));
             await page.Locator("a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             ILocator filter = page.Locator(".ms-db-toolbar input.ms-db-name-filter");
@@ -148,7 +148,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // Tenant A's orders: 160 rows, so there is a second page at the default page size of 50.
-            await studio.GoAsync(fixture.Host.StudioUrl("database/object?schema=public&name=orders&tab=rows&store=tenants&db=tenant_a"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database/object?schema=public&name=orders&tab=rows&store=tenants&db=tenant_a"));
             string firstPage = await FirstRowAsync(page);
 
             await page.Locator(".ms-pager button", new PageLocatorOptions { HasTextString = "Next" }).ClickAsync();
@@ -200,7 +200,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
 
             // A short viewport, so the Overview scrolls: a move to another page starts at the top.
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, 400);
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
             await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync();
 
             string overviewTitle = await page.TitleAsync();
@@ -247,7 +247,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             List<string> documents = [];
             void OnRequest(object? sender, IRequest request)
@@ -300,7 +300,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             string missing = fixture.Host.StudioUrl("no-such-page");
             studio.ExpectStatus(missing, 404);
@@ -350,7 +350,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             await page.EvaluateAsync("() => { const a = document.createElement('a'); a.id = 'ms-nav-probe'; a.setAttribute('href', '/'); a.textContent = 'probe'; document.body.appendChild(a); }");
             await page.Locator("#ms-nav-probe").ClickAsync();

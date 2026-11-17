@@ -234,7 +234,7 @@
             <h2 class="ms-section-title">Security posture</h2>
             <p class="ms-s2-note">
                 The health advisor's own checks of how the application and the studio connect, as the Health page shows them to you.
-                <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">Open the Health page</a>
+                <a href="@HealthLinks.ToPage(Descriptor.SourceQueryParameter, State.ActiveScope)">Open the Health page</a>
             </p>
 
             @if (postureError is { Length: > 0 })
@@ -292,7 +292,7 @@
                                 </div>
                             }
                             <p class="ms-health-link">
-                                <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, how sure, and what was read</a>
+                                <a href="@HealthLinks.ToFinding(Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, how sure, and what was read</a>
                             </p>
                         </article>
                     }

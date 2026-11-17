@@ -313,17 +313,17 @@
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
     public Task? Ready { get; set; }
 
-    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+    private string TopicsHref => KafkaAddress.Href(KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     /// <summary>Whether the page links to the live tail: the capability is on and the cluster's profile does not forbid it. Otherwise the link is left out (#74).</summary>
     private bool TailOffered =>
         Capabilities.IsEnabled(KafkaCapability.LiveTail) && !(State.ActiveCluster is { } active && Tail.ForbiddenByProfile(active));
 
     private string TailHref(string topic) =>
-        KafkaAddress.Href(Settings, KafkaAddress.TailRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicsParameter, topic));
+        KafkaAddress.Href(KafkaAddress.TailRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicsParameter, topic));
 
     private string SearchHref(string topic) =>
-        KafkaAddress.Href(Settings, KafkaAddress.SearchRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+        KafkaAddress.Href(KafkaAddress.SearchRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
 
     protected override async Task OnInitializedAsync()
     {

@@ -214,7 +214,7 @@
         return Task.CompletedTask;
     }
 
-    private string RowLink(string id) => ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, id);
+    private string RowLink(string id) => ConnectionLinks.To(Descriptor, State.ActiveScope, id);
 
     private RenderFragment ResultView(ConnectionCompareView view) => __builder =>
     {

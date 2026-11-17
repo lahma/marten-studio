@@ -54,11 +54,16 @@ public class DatabaseScopeAccessLifetimeTests
         Task change = routes.InvokeAsync(() => context.State.SetScopeAsync("other", null, null, Token));
         routes.WaitForAssertion(() => context.AuthorizationService.Calls.Count.Should().BeGreaterThan(asked, "the old host asked"));
 
-        // The layout is re-created: a page's own navigation to an address no page matches is "Not found", in a layout of its own.
+        // The layout is re-created twice: a page's own navigation to an address no page matches is "Not found", in a layout of its own - a page of no
+        // module, which has no scope gate and whose host asks nothing - and the way back to a page of the database's is another layout again.
+        await routes.InvokeAsync(() => navigation.NavigateTo("no-such-page"));
+        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Trim().Should().Be("Not found"));
+        routes.FindAll(".ms-loading-spinner").Should().BeEmpty("a page of no module is not gated");
+
         TaskCompletionSource newAnswer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         context.AuthorizationService.Gate = newAnswer;
         asked = context.AuthorizationService.Calls.Count;
-        await routes.InvokeAsync(() => navigation.NavigateTo("no-such-page"));
+        await routes.InvokeAsync(() => navigation.NavigateTo("marten"));
         routes.WaitForAssertion(() => context.AuthorizationService.Calls.Count.Should().BeGreaterThan(asked, "the new host asked"));
 
         // Until its own host has answered the new gate draws the spinner: not the previous layout's Granted, and so not the page.
@@ -67,7 +72,7 @@ public class DatabaseScopeAccessLifetimeTests
         routes.FindAll("h1").Should().BeEmpty("the body is drawn only once the new host was admitted");
 
         newAnswer.SetResult();
-        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Trim().Should().Be("Not found"));
+        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Trim().Should().Be("Overview"));
         access.Value.Should().Be(ScopeAccess.Granted);
 
         // The old host's answer arrives late - and would refuse. It belongs to a host that is gone, and changes nothing.
@@ -77,8 +82,8 @@ public class DatabaseScopeAccessLifetimeTests
         await routes.InvokeAsync(static () => { });
 
         access.Value.Should().Be(ScopeAccess.Granted, "the old host's late answer is ignored");
-        routes.Find("h1").TextContent.Trim().Should().Be("Not found");
-        routes.FindAll(".ms-empty-title").Should().BeEmpty("the refusal was never drawn");
+        routes.Find("h1").TextContent.Trim().Should().Be("Overview");
+        routes.FindAll(".ms-loading-spinner").Should().BeEmpty("nothing is waiting for an answer any more");
     }
 
     /// <summary>
@@ -105,19 +110,18 @@ public class DatabaseScopeAccessLifetimeTests
 
         DatabaseScopeAccess access = context.Services.GetRequiredService<DatabaseScopeAccess>();
 
-        // The first layout, on the Overview: admitted. Then "Not found", in a layout of its own: admitted as well.
+        // The first layout, on the Overview: admitted. Then "Not found", in a layout of its own: a page of no module, which asks nothing.
         IRenderedComponent<StudioRoutes> routes = context.Render<StudioRoutes>();
         routes.WaitForAssertion(() => access.Value.Should().Be(ScopeAccess.Granted));
         await routes.InvokeAsync(() => navigation.NavigateTo("no-such-page"));
         routes.WaitForAssertion(() => routes.Find("h1").TextContent.Trim().Should().Be("Not found"));
-        access.Value.Should().Be(ScopeAccess.Granted);
 
         // The policy now refuses the scope, and answers slowly. The way back to a page re-creates the layout again.
         TaskCompletionSource answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         context.AuthorizationService.DenyEverything();
         context.AuthorizationService.Gate = answer;
         int asked = context.AuthorizationService.Calls.Count;
-        await routes.InvokeAsync(() => navigation.NavigateTo(string.Empty));
+        await routes.InvokeAsync(() => navigation.NavigateTo("marten"));
         routes.WaitForAssertion(() => context.AuthorizationService.Calls.Count.Should().BeGreaterThan(asked, "the new host asked"));
 
         access.Value.Should().Be(ScopeAccess.Unknown, "the previous layout's Granted is not this layout's answer");

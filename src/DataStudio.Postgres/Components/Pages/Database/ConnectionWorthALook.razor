@@ -96,7 +96,7 @@
     private bool Visible(ConnectionCard card) => card.Finding is null || !Mutes.IsMuted(card.Finding.MuteKey);
 
     private string RowLink(string keyword) =>
-        ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, ConnectionPageBuilder.RowAnchor(keyword));
+        ConnectionLinks.To(Descriptor, State.ActiveScope, ConnectionPageBuilder.RowAnchor(keyword));
 
     private RenderFragment CardView(ConnectionCard card) => __builder =>
     {
@@ -170,7 +170,7 @@
             @if (card.Finding is { } linked)
             {
                 <p class="ms-health-link">
-                    <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, linked)">Why, how sure, and what was read</a>
+                    <a href="@HealthLinks.ToFinding(Descriptor.SourceQueryParameter, State.ActiveScope, linked)">Why, how sure, and what was read</a>
                 </p>
             }
         </article>

@@ -1,0 +1,56 @@
+@page "/"
+@inject NavigationManager Navigation
+@inject IShellSettings Settings
+@inject StudioShellDescriptor Descriptor
+
+@*
+    The shell's front page, at the mount itself (v2 step 5). It is a page of no module, so the layout draws no scope selector and no gate around it.
+
+    With one module composed there is nothing to choose, and no page is drawn: the visitor is sent to the module's home, with the query string they
+    came with (a scope in a pasted link survives). This runs on the prerender, where the framework turns it into the response's own redirect, and on the
+    circuit, where it is a navigation: the front address never draws a page the visitor has to click through.
+
+    With two or more, one tile per module, in module order: the module's name, one sentence and a link to its home. A tile carries no number: a count
+    of documents or topics is a gated read of the module's own, and the front page reads nothing.
+*@
+
+@if (Descriptor.Modules.Count > 1)
+{
+    <PageTitle>@Settings.Title</PageTitle>
+
+    <div class="ms-page ms-front">
+        <div class="ms-page-header">
+            <h1 class="ms-page-title">@Settings.Title</h1>
+        </div>
+
+        <ul class="ms-front-tiles" aria-label="Modules">
+            @foreach (IStudioModule module in Descriptor.Modules)
+            {
+                <li class="ms-front-tile-item" @key="module.Key">
+                    <a class="ms-front-tile" href="@StudioLink.To(module.HomeRoute)">
+                        <span class="ms-front-tile-name">@module.ProductName</span>
+                        <span class="ms-front-tile-summary">@module.Summary</span>
+                    </a>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@code
+{
+    protected override void OnInitialized()
+    {
+        if (Descriptor.Modules.Count != 1)
+        {
+            return;
+        }
+
+        // The mount's own path, as the request spelled it (the prerender's base URI is the application's, the circuit's is the mount's, so a relative
+        // reference would be one or the other), plus the module's home and the query the visitor came with.
+        Uri current = new(Navigation.Uri);
+        string target = current.AbsolutePath.TrimEnd('/') + "/" + Descriptor.Modules[0].HomeRoute + current.Query;
+
+        Navigation.NavigateTo(target, replace: true);
+    }
+}

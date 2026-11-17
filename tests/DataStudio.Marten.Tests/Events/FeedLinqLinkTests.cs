@@ -34,7 +34,7 @@ public class FeedLinqLinkTests
 
         IElement link = page.Find(LinkSelector);
         link.TextContent.Trim().Should().Be("Query these events with LINQ");
-        link.GetAttribute("href").Should().StartWith("query?");
+        link.GetAttribute("href").Should().StartWith("postgres/query?");
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class FeedLinqLinkTests
         using StudioComponentContext context = await NewContextAsync(
             static options => options.Capabilities.RunLinqQueries = true,
             tenant: "acme");
-        context.Navigate("studio/events/feed?types=OrderPlaced&stream=abc&archived=1");
+        context.Navigate("studio/marten/events/feed?types=OrderPlaced&stream=abc&archived=1");
 
         string href = context.Render<Feed>().Find(LinkSelector).GetAttribute("href")!;
 

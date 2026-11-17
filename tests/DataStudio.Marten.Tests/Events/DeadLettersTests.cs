@@ -72,8 +72,8 @@ public class DeadLettersTests
 
         // The rail's links carry the scope since 1.2 (?store=&db=), so the page is the part before the query.
         List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0])];
-        links.Should().NotContain("events/dead-letters", "a hidden document type is absent (D27)");
-        links.Should().Contain("events/feed", "the rest of the Events section is still there");
+        links.Should().NotContain("marten/events/dead-letters", "a hidden document type is absent (D27)");
+        links.Should().Contain("marten/events/feed", "the rest of the Events section is still there");
     }
 
     /// <summary>The positive control: a host that shows the type, or sets no delegate, keeps the entry.</summary>
@@ -85,7 +85,7 @@ public class DeadLettersTests
 
         var nav = context.Render<DataStudio.Components.Layout.NavMenu>();
 
-        nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain("events/dead-letters");
+        nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain("marten/events/dead-letters");
     }
 
     private static Func<Type, bool> Hiding(bool throws) => throws
@@ -486,7 +486,7 @@ public class DeadLettersTests
     public async Task The_filters_in_the_url_reach_the_query()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("studio/events/dead-letters?projection=Orders&shard=Orders:All&exception=Divide&offset=50");
+        context.Navigate("studio/marten/events/dead-letters?projection=Orders&shard=Orders:All&exception=Divide&offset=50");
 
         context.Render<DeadLetters>();
 
@@ -502,7 +502,7 @@ public class DeadLettersTests
     public async Task One_events_dead_letters_by_its_sequence_reach_the_query_and_the_page_says_how_to_see_them_all()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("studio/events/dead-letters?seq=103&projection=Orders");
+        context.Navigate("studio/marten/events/dead-letters?seq=103&projection=Orders");
 
         IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
 
@@ -522,7 +522,7 @@ public class DeadLettersTests
         IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
 
         page.Find("a.ms-dead-letter-step").GetAttribute("href").Should()
-            .Contain("events/streams/step?id=order-42").And.Contain("v=3").And.Contain("projection=OrderSummary");
+            .Contain("marten/events/streams/step?id=order-42").And.Contain("v=3").And.Contain("projection=OrderSummary");
     }
 
     [Fact]

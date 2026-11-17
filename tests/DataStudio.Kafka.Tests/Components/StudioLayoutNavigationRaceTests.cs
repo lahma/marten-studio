@@ -20,7 +20,7 @@ public class StudioLayoutNavigationRaceTests
 {
     private const string KafkaPage = "/studio/kafka";
 
-    private const string HostPath = "studio/database/connection";
+    private const string HostPath = "studio/postgres/database/connection";
 
     private static KafkaStudioHarness Harness(string startAt)
     {

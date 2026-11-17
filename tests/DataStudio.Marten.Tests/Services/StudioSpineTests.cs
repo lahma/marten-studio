@@ -120,7 +120,7 @@ public class StudioSpineTests
         descriptor.SourceQueryParameter.Should().Be("store");
         descriptor.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Select(static x => x.Label).Should().Equal(
             "Overview", "Stores", "Tenants", "Documents", "Query", "Plan", "Tables", "Connection", "Relationships", "Streams", "Feed", "Event types", "Event flow", "Dead letters",
-            "Health", "Statements", "Maintenance", "Storage", "Replication", "Projections", "Schema", "Server", "Configuration", "Activity");
+            "Health", "Statements", "Maintenance", "Storage", "Replication", "Projections", "Schema", "Server", "Configuration");
 
         // The navigation is built for the settings the studio is registered with, so a condition that reads them closes over them (5.6).
         MartenStudioSettings visible = MartenSpine.Settings();

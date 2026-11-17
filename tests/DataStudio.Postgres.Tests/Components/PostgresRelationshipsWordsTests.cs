@@ -63,7 +63,7 @@ public class PostgresRelationshipsWordsTests
     public async Task A_documents_view_in_the_url_draws_every_table_rather_than_nothing()
     {
         await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
-        context.Navigate("studio/relationships?view=documents");
+        context.Navigate("studio/postgres/relationships?view=documents");
 
         var page = context.Render<Relationships>();
 

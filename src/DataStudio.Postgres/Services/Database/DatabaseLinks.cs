@@ -74,10 +74,10 @@ internal static class DatabaseLinks
     public const string BrowserRoute = StudioPageRoutes.DatabaseBrowser;
 
     /// <summary>One relation's detail.</summary>
-    public const string ObjectRoute = "database/object";
+    public const string ObjectRoute = PostgresRoutes.Root + "/database/object";
 
     /// <summary>One row's detail.</summary>
-    public const string RowRoute = "database/row";
+    public const string RowRoute = PostgresRoutes.Root + "/database/row";
 
     /// <summary>The query-string key the schema travels under.</summary>
     public const string SchemaParameter = StudioPageRoutes.DatabaseSchemaParameter;
@@ -125,13 +125,12 @@ internal static class DatabaseLinks
     public const string FromParameter = "from";
 
     /// <summary>The Relationships screen's route below the studio root.</summary>
-    public const string RelationshipsRoute = "relationships";
+    public const string RelationshipsRoute = PostgresRoutes.Root + "/relationships";
 
     /// <summary>How many rows the <c>SELECT</c> that "Open in Query" writes into the console asks for.</summary>
     public const int ConsoleRowLimit = SqlLiteralText.ConsoleRowLimit;
 
     /// <summary>The browser, on one kind tab, optionally narrowed to one schema, an owner and a name.</summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" /> for none.</param>
     /// <param name="schema">One schema, or <see langword="null" /> for every schema this visitor may see.</param>
@@ -139,7 +138,6 @@ internal static class DatabaseLinks
     /// <param name="owner">The owner filter; <see cref="DatabaseOwnerFilter.All" /> is the default and is left out.</param>
     /// <param name="nameFilter">A case-insensitive substring of the name, or <see langword="null" />.</param>
     public static string ToBrowser(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         string? schema = null,
@@ -147,10 +145,9 @@ internal static class DatabaseLinks
         DatabaseOwnerFilter owner = DatabaseOwnerFilter.All,
         string? nameFilter = null)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        LinkBuilder link = new(StudioLink.To(settings, BrowserRoute), descriptor.SourceQueryParameter);
+        LinkBuilder link = new(StudioLink.To(BrowserRoute), descriptor.SourceQueryParameter);
 
         link.Add(SchemaParameter, schema);
         link.Add(KindParameter, kind is { } category ? KindToken(category) : null);
@@ -162,7 +159,6 @@ internal static class DatabaseLinks
     }
 
     /// <summary>One relation's detail page.</summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
@@ -173,7 +169,6 @@ internal static class DatabaseLinks
     /// value is left out.
     /// </param>
     public static string ToObject(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         string schema,
@@ -181,12 +176,11 @@ internal static class DatabaseLinks
         DatabaseObjectTab? tab = null,
         IReadOnlyList<KeyValuePair<string, string?>>? extra = null)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(name);
 
-        LinkBuilder link = new(StudioLink.To(settings, ObjectRoute), descriptor.SourceQueryParameter);
+        LinkBuilder link = new(StudioLink.To(ObjectRoute), descriptor.SourceQueryParameter);
 
         link.AddAlways(SchemaParameter, schema);
         link.AddAlways(NameParameter, name);
@@ -206,21 +200,18 @@ internal static class DatabaseLinks
     /// A relation's Rows tab, optionally filtered - where "filter by this value", a reference's parent and
     /// child rows, and "referenced by" all land.
     /// </summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
     /// <param name="filter">A filter in <see cref="RowFilterGrammar" />'s syntax, or <see langword="null" /> for every row.</param>
     public static string ToRows(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         string schema,
         string name,
         string? filter = null) =>
         ToObject(
-            settings,
             descriptor,
             scope,
             schema,
@@ -233,22 +224,19 @@ internal static class DatabaseLinks
     /// Folded in from DB-6's own link builder unchanged, the scope first and the view and schema after it, so
     /// that no href the screen already drew moves.
     /// </remarks>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="view">Documents, tables or both.</param>
     /// <param name="schema">One schema chip, or <see langword="null" /> for all of them.</param>
     public static string ToRelationships(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         RelationshipViewMode view,
         string? schema)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        string url = StudioScopeQuery.Append(StudioLink.To(settings, RelationshipsRoute), scope, descriptor.SourceQueryParameter);
+        string url = StudioScopeQuery.Append(StudioLink.To(RelationshipsRoute), scope, descriptor.SourceQueryParameter);
 
         if (RelationshipViews.Token(view) is { } token)
         {
@@ -315,7 +303,6 @@ internal static class DatabaseLinks
     }
 
     /// <summary>One row's detail page, with one readable parameter per key column.</summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
@@ -326,7 +313,6 @@ internal static class DatabaseLinks
     /// </param>
     /// <param name="extra">Further parameters to carry, in order; a blank value is left out.</param>
     public static string ToRow(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         string schema,
@@ -334,13 +320,12 @@ internal static class DatabaseLinks
         IReadOnlyList<KeyValuePair<string, string>> key,
         IReadOnlyList<KeyValuePair<string, string?>>? extra = null)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(key);
 
-        LinkBuilder link = new(StudioLink.To(settings, RowRoute), descriptor.SourceQueryParameter);
+        LinkBuilder link = new(StudioLink.To(RowRoute), descriptor.SourceQueryParameter);
 
         link.AddAlways(SchemaParameter, schema);
         link.AddAlways(NameParameter, name);
@@ -511,14 +496,12 @@ internal static class DatabaseLinks
     /// This link only fills the editor. The statement runs when the visitor presses Run, through the console's
     /// own gate: <c>RunSql</c>, the write policy, the statement guard and the read-only transaction (D13).
     /// </remarks>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
-    public static string? ToQueryConsole(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string schema, string name)
+    public static string? ToQueryConsole(StudioDescriptor descriptor, StudioScope? scope, string schema, string name)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
 
         // The statement itself is written in Internal/Sql (AGENTS.md hard rule 4): text that reaches an
@@ -528,7 +511,7 @@ internal static class DatabaseLinks
             return null;
         }
 
-        LinkBuilder link = new(StudioLink.To(settings, "query"), descriptor.SourceQueryParameter);
+        LinkBuilder link = new(StudioLink.To(PostgresRoutes.Page("query")), descriptor.SourceQueryParameter);
 
         link.AddAlways("mode", "sql");
         link.AddAlways("sql", statement);
@@ -541,17 +524,15 @@ internal static class DatabaseLinks
     /// The SQL console with a statement of the studio's own composing written into it - never run until the
     /// visitor presses Run, through the console's own gate (D13).
     /// </summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="statement">The text for the editor, from <see cref="SqlLiteralText" />.</param>
-    public static string ToQueryConsole(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string statement)
+    public static string ToQueryConsole(StudioDescriptor descriptor, StudioScope? scope, string statement)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(statement);
 
-        LinkBuilder link = new(StudioLink.To(settings, "query"), descriptor.SourceQueryParameter);
+        LinkBuilder link = new(StudioLink.To(PostgresRoutes.Page("query")), descriptor.SourceQueryParameter);
 
         link.AddAlways("mode", "sql");
         link.AddAlways("sql", statement);

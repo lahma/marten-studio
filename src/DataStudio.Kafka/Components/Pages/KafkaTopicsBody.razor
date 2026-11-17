@@ -413,7 +413,7 @@
     }
 
     private string TopicHref(string topic) =>
-        KafkaAddress.Href(Settings, KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+        KafkaAddress.Href(KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
 
     private RenderFragment RowFragment(KafkaTopicRow row) => @<tr class="ms-table-row" @key="row.Name">
         <td class="ms-table-cell">

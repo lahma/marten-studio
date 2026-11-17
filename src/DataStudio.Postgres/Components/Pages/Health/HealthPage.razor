@@ -693,7 +693,7 @@
                                                 }
                                                 else if (cell.Link is { } cellLink)
                                                 {
-                                                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, cellLink.Route, State.ActiveScope, cellLink.Query)">@cell.Text</a>
+                                                    <a href="@HealthLinks.To(Descriptor.SourceQueryParameter, cellLink.Route, State.ActiveScope, cellLink.Query)">@cell.Text</a>
                                                 }
                                                 else
                                                 {
@@ -844,7 +844,7 @@
             @if (finding.Finding.Link is { } link)
             {
                 <p class="ms-health-link">
-                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, link.Route, State.ActiveScope, link.Query)">@link.Label</a>
+                    <a href="@HealthLinks.To(Descriptor.SourceQueryParameter, link.Route, State.ActiveScope, link.Query)">@link.Label</a>
                 </p>
             }
 

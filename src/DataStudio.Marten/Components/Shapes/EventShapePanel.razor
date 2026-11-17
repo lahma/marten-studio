@@ -10,7 +10,6 @@
 @inject IOptions<MartenOptions> Options
 @inject NavigationManager Navigation
 @inject IServiceProvider Services
-@inject IStudioSettings Settings
 
 @*
     Check shapes, for the event types on the Event types page (D-SHAPE S10). It exists only after a click, so it never runs during
@@ -400,7 +399,6 @@
         }
 
         return EventLinks.To(
-            Settings,
             EventLinks.StreamDetailRoute,
             scope,
             [new("id", id), new("v", EventLinks.Number(version))]);

@@ -8,7 +8,6 @@
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
-@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject ILogger<KafkaRecordBody> Logger
 
@@ -184,7 +183,7 @@
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
     public Task? Ready { get; set; }
 
-    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+    private string TopicsHref => KafkaAddress.Href(KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     protected override async Task OnInitializedAsync()
     {
@@ -384,7 +383,6 @@
 
     private string RecordHref(long rowOffset) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RecordRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, topic),
@@ -404,7 +402,6 @@
         DateTimeOffset to = near.Timestamp.AddMinutes(5);
 
         return KafkaAddress.Href(
-            Settings,
             KafkaAddress.SearchRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, topic),

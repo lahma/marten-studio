@@ -21,7 +21,7 @@ public class EventFlowPageTests
 {
     private static IRenderedComponent<FlowPage> Render(StudioComponentContext context, string query = "")
     {
-        context.Navigate("studio/events/flow" + query);
+        context.Navigate("studio/marten/events/flow" + query);
 
         return context.Render<FlowPage>();
     }
@@ -38,7 +38,7 @@ public class EventFlowPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenSpine.Routes.Match("events/flow").Should().NotBeNull()
+        MartenSpine.Routes.Match("marten/events/flow").Should().NotBeNull()
             .And.Subject.As<RouteData>().PageType.Should().Be<FlowPage>();
     }
 
@@ -106,10 +106,10 @@ public class EventFlowPageTests
         links.Select(static x => x.GetAttribute("href")!).Should().OnlyContain(static x => x.Contains("store=default", StringComparison.Ordinal),
             "a link someone pastes has to reopen the same store (D9)");
 
-        page.FindAll("a.ms-event-chip").Select(static x => x.GetAttribute("href")!).Should().OnlyContain(static x => x.StartsWith("events/feed?types=", StringComparison.Ordinal));
-        page.Find("tr[data-source='Orders'] a.ms-flow-source-link").GetAttribute("href").Should().StartWith("projections");
-        page.Find("tr[data-source='Orders'] a.ms-flow-show-flow").GetAttribute("href").Should().StartWith("events/flow?projection=Orders");
-        page.Find("tr[data-source='Orders'] a.ms-flow-output-link").GetAttribute("href").Should().StartWith("documents/order");
+        page.FindAll("a.ms-event-chip").Select(static x => x.GetAttribute("href")!).Should().OnlyContain(static x => x.StartsWith("marten/events/feed?types=", StringComparison.Ordinal));
+        page.Find("tr[data-source='Orders'] a.ms-flow-source-link").GetAttribute("href").Should().StartWith("marten/projections");
+        page.Find("tr[data-source='Orders'] a.ms-flow-show-flow").GetAttribute("href").Should().StartWith("marten/events/flow?projection=Orders");
+        page.Find("tr[data-source='Orders'] a.ms-flow-output-link").GetAttribute("href").Should().StartWith("marten/documents/order");
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class EventFlowPageTests
 
         IElement chip = page.Find(".ms-flow-unconsumed a.ms-event-chip");
         chip.TextContent.Should().Be("ledger_opened");
-        chip.GetAttribute("href").Should().StartWith("events/feed?types=ledger_opened");
+        chip.GetAttribute("href").Should().StartWith("marten/events/feed?types=ledger_opened");
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public class EventFlowPageTests
         await page.Find("#ms-flow-projection").ChangeAsync(new ChangeEventArgs { Value = "Orders" });
 
         context.Services.GetRequiredService<NavigationManager>().Uri.Should()
-            .Contain("events/flow?projection=Orders").And.Contain("store=default");
+            .Contain("marten/events/flow?projection=Orders").And.Contain("store=default");
         page.FindAll(".ms-graph-svg .ms-flow-node-source").Should().ContainSingle();
     }
 

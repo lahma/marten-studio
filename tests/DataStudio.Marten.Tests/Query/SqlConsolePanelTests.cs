@@ -176,7 +176,7 @@ public class SqlConsolePanelTests
     public void A_deep_link_reaches_the_body_through_the_shared_query_page()
     {
         using StudioComponentContext context = CreateContext(new FakeQueryService().WithType("person"));
-        context.Navigate("studio/query?mode=sql&sql=select+1");
+        context.Navigate("studio/postgres/query?mode=sql&sql=select+1");
 
         var page = context.Render<QueryPage>();
 
@@ -184,16 +184,32 @@ public class SqlConsolePanelTests
         page.Find("#ms-query-sql").GetAttribute("value").Should().Be("select 1");
     }
 
-    /// <summary>The shared root route renders the descriptor's body - MartenStudio's overview.</summary>
+    /// <summary>The Marten module's home (<c>marten</c>) is its own page, the store overview.</summary>
     [Fact]
-    public void The_shared_root_page_renders_the_descriptors_overview_body()
+    public void The_marten_home_page_is_the_store_overview()
     {
         using var context = new StudioComponentContext();
         context.StoreInfo.WithStore(documentTypes: 7, postgresVersion: "17.2");
 
+        var page = context.Render<Overview>();
+
+        page.StatCardValue("Document types").Should().Be("7");
+        MartenSpine.Routes.Match("marten")!.PageType.Should().Be<Overview>();
+    }
+
+    /// <summary>
+    /// In a Marten host the Postgres module's home (<c>postgres</c>) is not a second copy of the overview: it sends the visitor to the Marten module's
+    /// home, with the query string it came with, and replaces the history entry.
+    /// </summary>
+    [Fact]
+    public void The_postgres_home_in_a_marten_host_sends_the_visitor_to_the_marten_home_keeping_the_query()
+    {
+        using var context = new StudioComponentContext();
+        context.Navigate("studio/postgres?store=default&db=localhost.marten");
+
         var page = context.Render<StudioHome>();
 
-        page.FindComponent<Overview>().Should().NotBeNull();
-        page.StatCardValue("Document types").Should().Be("7");
+        context.CurrentUri.Should().Be("http://localhost/studio/marten?store=default&db=localhost.marten");
+        page.Markup.Should().BeEmpty("the redirect draws nothing of its own");
     }
 }

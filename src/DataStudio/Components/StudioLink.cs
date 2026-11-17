@@ -29,22 +29,15 @@ namespace DataStudio.Components;
 internal static class StudioLink
 {
     /// <summary>
-    /// The href for a page below the studio root.
+    /// The href for a page below the studio root: the whole address below the mount (<c>postgres/query</c>, <c>marten/documents</c>, <c>activity</c>).
     /// </summary>
-    /// <param name="settings">
-    /// The studio's settings. Not read: <c>StudioDocument</c> renders a studio-rooted
-    /// <c>&lt;base href&gt;</c> for every mount now, so the answer no longer depends on the configured
-    /// path. The parameter stays because it is what every call site passes and because a future shape
-    /// that does depend on the settings must not be a signature change across all of them.
-    /// </param>
+    /// <remarks>
+    /// Relative to the studio-rooted <c>&lt;base href&gt;</c> that <c>StudioDocument</c> renders for every mount, so the answer does not depend on
+    /// the configured path, and takes no settings. An empty address resolves to the base URI (RFC 3986 section 5.4), which is the shell's own
+    /// front page.
+    /// </remarks>
     /// <param name="subPath">The path below the studio root, with no leading slash.</param>
-    internal static string To(IShellSettings settings, string subPath)
-    {
-        // Relative to the studio-rooted document base; an empty href resolves to the base URI
-        // (RFC 3986 §5.4), which is the studio's own front page.
-        _ = settings;
-        return subPath;
-    }
+    internal static string To(string subPath) => subPath;
 
     /// <summary>
     /// Converts an absolute URI into a path relative to the studio root ("" for the root itself,

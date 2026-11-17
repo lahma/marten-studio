@@ -25,7 +25,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
     {
         await BrowserScenario.RunAsync(fixture.Browser, "skip-link", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             string before = studio.Page.Url;
 
             ILocator link = studio.Page.Locator("a.ms-skip-link");
@@ -58,7 +58,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         {
             const string Refused = "IsArchived == false";
 
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events&predicate=" + Uri.EscapeDataString(Refused)));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events&predicate=" + Uri.EscapeDataString(Refused)));
 
             ILocator withheld = studio.Page.Locator(".ms-query-linq-withheld");
             (await withheld.GetAttributeAsync("open")).Should().NotBeNull("the list of what is not offered is open without a click");
@@ -106,7 +106,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, "linq-single-push", fixture.Root, "admin", async studio =>
         {
             await studio.RecordHistoryWritesAsync();
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
@@ -147,7 +147,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
     {
         await BrowserScenario.RunAsync(fixture.Browser, "linq-serialised-push", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             // Counts every request for the Query page's own address and lets it through: after the load above, any is a page fetch.
@@ -196,7 +196,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, "linq-withheld-390", fixture.Root, "admin", async studio =>
         {
             await studio.Page.SetViewportSizeAsync(390, 844);
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
             await studio.Page.Locator(".ms-query-linq-withheld").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             (await studio.Page.Locator(".ms-query-linq-withheld").GetAttributeAsync("open")).Should().NotBeNull();
@@ -213,7 +213,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
             const string ConfirmButton = ".ms-confirm-actions button.ms-button-danger";
 
             // An untyped order: no button, and the sentence where it would be.
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams/s?id=" + SampleDataSeeder.OrderStreamId(1)));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/streams/s?id=" + SampleDataSeeder.OrderStreamId(1)));
             await studio.Page.Locator(".ms-stream-compact-unavailable").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await studio.Page.Locator(".ms-stream-compact-unavailable").InnerTextAsync())
                 .Should().Be("Compact is offered for streams of a known aggregate type; this stream has none.");
@@ -221,14 +221,14 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
 
             // A typed order that folds: the dialog's Compact stays blocked only until the id is typed.
             Guid folds = SampleDataSeeder.TypedOrderStreamId(1);
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams/s?id=" + folds));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/streams/s?id=" + folds));
             await studio.Page.Locator(".ms-stream-compact-button").ClickAsync();
             await studio.Page.Locator(".ms-compact-facts").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await studio.Page.Locator(".ms-compact-fold-nothing").CountAsync()).Should().Be(0);
 
             // The voided one: its aggregate deletes itself, so the dialog says it folds to nothing before any click.
             Guid voided = SampleDataSeeder.TypedOrderStreamId(SampleDataSeeder.TypedOrderStreamCount);
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams/s?id=" + voided));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/streams/s?id=" + voided));
             await studio.Page.Locator(".ms-stream-compact-button").ClickAsync();
 
             ILocator nothing = studio.Page.Locator(".ms-compact-fold-nothing");

@@ -9,7 +9,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <param name="DefaultPageSize">The page size a grid opens with.</param>
 /// <param name="MaxPageSize">The largest page size.</param>
 /// <param name="QueryTimeout">The statement timeout.</param>
-/// <param name="MaxInlineBytes">The inline-value cap: MartenStudio's <c>MaxInlineValueBytes</c>, PostgresStudio's <c>MaxInlineValueBytes</c>.</param>
+/// <param name="MaxInlineBytes">The inline-value cap: <c>MaxInlineValueBytes</c>, whichever module's options hold it.</param>
 /// <param name="MaxSqlConsoleRows">The console's row cap.</param>
 /// <param name="SqlConsoleRole">The console's role.</param>
 /// <param name="ExactCountThreshold">The exact-count threshold.</param>

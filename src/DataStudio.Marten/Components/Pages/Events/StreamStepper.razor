@@ -11,7 +11,6 @@
 @inject StudioState State
 @inject NavigationManager Navigation
 @inject IOptions<MartenOptions> Options
-@inject IStudioSettings Settings
 
 @* M1, the projection stepper: one stream folded into one aggregate type an event at a time.
 
@@ -470,19 +469,18 @@
     private bool FoldsOnlyTheTenant =>
         shape is { EventsConjoined: false, HasTenantId: true } && !string.IsNullOrEmpty(State.ActiveScope?.TenantId);
 
-    private string StreamsHref => EventLinks.To(Settings, EventLinks.StreamsRoute, State.ActiveScope);
+    private string StreamsHref => EventLinks.To(EventLinks.StreamsRoute, State.ActiveScope);
 
     private string StreamHref =>
         EventLinks.To(
-            Settings,
             EventLinks.StreamDetailRoute,
             State.ActiveScope,
             [new("id", Id), new("v", EventLinks.Number(Selected?.Version)), new("agg", SelectedAggregate)]);
 
     private string Href(long version) =>
-        EventLinks.ToStep(Settings, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, version, path: Path);
+        EventLinks.ToStep(State.ActiveScope, Id ?? string.Empty, SelectedAggregate, version, path: Path);
 
-    private string TypeHref(string eventType) => EventLinks.ToFeedForType(Settings, State.ActiveScope, eventType);
+    private string TypeHref(string eventType) => EventLinks.ToFeedForType(State.ActiveScope, eventType);
 
     /// <summary>
     /// The dead letters of one event. Under per-tenant sequences a number names one event in each tenant, so with All
@@ -490,7 +488,6 @@
     /// </summary>
     private string DeadLettersHref(AggregateStep step) =>
         EventLinks.ToDeadLettersForEvent(
-            Settings,
             State.ActiveScope is { TenantId: null } all && shape is { PerTenantSequences: true } && !string.IsNullOrEmpty(step.TenantId)
                 ? all with { TenantId = step.TenantId }
                 : State.ActiveScope,
@@ -797,7 +794,6 @@
     {
         string? aggregate = args.Value?.ToString();
         Navigation.NavigateTo(EventLinks.ToStep(
-            Settings,
             State.ActiveScope,
             Id ?? string.Empty,
             string.IsNullOrWhiteSpace(aggregate) ? null : aggregate,
@@ -863,7 +859,7 @@
                 searchMessage = search.FoundFailure
                     ? $"Version {found.ToString(CultureInfo.InvariantCulture)}: applying it threw, and the stepper stops there."
                     : $"Version {found.ToString(CultureInfo.InvariantCulture)} changed {search.Path}.";
-                Navigation.NavigateTo(EventLinks.ToStep(Settings, scope, Id, aggregate, found, path: path));
+                Navigation.NavigateTo(EventLinks.ToStep(scope, Id, aggregate, found, path: path));
                 return;
             }
 

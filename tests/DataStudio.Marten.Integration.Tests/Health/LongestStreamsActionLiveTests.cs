@@ -84,7 +84,7 @@ public class LongestStreamsActionLiveTests(PostgresFixture postgres)
         result.Notes.Should().Contain("Archived streams are left out.");
 
         HealthActionCell first = result.Rows[0].Cells[0];
-        first.Link!.Route.Should().Be("events/streams/s");
+        first.Link!.Route.Should().Be("marten/events/streams/s");
         first.Link.Query.Should().ContainSingle().Which.Value.Should().Be(first.Text);
         Guid.TryParse(first.Text, out _).Should().BeTrue();
 

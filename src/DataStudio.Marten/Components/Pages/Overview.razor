@@ -1,3 +1,4 @@
+@page "/marten"
 @using System.Globalization
 @using DataStudio.Marten.Services
 @using DataStudio.Postgres.Components.Pages.Database
@@ -26,8 +27,8 @@
 @inject IStudioSettings StudioSettings
 
 @*
-    MartenStudio's store overview: the body of the studio's shared root page (StudioHome renders the descriptor's
-    OverviewComponent), so it has no @page of its own.
+    MartenStudio's store overview: the Marten module's home, at {mount}/marten. In a Marten host the Postgres module's own home,
+    {mount}/postgres (StudioHome), sends the visitor here rather than drawing a second copy.
 *@
 
 <PageTitle>Overview</PageTitle>
@@ -106,7 +107,7 @@
                 </a>
             }
 
-            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">
+            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(State.ActiveScope)">
                 <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
             </a>
         </div>
@@ -145,7 +146,7 @@
                     {
                         <span class="ms-overview-health-failed">@(HealthPresentation.Count(FailedChecks, "check") + " could not run.")</span>
                     }
-                    <a href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">See what was checked</a>
+                    <a href="@HealthLinks.ToPage(State.ActiveScope)">See what was checked</a>
                 </p>
             }
             else
@@ -155,7 +156,7 @@
                     {
                         <li class="ms-overview-list-item" @key="finding.MuteKey">
                             <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
-                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(StudioSettings, State.ActiveScope, finding)">@finding.Finding.Title</a>
+                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(State.ActiveScope, finding)">@finding.Finding.Title</a>
                         </li>
                     }
                 </ul>
@@ -166,7 +167,7 @@
                 }
 
                 <p class="ms-muted">
-                    <a href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">Open the Health page</a>
+                    <a href="@HealthLinks.ToPage(State.ActiveScope)">Open the Health page</a>
                 </p>
             }
 
@@ -526,11 +527,11 @@
 </div>
 
 @code {
-    /// <summary>The route of the projections screen, relative to the studio root.</summary>
-    private const string ProjectionsRoute = "projections";
+    /// <summary>The route of the projections screen below the mount.</summary>
+    private const string ProjectionsRoute = EventLinks.ProjectionsRoute;
 
-    /// <summary>The route of the activity log, relative to the studio root.</summary>
-    private const string ActivityRoute = "activity";
+    /// <summary>The route of the activity log below the mount: the shell's own page.</summary>
+    private const string ActivityRoute = StudioShellDescriptor.ActivityRoute;
 
     /// <summary>How many shards the health table shows before it points at the projections screen.</summary>
     private const int MaxShardsShown = 8;
@@ -1125,18 +1126,18 @@
         return await ActivityRing.GetVisibleAsync(RecentCount, cancellationToken);
     }
 
-    private string Link(string route) => EventLinks.To(StudioSettings, route, State.ActiveScope);
+    private string Link(string route) => EventLinks.To(route, State.ActiveScope);
 
     /// <summary>The strip's link for a store: its Overview, scoped to the store alone (the layout settles the database).</summary>
     private string StoreOverviewHref(string storeKey) =>
-        EventLinks.To(StudioSettings, string.Empty, new StudioScope(storeKey, string.Empty, null));
+        EventLinks.To(MartenRoutes.Root, new StudioScope(storeKey, string.Empty, null));
 
     private bool IsActiveStore(string storeKey) =>
         string.Equals(State.ActiveScope?.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase);
 
-    private string StreamHref(string streamId) => EventLinks.ToStream(StudioSettings, State.ActiveScope, streamId);
+    private string StreamHref(string streamId) => EventLinks.ToStream(State.ActiveScope, streamId);
 
-    private string TypeHref(string eventType) => EventLinks.ToFeedForType(StudioSettings, State.ActiveScope, eventType);
+    private string TypeHref(string eventType) => EventLinks.ToFeedForType(State.ActiveScope, eventType);
 
     public async ValueTask DisposeAsync()
     {

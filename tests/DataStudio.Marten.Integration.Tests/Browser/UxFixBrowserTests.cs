@@ -34,7 +34,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         RunAsync(name, async studio =>
         {
             await studio.Page.SetViewportSizeAsync(1280, 800);
-            await studio.GoAsync(fixture.Root.StudioUrl("projections"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/projections"));
             await studio.Page.Locator(".ms-projections-table tbody tr.ms-shard-row").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             if (widerMetrics)
@@ -77,7 +77,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(1280, 900);
-            await studio.GoAsync(fixture.Root.StudioUrl("projections"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/projections"));
 
             ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
             await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
@@ -124,7 +124,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(width, 900);
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await page.Locator(".ms-overview-tiles .ms-stat-card").Nth(5).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             // The Health tile says "checking" until the advisor has answered; it is the one that overflowed, so it is measured answered.
@@ -161,7 +161,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(1280, 800);
-            await studio.GoAsync(fixture.Root.StudioUrl("maintenance"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/maintenance"));
             await page.Locator(".ms-maint-name").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             string[] broken = await page.EvaluateAsync<string[]>(
@@ -203,7 +203,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(390, 800);
-            await studio.GoAsync(fixture.Root.StudioUrl("maintenance"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/maintenance"));
 
             ILocator mark = page.Locator(".ms-mark button", new PageLocatorOptions { HasTextString = "Mark" }).First;
             await mark.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
@@ -233,7 +233,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         RunAsync("uxfix-back-tenant", async studio =>
         {
             IPage page = studio.Page;
-            await studio.GoAsync(fixture.Root.StudioUrl("tenants"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/tenants"));
 
             ILocator link = page.Locator("main a[href*='tenant=acme']").First;
             await link.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });

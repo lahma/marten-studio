@@ -24,7 +24,7 @@
     int worth = Worth(read);
 
     <p class="ms-muted ms-overview-connection">
-        <a href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope)">Connection</a>:
+        <a href="@ConnectionLinks.To(Descriptor, State.ActiveScope)">Connection</a>:
         @read.Tls.Summary
         @if (read.PoolMax is { } pool)
         {

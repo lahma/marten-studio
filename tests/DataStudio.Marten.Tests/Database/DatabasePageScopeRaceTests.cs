@@ -36,10 +36,10 @@ namespace DataStudio.Marten.Tests.Database;
 /// </remarks>
 public class DatabasePageScopeRaceTests
 {
-    private const string Browser = "studio/database?schema=quartz&store=default&db=db-b";
+    private const string Browser = "studio/postgres/database?schema=quartz&store=default&db=db-b";
 
     private const string Row =
-        "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00" +
+        "studio/postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00" +
         "&key.trigger_group=DEFAULT&store=default&db=db-b";
 
     // ----------------------------------------------------------------------------------------------
@@ -52,7 +52,7 @@ public class DatabasePageScopeRaceTests
         await using StudioComponentContext context = await TwoDatabasesAsync();
         TaskCompletionSource gate = Hold(context);
 
-        context.Navigate("studio/database/object?schema=quartz&name=qrtz_triggers&tab=columns&store=default&db=db-b");
+        context.Navigate("studio/postgres/database/object?schema=quartz&name=qrtz_triggers&tab=columns&store=default&db=db-b");
         var page = context.Render<ObjectDetail>();
 
         page.FindAll(".ms-loading-spinner").Should().NotBeEmpty("the circuit rendered while the scope was being applied");

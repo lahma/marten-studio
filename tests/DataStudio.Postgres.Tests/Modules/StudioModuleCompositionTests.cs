@@ -14,9 +14,9 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Tests.Modules;
 
 /// <summary>
-/// D34: the shell's descriptor is the database module (the root) composed with the registered modules when first resolved. With no module it
-/// carries the database's own lists, element by element; with some it adds the modules' pages, rail sections and shortcuts after the root's, and
-/// refuses the compositions that would put two entries on one key. The modules here are fakes whose pages name this test assembly, so no route
+/// D34: the shell's descriptor is the registered modules composed in key order when first resolved, every one under a segment of its own. With the
+/// database alone it carries the database's own lists, element by element, then the shell's own rail section; with more it adds the modules' pages,
+/// rail sections and shortcuts in key order, and refuses the compositions that would put two entries on one key or two pages on one root. The modules here are fakes whose pages name this test assembly, so no route
 /// table is built.
 /// </summary>
 public class StudioModuleCompositionTests
@@ -32,15 +32,11 @@ public class StudioModuleCompositionTests
 
     private sealed class FakeModule(string key, string root, params string[] sections) : IStudioModule
     {
-        public bool KeepRoot { get; init; } = true;
-
         public string Key => key;
 
         public string ProductName => "Fake " + key;
 
-        public bool IsRoot { get; init; }
-
-        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(FakeModule).Assembly, root) { KeepsRoot = KeepRoot }];
+        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(FakeModule).Assembly, root)];
 
         public IReadOnlyList<StudioNavSection> Navigation { get; } =
             [.. sections.Select(static title => new StudioNavSection(title, [new StudioNavItem(title + " item", title.ToLowerInvariant(), "grid")]))];
@@ -54,6 +50,8 @@ public class StudioModuleCompositionTests
         public Type? ScopeGate => null;
 
         public string HomeRoute => key;
+
+        public string Summary => "A fake.";
 
         public string ExposedSentence => "Fake sentence.";
 
@@ -72,9 +70,7 @@ public class StudioModuleCompositionTests
 
         public string ProductName => "Other";
 
-        public bool IsRoot => false;
-
-        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(OtherFakeModule).Assembly, "/other") { KeepsRoot = true }];
+        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(OtherFakeModule).Assembly, "/other")];
 
         public IReadOnlyList<StudioNavSection> Navigation => [];
 
@@ -87,6 +83,8 @@ public class StudioModuleCompositionTests
         public Type? ScopeGate => null;
 
         public string HomeRoute => "other";
+
+        public string Summary => "Other.";
 
         public string ExposedSentence => string.Empty;
 
@@ -107,7 +105,7 @@ public class StudioModuleCompositionTests
         (section.Title, [.. section.Items.Select(static i => (i.Label, i.Route, i.Icon, i.BadgeKey, i.Title, i.IsShown is not null, i.ShownWhen))]);
 
     /// <summary>
-    /// Every page template of every assembly of the database's descriptor, as the dashboard-relative path that reaches it (a parameter segment is given a
+    /// Every page template of every assembly of the database's descriptor, as the address below the mount that reaches it (a parameter segment is given a
     /// value): not only the rail's routes, but the pages a link alone reaches, such as a detail page.
     /// </summary>
     private static string[] EveryPagePath(StudioDescriptor descriptor)
@@ -120,7 +118,7 @@ public class StudioModuleCompositionTests
             {
                 foreach (Microsoft.AspNetCore.Components.RouteAttribute route in type.GetCustomAttributes<Microsoft.AspNetCore.Components.RouteAttribute>())
                 {
-                    string relative = route.Template[pageAssembly.CompileTimeRoot.Length..].TrimStart('/');
+                    string relative = route.Template.TrimStart('/');
                     paths.Add(string.Join('/', relative.Length == 0 ? [] : relative.Split('/').Select(static x => x.StartsWith('{') ? "value" : x)));
                 }
             }
@@ -137,7 +135,7 @@ public class StudioModuleCompositionTests
         string[] paths = EveryPagePath(Host);
 
         paths.Should().HaveCountGreaterThan(14, "every page of the assembly is compared, not the rail's entries alone")
-            .And.Contain("database/row", "a page only a link reaches is among them");
+            .And.Contain("postgres/database/row", "a page only a link reaches is among them");
         foreach (string path in paths)
         {
             Microsoft.AspNetCore.Components.RouteData? expected = own.Match(path);
@@ -147,7 +145,7 @@ public class StudioModuleCompositionTests
     }
 
     [Fact]
-    public void No_module_registered_resolves_the_database_as_the_one_root_module()
+    public void No_other_module_registered_resolves_the_database_as_the_one_module()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
@@ -155,8 +153,7 @@ public class StudioModuleCompositionTests
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(Host, "the database's descriptor is registered as itself, never composed");
         StudioShellDescriptor shell = provider.GetRequiredService<StudioShellDescriptor>();
-        shell.Modules.Should().ContainSingle().Which.Should().BeOfType<DatabaseStudioModule>().Which.IsRoot.Should().BeTrue();
-        shell.Root.Should().BeSameAs(shell.Modules[0]);
+        shell.Modules.Should().ContainSingle().Which.Should().BeOfType<DatabaseStudioModule>().Which.HomeRoute.Should().Be("postgres");
     }
 
     [Fact]
@@ -172,14 +169,18 @@ public class StudioModuleCompositionTests
             + " Data Studio refuses to start rather than serve that by accident. Say which you meant:");
         StudioShellIdentity.Remedies.Should().Contain("app.MapDataStudio().RequireAuthorization()").And.Contain("services.AddDataStudio(options => options.AuthorizationPolicy").And.Contain("app.MapDataStudio().AllowAnonymous()");
 
-        // The lists are the database's own, in order, then the shell's own Activity page. The navigation is built once per registration, so the two builds are compared by what they say.
+        // The lists are the database's own, in order, then the shell's own pages (the front page and Activity). The navigation is built once per registration,
+        // so the two builds are compared by what they say, and the shell's own section closes it.
         shell.PageAssemblies.Should().Equal([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages]);
         shell.ExtraShortcuts.Should().Equal(Host.ExtraShortcuts);
-        shell.Navigation.Select(Shape).Should().BeEquivalentTo(Host.Navigation(Settings).Select(Shape), static options => options.WithStrictOrdering());
+        shell.Navigation.Take(shell.Navigation.Count - 1).Select(Shape).Should().BeEquivalentTo(Host.Navigation(Settings).Select(Shape), static options => options.WithStrictOrdering());
+        shell.Navigation[^1].Title.Should().Be("Studio", "the Postgres module closes its own rail with System");
+        shell.Navigation[^1].Items.Select(static x => (x.Label, x.Route)).Should().Equal(("Activity", "activity"));
+        Host.Navigation(Settings).SelectMany(static x => x.Items).Should().NotContain(static x => x.Route == "activity");
 
-        // Shell A2b, 6.1: the one expected value that moves. The root's sections are stamped with the root's key too, so that a section's rail is
-        // the rail of its module, whichever module it is; before, they carried none.
-        shell.Navigation.Should().OnlyContain(static x => x.ModuleKey == "postgres", "the root's own sections carry the root's key");
+        // Every module's sections are stamped with the module's key, so that a section's rail is the rail of its module; the shell's own has none.
+        shell.Navigation.Take(shell.Navigation.Count - 1).Should().OnlyContain(static x => x.ModuleKey == "postgres");
+        shell.Navigation[^1].ModuleKey.Should().BeNull();
 
         // The route table is the database's own plus the shell's Activity page: one built from those alone matches every entry's route to the same page.
         StudioRouteTable own = new([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages]);
@@ -194,28 +195,29 @@ public class StudioModuleCompositionTests
     }
 
     [Fact]
-    public void Module_sections_go_before_the_roots_last_section_in_key_order()
+    public void Modules_compose_in_key_order_and_the_shells_own_section_closes_the_rail()
     {
-        // Registered out of order on purpose: the composition sorts by key, ordinally.
+        // Registered out of order on purpose: the composition sorts by key, ordinally, the database among the rest.
         StudioShellDescriptor composed = Compose(new FakeModule("b", "/b", "Bravo"), new FakeModule("a", "/a", "Alpha"));
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
-        composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles[..^1], "Alpha", "Bravo", hostTitles[^1]]);
-        composed.Navigation.Where(static x => x.ModuleKey != "postgres").Select(static x => x.ModuleKey).Should().Equal("a", "b");
-        composed.Navigation.Where(static x => x.ModuleKey == "postgres").Should().HaveCount(hostTitles.Length, "the root's own sections carry the root's key (6.1)");
-        composed.Modules.Select(static x => x.Key).Should().Equal("postgres", "a", "b");
+        composed.Navigation.Select(static x => x.Title).Should().Equal(["Alpha", "Bravo", .. hostTitles, "Studio"]);
+        composed.Navigation.Where(static x => x.ModuleKey is not null).Select(static x => x.ModuleKey).Distinct().Should().Equal("a", "b", "postgres");
+        composed.Navigation.Where(static x => x.ModuleKey == "postgres").Should().HaveCount(hostTitles.Length, "the database's own sections carry its key");
+        composed.Modules.Select(static x => x.Key).Should().Equal("a", "b", "postgres");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 3, "the two modules' and the shell's own");
         composed.ExtraShortcuts.Select(static x => x.Title).Should().Equal([.. Host.ExtraShortcuts.Select(static x => x.Title), "a keys", "b keys"]);
     }
 
     [Fact]
-    public void ModuleOf_answers_the_module_whose_assembly_the_page_is_in_and_the_root_for_any_other()
+    public void ModuleOf_answers_the_module_whose_assembly_the_page_is_in_and_null_for_a_page_of_no_module()
     {
         StudioShellDescriptor composed = Compose(new FakeModule("fake", "/fake", "Fake"));
 
         composed.ModuleOf(typeof(StudioModuleCompositionTests))!.Key.Should().Be("fake");
         composed.ModuleOf(typeof(PostgresOptions))!.Key.Should().Be("postgres", "a page of the database's own assembly");
-        composed.ModuleOf(typeof(string))!.Key.Should().Be("postgres", "a page of no module's assembly is the root's");
+        composed.ModuleOf(typeof(string)).Should().BeNull("a page of no module's assembly is no module's");
+        composed.ModuleOf(typeof(StudioShellDescriptor)).Should().BeNull("the shell's own pages (the front page, Activity) are of no module");
     }
 
     [Fact]
@@ -227,44 +229,95 @@ public class StudioModuleCompositionTests
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, OtherFakeModule>());
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("postgres", "other");
-    }
-
-    [Fact]
-    public void A_module_that_does_not_keep_its_root_is_refused()
-    {
-        Action compose = () => Compose(new FakeModule("fake", "/fake", "Fake") { KeepRoot = false });
-
-        compose.Should().Throw<InvalidOperationException>().WithMessage("*do not keep their root*");
+        provider.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("other", "postgres");
     }
 
     [Theory]
     [InlineData("/postgres")]
-    [InlineData("/marten")]
-    [InlineData("/MARTEN/")]
-    public void A_module_root_equal_to_a_host_root_is_refused(string root)
+    [InlineData("/POSTGRES/")]
+    public void A_module_root_equal_to_the_databases_own_is_refused(string root)
     {
         Action compose = () => Compose(new FakeModule("fake", root, "Fake"));
 
-        compose.Should().Throw<InvalidOperationException>().WithMessage("*another page assembly of the studio already uses*");
+        compose.Should().Throw<InvalidOperationException>().WithMessage("*'postgres' are rooted at*which the pages of 'fake' already use*");
+    }
+
+    [Theory]
+    [InlineData("/activity")]
+    [InlineData("/ACTIVITY")]
+    [InlineData("/activity/more")]
+    [InlineData("/_blazor")]
+    [InlineData("/_framework")]
+    [InlineData("/_content")]
+    [InlineData("/opaque-redirect")]
+    [InlineData("/")]
+    [InlineData("")]
+    public void A_module_root_the_shell_keeps_for_itself_is_refused(string root)
+    {
+        Action compose = () => Compose(new FakeModule("fake", root, "Fake"));
+
+        compose.Should().Throw<InvalidOperationException>().WithMessage("*'fake' are rooted at*which the shell keeps for itself*");
     }
 
     [Fact]
     public void Two_modules_with_one_key_or_one_root_are_refused()
     {
         Action sameKey = () => Compose(new FakeModule("fake", "/one", "One"), new FakeModule("fake", "/two", "Two"));
-        Action sameRoot = () => Compose(new FakeModule("one", "/same", "One"), new FakeModule("two", "/same", "Two"));
+        Action sameRoot = () => Compose(new FakeModule("one", "/same", "One"), new FakeModule("two", "/SAME/", "Two"));
 
         sameKey.Should().Throw<InvalidOperationException>().WithMessage("*under the key 'fake'*");
-        sameRoot.Should().Throw<InvalidOperationException>().WithMessage("*already uses*");
+        sameRoot.Should().Throw<InvalidOperationException>().WithMessage("*which the pages of 'one' already use*");
     }
 
     [Fact]
-    public void Two_root_modules_are_refused()
+    public void The_shells_own_section_is_titled_System_unless_a_module_has_a_section_of_that_name()
     {
-        Action compose = () => Compose(new FakeModule("fake", "/fake", "Fake") { IsRoot = true });
+        StudioShellDescriptor withoutDatabase = StudioModuleComposition.Compose([new FakeModule("fake", "/fake", "Fake")]);
+        StudioShellDescriptor withDatabase = Compose();
 
-        compose.Should().Throw<InvalidOperationException>().WithMessage("*both the root*");
+        withoutDatabase.Navigation.Select(static x => x.Title).Should().Equal("Fake", "System");
+        withDatabase.Navigation.Select(static x => x.Title).Last().Should().Be("Studio", "the database module's rail already ends with a System section");
+    }
+
+    [Fact]
+    public void A_module_that_takes_the_shells_Activity_label_is_refused()
+    {
+        Action label = () => StudioModuleComposition.Compose([new LabelledModule("labelled", "/labelled", "Activity")]);
+
+        label.Should().Throw<InvalidOperationException>().WithMessage("*'Activity' of module 'labelled'*unique, ignoring case*");
+    }
+
+    private sealed class LabelledModule(string key, string root, string label) : IStudioModule
+    {
+        public string Key => key;
+
+        public string ProductName => "Labelled";
+
+        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(LabelledModule).Assembly, root)];
+
+        public IReadOnlyList<StudioNavSection> Navigation { get; } = [new StudioNavSection("Labelled", [new StudioNavItem(label, "labelled", "grid")])];
+
+        public Type? ScopeSelector => null;
+
+        public Type? HeaderSearch => null;
+
+        public Type? CircuitHost => null;
+
+        public Type? ScopeGate => null;
+
+        public string HomeRoute => key;
+
+        public string Summary => "Labelled.";
+
+        public string ExposedSentence => string.Empty;
+
+        public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups => [];
+
+        public string? AllCapabilitiesOption => null;
+
+        public IReadOnlyList<StudioShortcutGroup> Shortcuts => [];
+
+        public string AuditEventIds => string.Empty;
     }
 
     [Theory]
@@ -274,10 +327,10 @@ public class StudioModuleCompositionTests
     [InlineData("System")]
     public void A_rail_label_two_sections_share_is_refused_ignoring_case(string title)
     {
-        // The root's rail has an "Overview" entry and a "System" section.
-        Action compose = () => Compose(new FakeModule("fake", "/fake", title));
+        // The database's rail has an "Overview" entry and a "System" section. The fake's key sorts after "postgres", so it is the one that is refused.
+        Action compose = () => Compose(new FakeModule("zeta", "/zeta", title));
 
-        compose.Should().Throw<InvalidOperationException>().WithMessage($"*'{title}' of module 'fake'*unique, ignoring case*");
+        compose.Should().Throw<InvalidOperationException>().WithMessage($"*'{title}' of module 'zeta'*unique, ignoring case*");
     }
 
     [Fact]

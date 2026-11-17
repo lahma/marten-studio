@@ -30,24 +30,21 @@ internal static class PlanLinks
     public const int MaxUrlStatementLength = 4 * 1024;
 
     /// <summary>The page, with the scope carried and - when there is one - the statement, the mode and the options.</summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
     /// <param name="statement">The statement for the editor, or <see langword="null" /> for none; one past <see cref="MaxUrlStatementLength" /> is left out.</param>
     /// <param name="mode">The mode; <see cref="PlanMode.Plan" /> is the default and is not written.</param>
     /// <param name="options">The options; the defaults are not written.</param>
     public static string ToPlan(
-        IStudioSettings settings,
         StudioDescriptor descriptor,
         StudioScope? scope,
         string? statement = null,
         PlanMode mode = PlanMode.Plan,
         PlanOptions? options = null)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        string url = StudioLink.To(settings, Route);
+        string url = StudioLink.To(Route);
 
         if (!string.IsNullOrWhiteSpace(statement) && statement.Length <= MaxUrlStatementLength)
         {

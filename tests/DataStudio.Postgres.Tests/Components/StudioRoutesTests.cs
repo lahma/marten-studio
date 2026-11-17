@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Tests.Components;
 /// </summary>
 public sealed class StudioRoutesTests
 {
-    private const string Start = "http://localhost/studio/database/connection";
+    private const string Start = "http://localhost/studio/postgres/database/connection";
 
     private sealed record Rig(
         PostgresStudioComponentContext Context,
@@ -55,8 +55,8 @@ public sealed class StudioRoutesTests
 
         routes.WaitForAssertion(() => rig.Interception.Calls.Should().Be(1));
 
-        rig.Navigation.Simulate("studio/health", intercepted: true);
-        rig.Navigation.Simulate("studio/database/connection?x=1", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/health", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/database/connection?x=1", intercepted: true);
         routes.Render();
         await SettleAsync(routes);
 
@@ -147,7 +147,7 @@ public sealed class StudioRoutesTests
         await using PostgresStudioComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
 
-        rig.Navigation.Simulate("studio/health", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/health", intercepted: true);
 
         routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().NotBe("Connection"));
         routes.Markup.Should().NotContain("The requested page was not found.");
@@ -198,7 +198,7 @@ public sealed class StudioRoutesTests
         routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().Be("Not found"));
         rig.Navigation.ForceLoads.Should().BeEmpty("enhanced navigation reports a click as intercepted, and a force-load would abort its fetch");
 
-        rig.Navigation.Simulate("studio/database/connection#conn-marten", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/database/connection#conn-marten", intercepted: true);
         await SettleAsync(routes);
 
         rig.Scroll.Refreshed.Should().BeEmpty("enhanced navigation scrolls to the fragment itself");
@@ -207,27 +207,27 @@ public sealed class StudioRoutesTests
     [Fact]
     public async Task The_fragment_is_scrolled_to_when_the_path_or_the_fragment_changes_and_never_for_a_query_only_change()
     {
-        Rig rig = await NewRigAsync("http://localhost/studio/health");
+        Rig rig = await NewRigAsync("http://localhost/studio/postgres/health");
         await using PostgresStudioComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
         await SettleAsync(routes);
         rig.Scroll.Refreshed.Should().BeEmpty("the first render does nothing: the browser scrolled the document itself");
 
         // A path change to an address with a fragment.
-        rig.Navigation.Simulate("studio/database/connection#conn-row-host", intercepted: true);
-        routes.WaitForAssertion(() => rig.Scroll.Refreshed.Should().Equal("http://localhost/studio/database/connection#conn-row-host"));
+        rig.Navigation.Simulate("studio/postgres/database/connection#conn-row-host", intercepted: true);
+        routes.WaitForAssertion(() => rig.Scroll.Refreshed.Should().Equal("http://localhost/studio/postgres/database/connection#conn-row-host"));
 
         // A fragment change on the same path.
-        rig.Navigation.Simulate("studio/database/connection#conn-marten", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/database/connection#conn-marten", intercepted: true);
         routes.WaitForAssertion(() => rig.Scroll.Refreshed.Should().HaveCount(2));
 
         // A query-only change: a push keeps the fragment, and must not pull the visitor back to it.
-        rig.Navigation.Simulate("studio/database/connection?x=2#conn-marten", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/database/connection?x=2#conn-marten", intercepted: true);
         await SettleAsync(routes);
         rig.Scroll.Refreshed.Should().HaveCount(2);
 
         // An address with no fragment.
-        rig.Navigation.Simulate("studio/health", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/health", intercepted: true);
         await SettleAsync(routes);
         rig.Scroll.Refreshed.Should().HaveCount(2);
     }
@@ -235,12 +235,12 @@ public sealed class StudioRoutesTests
     [Fact]
     public async Task A_scroll_that_fails_because_the_circuit_closed_costs_nothing()
     {
-        Rig rig = await NewRigAsync("http://localhost/studio/health");
+        Rig rig = await NewRigAsync("http://localhost/studio/postgres/health");
         await using PostgresStudioComponentContext context = rig.Context;
         rig.Scroll.Failure = new JSDisconnectedException("the circuit closed");
         var routes = context.Render<StudioRoutes>();
 
-        rig.Navigation.Simulate("studio/database/connection#conn-marten", intercepted: true);
+        rig.Navigation.Simulate("studio/postgres/database/connection#conn-marten", intercepted: true);
 
         routes.WaitForAssertion(() => rig.Scroll.Refreshed.Should().ContainSingle());
         await SettleAsync(routes);

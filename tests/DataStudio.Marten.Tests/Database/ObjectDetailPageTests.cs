@@ -25,7 +25,7 @@ public class ObjectDetailPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenSpine.Routes.Match("database/object")!.PageType.Should().Be<DetailPage>();
+        MartenSpine.Routes.Match("postgres/database/object")!.PageType.Should().Be<DetailPage>();
     }
 
     [Fact]
@@ -43,8 +43,8 @@ public class ObjectDetailPageTests
 
         page.FindAll(".ms-db-breadcrumb a").Select(x => x.GetAttribute("href"))
             .Should().SatisfyRespectively(
-                x => x.Should().StartWith("database?").And.Contain("store=default"),
-                x => x.Should().StartWith("database?schema=quartz&kind=tables"));
+                x => x.Should().StartWith("postgres/database?").And.Contain("store=default"),
+                x => x.Should().StartWith("postgres/database?schema=quartz&kind=tables"));
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public class ObjectDetailPageTests
         card.TextContent.Should().Contain("Browsed in Documents, where tenancy, soft delete and the serializer apply");
 
         IElement link = card.QuerySelector("a.ms-btn-primary")!;
-        link.GetAttribute("href").Should().StartWith("documents/customer?").And.Contain("store=default").And.Contain("db=localhost.marten");
+        link.GetAttribute("href").Should().StartWith("marten/documents/customer?").And.Contain("store=default").And.Contain("db=localhost.marten");
     }
 
     [Fact]
@@ -99,9 +99,9 @@ public class ObjectDetailPageTests
         List<string?> hrefs = [.. page.FindAll(".ms-db-rows-card a").Select(x => x.GetAttribute("href"))];
 
         hrefs.Should().HaveCount(3);
-        hrefs[0].Should().StartWith("events/streams");
-        hrefs[1].Should().StartWith("events/feed");
-        hrefs[2].Should().StartWith("projections");
+        hrefs[0].Should().StartWith("marten/events/streams");
+        hrefs[1].Should().StartWith("marten/events/feed");
+        hrefs[2].Should().StartWith("marten/projections");
         hrefs.Should().OnlyContain(x => x!.Contains("store=default", StringComparison.Ordinal));
     }
 
@@ -152,7 +152,7 @@ public class ObjectDetailPageTests
         IElement jobName = rows.Single(x => x.QuerySelector(".ms-db-name")!.TextContent.Trim() == "job_name");
         IElement parent = jobName.QuerySelector("a.ms-db-fk-link")!;
         parent.TextContent.Trim().Should().Be("→ qrtz_job_details");
-        parent.GetAttribute("href").Should().StartWith("database/object?schema=quartz&name=qrtz_job_details");
+        parent.GetAttribute("href").Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_job_details");
 
         rows.Single(x => x.QuerySelector(".ms-db-name")!.TextContent.Trim() == "next_fire_time")
             .TextContent.Should().Contain("bigint").And.Contain("null");
@@ -175,7 +175,7 @@ public class ObjectDetailPageTests
         indexes[1].TextContent.Should().Contain("CREATE INDEX idx_qrtz_t_next_fire_time");
 
         IElement outbound = page.Find(".ms-db-fks-out tbody tr");
-        outbound.QuerySelector("a.ms-db-name")!.GetAttribute("href").Should().StartWith("database/object?schema=quartz&name=qrtz_job_details");
+        outbound.QuerySelector("a.ms-db-name")!.GetAttribute("href").Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_job_details");
         outbound.TextContent.Should().Contain("sched_name, job_name, job_group").And.Contain("no action");
 
         IElement inbound = page.Find(".ms-db-fks-in tbody tr");
@@ -450,7 +450,7 @@ public class ObjectDetailPageTests
         IElement link = on.FindAll(".ms-db-object-actions a").Single(x => x.TextContent.Trim() == "Open in Query");
         string href = link.GetAttribute("href")!;
 
-        href.Should().StartWith("query?mode=sql&sql=");
+        href.Should().StartWith("postgres/query?mode=sql&sql=");
         Parameter(href, "sql").Should().Be("select * from \"quartz\".\"qrtz_triggers\" limit 100");
         href.Should().Contain("store=default");
     }
@@ -561,7 +561,7 @@ public class ObjectDetailPageTests
 
         IElement back = panel.QuerySelector("a.ms-db-back-link")!;
         back.TextContent.Should().Be("Back to the database browser");
-        back.GetAttribute("href").Should().StartWith("database").And.Contain("store=default");
+        back.GetAttribute("href").Should().StartWith("postgres/database").And.Contain("store=default");
     }
 
     /// <summary>

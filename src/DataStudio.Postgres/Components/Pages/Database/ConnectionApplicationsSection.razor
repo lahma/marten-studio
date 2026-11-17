@@ -108,9 +108,9 @@
         }
 
         <p class="ms-conn-note">
-            <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">Open Sessions</a>
+            <a href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope)">Open Sessions</a>
             for every session, their locks and what they wait for, or
-            <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.HoldersView)">Holders</a>
+            <a href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope, SessionLinks.HoldersView)">Holders</a>
             for who holds the whole server's connections.
         </p>
     }

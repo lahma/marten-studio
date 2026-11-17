@@ -1,4 +1,6 @@
 @page "/marten/schema"
+@using DataStudio.Marten.Services.Documents
+@using DataStudio.Marten.Services.Events
 @using DataStudio.Postgres.Services.Database
 @using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.Extensions.Options
@@ -8,7 +10,6 @@
 @inject StudioState State
 @inject NavigationManager Navigation
 @inject IOptions<MartenOptions> Options
-@inject IStudioSettings Settings
 
 <PageTitle>Schema</PageTitle>
 
@@ -150,25 +151,25 @@
     private string? AriaCurrent(string key) => IsActive(key) ? "page" : null;
 
     /// <summary>A link to one tab, carrying the scope so the link reopens the same thing.</summary>
-    private string TabLink(string key) => Link("schema", ("tab", key));
+    private string TabLink(string key) => Link(MartenRoutes.Page("schema"), ("tab", key));
 
     /// <summary>A link to a document collection, carrying the scope.</summary>
-    private string CollectionLink(string alias) => Link("documents/" + Uri.EscapeDataString(alias));
+    private string CollectionLink(string alias) => Link(DocumentLinks.Root + "/" + Uri.EscapeDataString(alias));
 
     /// <summary>A link to the event store's streams, carrying the scope.</summary>
-    private string StreamsLink => Link("events/streams");
+    private string StreamsLink => Link(EventLinks.StreamsRoute);
 
     /// <summary>
-    /// A link to one relation's detail in the database browser - <c>/marten/database/object?schema=&amp;name=</c>
+    /// A link to one relation's detail in the database browser - <c>/postgres/database/object?schema=&amp;name=</c>
     /// - carrying the scope, built by the browser's own <see cref="DatabaseLinks" /> so the two screens can
     /// never disagree about the route or its parameters.
     /// </summary>
     private string ObjectLink(string schema, string name) =>
-        DatabaseLinks.ToObject(Settings, State.ActiveScope, schema, name);
+        DatabaseLinks.ToObject(State.ActiveScope, schema, name);
 
     private string Link(string subPath, params (string Name, string? Value)[] extra)
     {
-        string path = StudioLink.To(Settings, subPath);
+        string path = StudioLink.To(subPath);
         Dictionary<string, string?> query = new(StringComparer.Ordinal);
 
         StudioScope? scope = State.ActiveScope;

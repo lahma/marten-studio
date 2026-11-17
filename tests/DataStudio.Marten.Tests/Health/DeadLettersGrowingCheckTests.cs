@@ -40,7 +40,7 @@ public class DeadLettersGrowingCheckTests
         finding.DocumentTypes.Should().Equal(typeof(DeadLetterEvent));
         finding.Evidence.Select(static x => x.Label).Should().OnlyHaveUniqueItems();
 
-        finding.Link!.Route.Should().Be("events/dead-letters", "the dead-letter screen, filtered to this projection");
+        finding.Link!.Route.Should().Be("marten/events/dead-letters", "the dead-letter screen, filtered to this projection");
         finding.Link.Query.Should().ContainSingle().Which.Should().Be(new KeyValuePair<string, string?>("projection", "ShipmentTracker"));
     }
 

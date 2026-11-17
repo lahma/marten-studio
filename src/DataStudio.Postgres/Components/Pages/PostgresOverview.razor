@@ -24,7 +24,7 @@
 @inject StudioDescriptor Descriptor
 
 @*
-    PostgresStudio's overview: the body of the shared root page (StudioHome renders the descriptor's OverviewComponent),
+    PostgresStudio's overview: the body of the Postgres module's home page (StudioHome),
     so it has no @page of its own.
 
     Every number here comes through a service another screen already reads it with, under that screen's gate: the
@@ -54,23 +54,23 @@
 
             <StatCard Title="Databases" Value="@DatabaseCount" Color="info" />
 
-            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope)">
                 <StatCard Title="Schemas" Value="@SchemaValue" Color="@(overview is { Refusal: DatabaseRefusal.None } ? "info" : "warning")" />
             </a>
 
-            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
                 <StatCard Title="Tables" Value="@CountValue(static x => x.Tables)" Color="info" />
             </a>
 
-            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
                 <StatCard Title="Estimated size" Value="@SizeValue" Color="info" />
             </a>
 
-            <a class="ms-stat-link" href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">
+            <a class="ms-stat-link" href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope)">
                 <StatCard Title="Connections" Value="@ConnectionValue" Color="@(sessions is { Refusal: DatabaseRefusal.None } ? "info" : "warning")" />
             </a>
 
-            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">
+            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Descriptor.SourceQueryParameter, State.ActiveScope)">
                 <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
             </a>
         </div>
@@ -144,7 +144,7 @@
             {
                 <p class="ms-muted ms-overview-health-empty">
                     @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : "Nothing to report.")
-                    <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">See what was checked</a>
+                    <a href="@HealthLinks.ToPage(Descriptor.SourceQueryParameter, State.ActiveScope)">See what was checked</a>
                 </p>
             }
             else
@@ -154,7 +154,7 @@
                     {
                         <li class="ms-overview-list-item" @key="finding.MuteKey">
                             <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
-                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">@finding.Finding.Title</a>
+                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(Descriptor.SourceQueryParameter, State.ActiveScope, finding)">@finding.Finding.Title</a>
                         </li>
                     }
                 </ul>
@@ -201,7 +201,7 @@
                             {
                                 <tr @key="table.Schema + '.' + table.Name">
                                     <td>
-                                        <a class="ms-mono" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, table.Schema, table.Name)">@DatabaseLinks.QualifiedName(table.Schema, table.Name)</a>
+                                        <a class="ms-mono" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, table.Schema, table.Name)">@DatabaseLinks.QualifiedName(table.Schema, table.Name)</a>
                                     </td>
                                     <td class="ms-num">@(table.EstimatedRows is { } rows ? "~" + rows.ToString("N0", CultureInfo.InvariantCulture) : "not analysed")</td>
                                     <td class="ms-num">~@SqlCellFormat.Bytes(table.SizeBytes)</td>
@@ -251,7 +251,7 @@
 
                 <p class="ms-muted">
                     @Count(sessions.Waiting, "session") waiting for a lock.
-                    <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">Open Sessions</a>
+                    <a href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope)">Open Sessions</a>
                 </p>
             }
 
@@ -290,7 +290,7 @@
                 </ul>
 
                 <p class="ms-muted">
-                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, "activity", State.ActiveScope)">Open the activity log</a>
+                    <a href="@HealthLinks.To(Descriptor.SourceQueryParameter, StudioShellDescriptor.ActivityRoute, State.ActiveScope)">Open the activity log</a>
                 </p>
             }
         </section>

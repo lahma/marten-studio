@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Components;
 namespace DataStudio.Tests.Modules;
 
 /// <summary>
-/// D34: a root-keeping assembly's pages stay below their own segment in the relative route space, so a module's <c>/orders/list</c> is
-/// <c>orders/list</c> and never lands over a host page; the root check and the duplicate check are unchanged.
+/// D34 and v2 step 5: every assembly's pages keep their root as their first segment, so a module's <c>/orders/list</c> is <c>orders/list</c> and never lands
+/// over another module's page, and the shell's own <c>/activity</c> (root <c>/</c>) is <c>activity</c>; the root check and the duplicate check stand.
 /// </summary>
 public class StudioRouteTableModuleTests
 {
@@ -29,20 +29,25 @@ public class StudioRouteTableModuleTests
     {
     }
 
-    [Route("/host/orders/list")]
-    private sealed class HostListPage : ComponentBase
+    [Route("/")]
+    private sealed class FrontPage : ComponentBase
     {
     }
 
-    [Route("/host")]
-    private sealed class HostIndexPage : ComponentBase
+    [Route("/activity")]
+    private sealed class ShellActivityPage : ComponentBase
+    {
+    }
+
+    [Route("/orders/list")]
+    private sealed class OtherOrdersListPage : ComponentBase
     {
     }
 
     [Fact]
-    public void A_root_keeping_assembly_routes_below_its_own_segment()
+    public void An_assembly_routes_below_its_own_segment()
     {
-        StudioRouteTable table = new([(typeof(IndexPage), "/orders", true), (typeof(ListPage), "/orders", true), (typeof(DetailPage), "/orders", true)]);
+        StudioRouteTable table = new([(typeof(IndexPage), "/orders"), (typeof(ListPage), "/orders"), (typeof(DetailPage), "/orders")]);
 
         table.Match("orders")!.PageType.Should().Be<IndexPage>();
         table.Match("orders/list")!.PageType.Should().Be<ListPage>("a literal segment beats a parameter");
@@ -54,36 +59,39 @@ public class StudioRouteTableModuleTests
     }
 
     [Fact]
-    public void A_root_dropping_assembly_is_routed_as_it_always_was()
+    public void The_shells_own_root_is_the_mount_itself_and_every_address_is_below_it()
     {
-        StudioRouteTable table = new([(typeof(HostIndexPage), "/host", false), (typeof(HostListPage), "/host", false)]);
+        StudioRouteTable table = new([(typeof(FrontPage), "/"), (typeof(ShellActivityPage), "/"), (typeof(ListPage), "/orders")]);
 
-        table.Match(string.Empty)!.PageType.Should().Be<HostIndexPage>();
-        table.Match("orders/list")!.PageType.Should().Be<HostListPage>();
+        table.Match(string.Empty)!.PageType.Should().Be<FrontPage>("the mount is the front page");
+        table.Match("activity")!.PageType.Should().Be<ShellActivityPage>();
+        table.Match("orders/list")!.PageType.Should().Be<ListPage>();
+        table.Match("list").Should().BeNull();
     }
 
     [Fact]
-    public void A_root_keeping_template_outside_its_root_is_refused()
+    public void A_template_outside_its_root_is_refused()
     {
-        Action build = () => _ = new StudioRouteTable([(typeof(OutsidePage), "/orders", true)]);
+        Action build = () => _ = new StudioRouteTable([(typeof(OutsidePage), "/orders")]);
 
         build.Should().Throw<InvalidOperationException>().WithMessage("*not rooted at '/orders'*");
     }
 
     [Fact]
-    public void A_module_route_equal_to_a_host_route_is_refused()
+    public void A_route_two_assemblies_claim_is_refused()
     {
-        // The host's /host/orders/list is orders/list below its root; the module's /orders/list keeps its root and is orders/list too.
-        Action build = () => _ = new StudioRouteTable([(typeof(HostListPage), "/host", false), (typeof(ListPage), "/orders", true)]);
+        Action build = () => _ = new StudioRouteTable([(typeof(OtherOrdersListPage), "/orders"), (typeof(ListPage), "/orders")]);
 
         build.Should().Throw<InvalidOperationException>().WithMessage("*both claim the route '/orders/list'*");
     }
 
     [Fact]
-    public void The_two_tuple_constructor_keeps_no_root()
+    public void A_pre_2_address_is_not_a_page()
     {
+        // A page of the module that owns /orders is at orders/..., never at the bare name a 1.x studio served it at.
         StudioRouteTable table = new([(typeof(ListPage), "/orders")]);
 
-        table.Match("list")!.PageType.Should().Be<ListPage>();
+        table.Match("list").Should().BeNull();
+        table.Match("orders/list")!.PageType.Should().Be<ListPage>();
     }
 }

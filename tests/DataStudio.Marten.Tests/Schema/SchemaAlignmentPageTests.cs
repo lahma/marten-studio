@@ -67,7 +67,7 @@ public class SchemaAlignmentPageTests
         string href = page.Find(".ms-schema-owner a.ms-index-flag").GetAttribute("href") ?? string.Empty;
         // Relative, like every studio link: it resolves against the studio-rooted <base href>, which is
         // what keeps a custom mount path working.
-        href.Should().StartWith("events/streams?").And.Contain("store=default").And.Contain("db=localhost.marten");
+        href.Should().StartWith("marten/events/streams?").And.Contain("store=default").And.Contain("db=localhost.marten");
     }
 
     /// <summary>Another store's table is labelled, and never linked into this store's Documents or Streams.</summary>
@@ -104,7 +104,7 @@ public class SchemaAlignmentPageTests
         links.Should().HaveCount(2);
 
         string first = links[0].GetAttribute("href") ?? string.Empty;
-        first.Should().StartWith("database/object?", "relative, so it resolves against the studio-rooted <base href>");
+        first.Should().StartWith("postgres/database/object?", "relative, so it resolves against the studio-rooted <base href>");
         first.Should().Contain("schema=studio&").And.Contain("name=mt_doc_customer");
         first.Should().Contain("store=default").And.Contain("db=localhost.marten");
 

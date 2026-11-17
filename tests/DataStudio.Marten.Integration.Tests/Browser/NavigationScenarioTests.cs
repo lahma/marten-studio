@@ -72,7 +72,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
 
             // Five to a page, highest id first: the seeder writes 25 customers (the list starts at 25), and the nine whose e-mail
             // contains "customer0" start at 09 and run over two pages, so each state has a first row of its own.
-            await studio.GoAsync(fixture.Root.StudioUrl("documents/customer?size=5"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/documents/customer?size=5"));
             string everyone = await FirstDocumentAsync(page);
 
             await page.Locator("#ms-doc-search-input").FillAsync("Email ~ customer0");
@@ -109,7 +109,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("documents/customer?size=5"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/documents/customer?size=5"));
             string opened = await FirstDocumentAsync(page);
             await page.Locator(".ms-doc-table tbody tr.ms-doc-row a.ms-doc-id").First.ClickAsync();
 
@@ -139,7 +139,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("events/feed"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/feed"));
             ILocator range = page.Locator("#ms-feed-range");
             await range.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await SettledAsync(page);
@@ -164,7 +164,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/streams"));
             await SettledAsync(page);
 
             ILocator type = page.Locator("#ms-streams-type");
@@ -186,7 +186,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("events/dead-letters"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/dead-letters"));
             ILocator projection = page.Locator("#ms-dl-projection");
             await projection.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
@@ -209,7 +209,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // A typed order stream: three events, and an aggregate type to replay them into.
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams/s?id=" + SampleDataSeeder.TypedOrderStreamId(1)));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/streams/s?id=" + SampleDataSeeder.TypedOrderStreamId(1)));
             await page.Locator("#ms-time-travel-type").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await page.Locator("#ms-time-travel-type").SelectOptionAsync(new SelectOptionValue { Index = 1 });
             await studio.WaitForLocationAsync("location.search.includes('agg=')");
@@ -253,7 +253,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("relationships"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/relationships"));
             await page.Locator("svg.ms-graph-svg").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             // The view that is not on: the address changes with it.
@@ -286,7 +286,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("database"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/database"));
             await page.Locator("a.ms-db-name[title='studio_sample.mt_doc_customer']").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             await page.Locator(".ms-db-owner-filter button[aria-pressed='false']").First.ClickAsync();
@@ -321,7 +321,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
 
             // A short viewport, so the Overview scrolls: a move to another page starts at the top.
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, 400);
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
             await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync();
             await page.Locator(".ms-overview-tiles .ms-stat-card").Nth(6).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
@@ -368,7 +368,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl("config"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/config"));
             await page.Locator("a", new PageLocatorOptions { HasTextString = "Database › Connection" }).First.ClickAsync();
 
             await studio.WaitForLocationAsync("location.pathname.endsWith('/database/connection') && location.hash === '#conn-marten'");
@@ -389,7 +389,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             List<string> documents = [];
             void OnRequest(object? sender, IRequest request)
@@ -442,7 +442,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             string missing = fixture.Root.StudioUrl("no-such-page");
             studio.ExpectStatus(missing, 404);
@@ -492,7 +492,7 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             await page.EvaluateAsync("() => { const a = document.createElement('a'); a.id = 'ms-nav-probe'; a.setAttribute('href', '/'); a.textContent = 'probe'; document.body.appendChild(a); }");
             await page.Locator("#ms-nav-probe").ClickAsync();

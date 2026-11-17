@@ -32,6 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
   </ItemGroup>
 

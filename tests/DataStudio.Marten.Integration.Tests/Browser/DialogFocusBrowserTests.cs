@@ -19,7 +19,7 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
 
     /// <summary>The typed order whose stream folds, so the sample's Compact dialog opens with its phrase to type.</summary>
     private static string TypedStream(BrowserSuiteFixture fixture) =>
-        fixture.Root.StudioUrl("events/streams/s?id=" + SampleDataSeeder.TypedOrderStreamId(1));
+        fixture.Root.StudioUrl("marten/events/streams/s?id=" + SampleDataSeeder.TypedOrderStreamId(1));
 
     [BrowserFact]
     public async Task The_Compact_dialog_takes_focus_keeps_Tab_inside_and_gives_focus_back_on_Esc()
@@ -84,7 +84,7 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(1280, 900);
-            await studio.GoAsync(fixture.Root.StudioUrl("projections"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/projections"));
 
             ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
             await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
@@ -122,7 +122,7 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, "shortcut-sheet", fixture.Root, "admin", async studio =>
         {
             IPage page = studio.Page;
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             // Focus a control first, so there is something to give back.
             ILocator link = page.Locator("a.ms-nav-link").First;
@@ -168,7 +168,7 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, "shortcut-sheet-in-field", fixture.Root, "admin", async studio =>
         {
             IPage page = studio.Page;
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
 
             ILocator field = page.Locator("#ms-query-linq-where");
             await field.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });

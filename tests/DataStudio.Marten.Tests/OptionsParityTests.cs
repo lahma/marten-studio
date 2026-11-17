@@ -17,7 +17,6 @@ public class OptionsParityTests
     private static readonly Dictionary<string, string> Renames = new(StringComparer.Ordinal)
     {
         ["SourceAuthorizationPolicy"] = nameof(MartenOptions.StoreAuthorizationPolicy),
-        ["MaxInlineValueBytes"] = nameof(MartenOptions.MaxInlineValueBytes),
     };
 
     /// <summary>The same name and a studio's own type: each studio's capabilities class.</summary>

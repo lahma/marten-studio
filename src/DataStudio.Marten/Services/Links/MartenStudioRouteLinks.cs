@@ -55,14 +55,12 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     private const int MaxStreamKeyLength = 250;
 
     private readonly IOptions<MartenOptions> options;
-    private readonly IShellSettings settings;
     private readonly MartenStoreRegistry registry;
     private readonly IServiceProvider provider;
 
-    public MartenStudioRouteLinks(IOptions<MartenOptions> options, IShellSettings settings, MartenStoreRegistry registry, IServiceProvider provider)
+    public MartenStudioRouteLinks(IOptions<MartenOptions> options, MartenStoreRegistry registry, IServiceProvider provider)
     {
         this.options = options;
-        this.settings = settings;
         this.registry = registry;
         this.provider = provider;
     }
@@ -94,7 +92,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        return DocumentLinks.ToDocument(settings, chosen.StoreKey, tenant, alias, id);
+        return DocumentLinks.ToDocument(chosen.StoreKey, tenant, alias, id);
     }
 
     /// <inheritdoc />
@@ -124,7 +122,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        return EventLinks.ToStream(settings, chosen.StoreKey, tenant, canonicalId);
+        return EventLinks.ToStream(chosen.StoreKey, tenant, canonicalId);
     }
 
     /// <summary>The stores the studio lists, the default first, those that build.</summary>

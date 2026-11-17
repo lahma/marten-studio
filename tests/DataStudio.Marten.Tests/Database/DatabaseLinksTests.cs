@@ -19,7 +19,7 @@ public class DatabaseLinksTests
 
     private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
 
-    private static readonly IStudioLinks Links = new MartenStudioLinks(MartenStudioSettings.Of(Options));
+    private static readonly IStudioLinks Links = new MartenStudioLinks();
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
@@ -35,9 +35,9 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_carries_the_schema_kind_owner_filter_and_scope()
     {
-        string url = DatabaseLinks.ToBrowser(Settings, Descriptor, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
+        string url = DatabaseLinks.ToBrowser(Descriptor, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
 
-        url.Should().StartWith("database?");
+        url.Should().StartWith("postgres/database?");
         url.Should().Contain("schema=quartz").And.Contain("kind=views").And.Contain("owner=other").And.Contain("q=trig");
         url.Should().Contain("store=default").And.Contain("db=localhost.marten").And.Contain("tenant=acme");
     }
@@ -45,20 +45,20 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_leaves_out_what_is_the_default_or_blank()
     {
-        DatabaseLinks.ToBrowser(Settings, Descriptor, null).Should().Be("database");
+        DatabaseLinks.ToBrowser(Descriptor, null).Should().Be("postgres/database");
 
-        string url = DatabaseLinks.ToBrowser(Settings, Descriptor, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
+        string url = DatabaseLinks.ToBrowser(Descriptor, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
 
-        url.Should().Be("database?kind=tables", "owner=all is the default and a blank filter is no filter");
+        url.Should().Be("postgres/database?kind=tables", "owner=all is the default and a blank filter is no filter");
     }
 
     [Theory]
     [MemberData(nameof(OddNames))]
     public void An_object_link_round_trips_any_name(string schema, string name)
     {
-        string url = DatabaseLinks.ToObject(Settings, Descriptor, Scope, schema, name, DatabaseObjectTab.Keys);
+        string url = DatabaseLinks.ToObject(Descriptor, Scope, schema, name, DatabaseObjectTab.Keys);
 
-        url.Should().StartWith("database/object?", "the name travels in the query string, never as a segment");
+        url.Should().StartWith("postgres/database/object?", "the name travels in the query string, never as a segment");
 
         DatabaseRowLink read = DatabaseLinks.ReadRow(url);
         read.Schema.Should().Be(schema);
@@ -80,9 +80,9 @@ public class DatabaseLinksTests
             new("naïve \"col\"", "v=1&w=2 + 3 % # ?"),
         ];
 
-        string url = DatabaseLinks.ToRow(Settings, Descriptor, Scope, schema, name, key);
+        string url = DatabaseLinks.ToRow(Descriptor, Scope, schema, name, key);
 
-        url.Should().StartWith("database/row?");
+        url.Should().StartWith("postgres/database/row?");
 
         DatabaseRowLink read = DatabaseLinks.ReadRow("http://localhost/studio/" + url);
         read.Schema.Should().Be(schema);
@@ -96,20 +96,19 @@ public class DatabaseLinksTests
     public void Each_key_column_is_its_own_readable_parameter()
     {
         string url = DatabaseLinks.ToRow(
-            Settings,
             Descriptor,
             null,
             "quartz",
             "qrtz_triggers",
             [new("sched_name", "QRTZ"), new("trigger_name", "nightly")]);
 
-        url.Should().Be("database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ&key.trigger_name=nightly");
+        url.Should().Be("postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ&key.trigger_name=nightly");
     }
 
     [Fact]
     public void The_key_prefix_is_stripped_exactly_once()
     {
-        string url = DatabaseLinks.ToRow(Settings, Descriptor, null, "s", "t", [new("key.x", "1")]);
+        string url = DatabaseLinks.ToRow(Descriptor, null, "s", "t", [new("key.x", "1")]);
 
         url.Should().Contain("key.key.x=1");
         Pairs(DatabaseLinks.ReadKey(url)).Should().Equal(("key.x", "1"));
@@ -119,7 +118,7 @@ public class DatabaseLinksTests
     public void A_hand_edited_link_keeps_the_first_value_of_a_repeated_key_column_and_ignores_the_rest()
     {
         IReadOnlyList<KeyValuePair<string, string>> key =
-            DatabaseLinks.ReadKey("database/row?schema=s&name=t&key.a=1&key.=x&other=y&key.a=2&key.b=3+4");
+            DatabaseLinks.ReadKey("postgres/database/row?schema=s&name=t&key.a=1&key.=x&other=y&key.a=2&key.b=3+4");
 
         Pairs(key).Should().Equal(("a", "1"), ("b", "3 4"));
     }
@@ -127,7 +126,7 @@ public class DatabaseLinksTests
     [Fact]
     public void A_url_with_no_query_names_nothing()
     {
-        DatabaseRowLink read = DatabaseLinks.ReadRow("database/row");
+        DatabaseRowLink read = DatabaseLinks.ReadRow("postgres/database/row");
 
         read.Schema.Should().BeNull();
         read.Name.Should().BeNull();
@@ -138,7 +137,6 @@ public class DatabaseLinksTests
     public void The_extra_parameters_ride_along_before_the_scope()
     {
         string url = DatabaseLinks.ToObject(
-            Settings,
             Descriptor,
             Scope,
             "quartz",
@@ -147,7 +145,7 @@ public class DatabaseLinksTests
             [new("sort", "next_fire_time"), new("dir", "asc"), new("q", null)]);
 
         url.Should().Be(
-            "database/object?schema=quartz&name=qrtz_triggers&tab=rows&sort=next_fire_time&dir=asc&store=default&db=localhost.marten&tenant=acme");
+            "postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows&sort=next_fire_time&dir=asc&store=default&db=localhost.marten&tenant=acme");
     }
 
     [Theory]
@@ -203,17 +201,17 @@ public class DatabaseLinksTests
         string? href = DatabaseLinks.ToWhereItLives(
             Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "default", "customer"));
 
-        href.Should().StartWith("documents/customer?").And.Contain("store=default").And.Contain("tenant=acme");
+        href.Should().StartWith("marten/documents/customer?").And.Contain("store=default").And.Contain("tenant=acme");
     }
 
     [Fact]
     public void The_event_store_lives_in_streams_and_marten_s_bookkeeping_on_the_schema_screen()
     {
         DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "default"))
-            .Should().StartWith("events/streams?").And.Contain("store=default");
+            .Should().StartWith("marten/events/streams?").And.Contain("store=default");
 
         DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure, "default"))
-            .Should().StartWith("schema?tab=tables&").And.Contain("store=default");
+            .Should().StartWith("marten/schema?tab=tables&").And.Contain("store=default");
     }
 
     [Fact]
@@ -229,9 +227,9 @@ public class DatabaseLinksTests
     [Fact]
     public void The_console_link_fills_the_editor_with_a_quoted_select()
     {
-        string? href = DatabaseLinks.ToQueryConsole(Settings, Descriptor, Scope, "quartz", "qrtz_triggers");
+        string? href = DatabaseLinks.ToQueryConsole(Descriptor, Scope, "quartz", "qrtz_triggers");
 
-        href.Should().StartWith("query?mode=sql&sql=");
+        href.Should().StartWith("postgres/query?mode=sql&sql=");
         Parameter(href!, "sql").Should().Be("select * from \"quartz\".\"qrtz_triggers\" limit 100");
         StudioScopeQuery.Read(href!, MartenStudioDescriptor.SourceQueryParameter).Should().Be(("default", "localhost.marten", "acme"));
     }
@@ -240,7 +238,7 @@ public class DatabaseLinksTests
     public void A_name_that_cannot_be_quoted_gets_no_statement_at_all()
     {
         DataStudio.Postgres.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
-        DatabaseLinks.ToQueryConsole(Settings, Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
+        DatabaseLinks.ToQueryConsole(Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
         DataStudio.Postgres.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
     }
 

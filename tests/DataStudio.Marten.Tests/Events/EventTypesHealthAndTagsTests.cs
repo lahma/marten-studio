@@ -79,7 +79,7 @@ public class EventTypesHealthAndTagsTests
         var banner = page.Find(".ms-event-types-health");
         banner.GetAttribute("role").Should().Be("status");
         banner.TextContent.Should().Contain("E05").And.Contain("Unregistered event types").And.Contain("Because the test says so.");
-        banner.QuerySelector(".ms-health-banner-link")!.GetAttribute("href").Should().Contain("health").And.Contain("#finding-");
+        banner.QuerySelector(".ms-health-banner-link")!.GetAttribute("href").Should().Contain("postgres/health").And.Contain("#finding-");
 
         health.CachedReads.Should().NotBeEmpty().And.OnlyContain(static codes => codes.SequenceEqual(EventTypesHealth.BannerCodes));
         health.ReportRequests.Should().Be(0, "the screen reads the cache, and never asks for the report that sweeps");
@@ -220,7 +220,7 @@ public class EventTypesHealthAndTagsTests
         StudioComponentContext context = new(services => services.AddSingleton(health));
         data?.Invoke(context.EventData);
         await context.ReadyAsync();
-        context.Navigate("studio/events/types");
+        context.Navigate("studio/marten/events/types");
         return context;
     }
 

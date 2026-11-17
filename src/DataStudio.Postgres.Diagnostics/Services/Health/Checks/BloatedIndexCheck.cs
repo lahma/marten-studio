@@ -230,7 +230,7 @@ internal sealed class BloatedIndexCheck : HealthCheck<BloatedIndexFacts>
                 + "(PostgreSQL 13+) and reads smaller than this; one filled in random key order leaves its leaves part-full, which "
                 + "the screen's " + KeyWidthFactor.ToString(CultureInfo.InvariantCulture) + "× allows for.",
             Remedy = evaluation.TableRemedies?.RebuildBloatedIndex(index.Table, index.Row, index.Origin),
-            Link = new HealthLink("Measure it on the Maintenance page", "maintenance"),
+            Link = new HealthLink("Measure it on the Maintenance page", Maintenance.MaintenanceLinks.Route),
         };
     }
 }

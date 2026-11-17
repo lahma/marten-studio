@@ -657,7 +657,7 @@ public class MartenStudioRouteLinksTests
         configure?.Invoke(options);
 
         ServiceProvider provider = services.BuildServiceProvider();
-        return new MartenStudioRouteLinks(Microsoft.Extensions.Options.Options.Create(options), MartenStudioSettings.Of(options), new MartenStoreRegistry(services), provider);
+        return new MartenStudioRouteLinks(Microsoft.Extensions.Options.Options.Create(options), new MartenStoreRegistry(services), provider);
     }
 
     /// <summary>The query string of a studio-relative link, decoded.</summary>

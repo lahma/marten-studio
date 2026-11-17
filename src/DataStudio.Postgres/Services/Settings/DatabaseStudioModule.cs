@@ -7,7 +7,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <summary>
 /// The database as a module of the shell (D34): the Postgres module's pages or the Marten module's, built from the module's own
 /// <see cref="StudioDescriptor" />, <see cref="IStudioSettings" /> and <see cref="StudioCapabilityGuard" />, and registered by
-/// <see cref="StudioCoreRegistration" />. It is the root: its pages sit directly under the mount, and it always exists.
+/// <see cref="StudioCoreRegistration" />. Its pages sit below its own segment under the mount (<c>postgres</c> or <c>marten</c>), like every module's.
 /// </summary>
 /// <remarks>
 /// Pure, like every module: the rail is built once from the descriptor's factory (an entry whose condition needs the studio's settings closes
@@ -43,9 +43,6 @@ internal sealed class DatabaseStudioModule : IStudioModule
     public string ProductName => descriptor.ProductName;
 
     /// <inheritdoc />
-    public bool IsRoot => true;
-
-    /// <inheritdoc />
     public IReadOnlyList<StudioPageAssembly> PageAssemblies => descriptor.PageAssemblies;
 
     /// <inheritdoc />
@@ -64,7 +61,10 @@ internal sealed class DatabaseStudioModule : IStudioModule
     public Type? ScopeGate => typeof(DatabaseScopeGate);
 
     /// <inheritdoc />
-    public string HomeRoute => string.Empty;
+    public string HomeRoute => descriptor.Key;
+
+    /// <inheritdoc />
+    public string Summary => descriptor.Summary;
 
     /// <inheritdoc />
     public string ExposedSentence => "Its pages carry no authorization, so " + descriptor.ExposedContent + " is readable by anyone who can reach this URL.";

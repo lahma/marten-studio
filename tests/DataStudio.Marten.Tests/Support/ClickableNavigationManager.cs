@@ -4,14 +4,14 @@ using Microsoft.AspNetCore.Components.Routing;
 namespace DataStudio.Marten.Tests.Support;
 
 /// <summary>
-/// A navigation manager for a circuit-shaped document: its base is the studio root (<c>http://localhost/studio/</c>), as the rendered
+/// A navigation manager for a circuit-shaped document, which starts on the Marten module's home (<c>marten</c>: a page of a module, so the layout draws that module's scope selector): its base is the studio root (<c>http://localhost/studio/</c>), as the rendered
 /// <c>&lt;base href&gt;</c> makes it on the interactive circuit, so a relative <c>href</c> from a page resolves to an address under the
 /// mount. <see cref="Click" /> is the browser reporting an intercepted link; a studio <c>NavigateTo</c> lands at once and is reported as
 /// not intercepted, the way a page's own push and the shell's replace are.
 /// </summary>
 internal sealed class ClickableNavigationManager : NavigationManager
 {
-    public ClickableNavigationManager(string startAt = "http://localhost/studio/") => Initialize("http://localhost/studio/", startAt);
+    public ClickableNavigationManager(string startAt = "http://localhost/studio/marten") => Initialize("http://localhost/studio/", startAt);
 
     /// <summary>Every <c>NavigateTo</c> the components made, as the absolute address and its options.</summary>
     public List<(string Uri, NavigationOptions Options)> Requests { get; } = [];

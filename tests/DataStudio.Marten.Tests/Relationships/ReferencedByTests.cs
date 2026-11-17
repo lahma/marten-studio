@@ -48,7 +48,7 @@ public class ReferencedByTests
 
         string href = panel.FindAll(".ms-referenced-link")[1].GetAttribute("href") ?? string.Empty;
 
-        href.Should().Be($"documents/order?q=CustomerId%20%3D%20%22{CustomerId}%22",
+        href.Should().Be($"marten/documents/order?q=CustomerId%20%3D%20%22{CustomerId}%22",
             "the filter is written with the .NET member - the name a person reads in the search box; " +
             "FindDuplicated would have resolved the column name just as well");
     }
@@ -61,7 +61,7 @@ public class ReferencedByTests
         var panel = Render(context, new ReferencedBy(
             [new ReferencedByEntry("note", "order_id", null, 120, 2, false, false, true)]));
 
-        panel.Find(".ms-referenced-link").GetAttribute("href").Should().Be("documents/note",
+        panel.Find(".ms-referenced-link").GetAttribute("href").Should().Be("marten/documents/note",
             "no member means no DuplicatedField behind the column, so neither name resolves and a filter " +
             "written with either would answer 'nothing found' about data that is plainly there");
     }
@@ -179,9 +179,8 @@ public class ReferencedByTests
     /// </summary>
     private static string Href(string alias, string? filter) =>
         filter is null
-            ? DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(MartenStudioSettings.Of(new MartenOptions()), null, alias)
+            ? DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(null, alias)
             : DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(
-                MartenStudioSettings.Of(new MartenOptions()),
                 null,
                 alias,
                 new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });

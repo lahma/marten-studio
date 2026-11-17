@@ -46,11 +46,11 @@
 
         <div class="ms-doc-main">
             <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
-                <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Database</a>
+                <a href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope)">Database</a>
                 @if (VisibleSchema is { Length: > 0 } crumb)
                 {
                     <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
-                    <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, crumb, RailCategory)">@crumb</a>
+                    <a href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, crumb, RailCategory)">@crumb</a>
                 }
             </nav>
 
@@ -60,7 +60,7 @@
                     <p class="ms-empty-title">No object asked for</p>
                     <p class="ms-empty-description">
                         This page opens one table or view, named in the query string
-                        (<code>?schema=&amp;name=</code>). Pick one from <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">the database browser</a>.
+                        (<code>?schema=&amp;name=</code>). Pick one from <a href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope)">the database browser</a>.
                     </p>
                 </div>
             }
@@ -84,7 +84,7 @@
                     @foreach (DatabaseObjectTab tab in Tabs)
                     {
                         <a class="@(tab == ActiveTab ? "ms-tab ms-tab-active" : "ms-tab")"
-                           href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name, tab)"
+                           href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, relation.Schema, relation.Name, tab)"
                            aria-current="@(tab == ActiveTab ? "page" : null)"
                            @key="tab">
                             @TabLabel(tab)
@@ -504,7 +504,7 @@
                 </h1>
 
                 <div class="ms-db-object-actions">
-                    @if (mayRunSql && DatabaseLinks.ToQueryConsole(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name) is { } queryHref)
+                    @if (mayRunSql && DatabaseLinks.ToQueryConsole(Descriptor, State.ActiveScope, relation.Schema, relation.Name) is { } queryHref)
                     {
                         <a class="ms-btn ms-btn-sm" href="@queryHref" title="Open the SQL console with a SELECT of this relation written into it">Open in Query</a>
                     }
@@ -660,7 +660,7 @@
                                 <li>
                                     @if (dependency is { Visible: true, Schema: { } schema, Name: { } name })
                                     {
-                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name)">@DatabaseLinks.QualifiedName(schema, name)</a>
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, name)">@DatabaseLinks.QualifiedName(schema, name)</a>
                                         <span class="ms-db-fk-meta">@DatabasePresentation.KindLabel(dependency.Kind)@(dependency.Depth > 1 ? ", through another view" : string.Empty)</span>
                                     }
                                     else
@@ -690,7 +690,7 @@
                 <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
             }
             <p class="ms-empty-description">
-                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Back to the database browser</a>
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope)">Back to the database browser</a>
             </p>
         </div>;
 

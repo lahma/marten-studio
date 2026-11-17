@@ -105,7 +105,7 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
         // paid here, outside any scenario's timeout.
         await using StudioPage studio = await StudioPage.SignInAsync(browser, host, "admin", StudioPage.WarmUpTimeout);
         await studio.Page.GotoAsync(
-            host.StudioUrl(),
+            host.StudioUrl("postgres"),
             new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = (float) StudioPage.WarmUpTimeout.TotalMilliseconds });
     }
 

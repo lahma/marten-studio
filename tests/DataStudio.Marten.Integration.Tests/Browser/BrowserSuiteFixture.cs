@@ -122,7 +122,7 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
     {
         await using StudioPage studio = await StudioPage.SignInAsync(browser, host, "admin", StudioPage.WarmUpTimeout);
         await studio.Page.GotoAsync(
-            host.StudioUrl(),
+            host.StudioUrl("marten"),
             new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = (float) StudioPage.WarmUpTimeout.TotalMilliseconds });
     }
 

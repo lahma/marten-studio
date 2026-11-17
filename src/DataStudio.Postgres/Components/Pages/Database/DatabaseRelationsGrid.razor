@@ -119,7 +119,7 @@
     private bool IsViews => List?.Query.Category == DatabaseObjectCategory.Views;
 
     private string ObjectHref(DatabaseRelationSummary relation) =>
-        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name);
+        DatabaseLinks.ToObject(Descriptor, State.ActiveScope, relation.Schema, relation.Name);
 
     private IEnumerable<DatabaseRelationSummary> Sorted()
     {

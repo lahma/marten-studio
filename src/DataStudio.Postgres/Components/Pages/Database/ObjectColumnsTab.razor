@@ -97,7 +97,7 @@
                                 @if (foreignKey is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
                                 {
                                     <a class="ms-db-fk-link"
-                                       href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)"
+                                       href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, table)"
                                        title="@($"Foreign key {foreignKey.Name}: references {DatabaseLinks.QualifiedName(schema, table)} ({string.Join(", ", foreignKey.LinkedColumns)})")">→ @table</a>
                                 }
                                 else

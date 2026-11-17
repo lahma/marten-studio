@@ -17,7 +17,6 @@
 @inject StudioPreferences Preferences
 @inject IOptions<MartenOptions> Options
 @inject ILogger<EventTypes> Logger
-@inject IStudioSettings Settings
 
 <PageTitle>Event types</PageTitle>
 
@@ -68,7 +67,7 @@
                 <p class="ms-event-types-health-why">@finding.Finding.WhyItMatters</p>
                 <p class="ms-muted ms-health-banner-meta">
                     From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
-                    <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Settings, State.ActiveScope, finding)">Why, and what to change</a>
+                    <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(State.ActiveScope, finding)">Why, and what to change</a>
                 </p>
             </div>
         </section>
@@ -469,10 +468,10 @@
         value is { } sequence ? "#" + sequence.ToString(CultureInfo.InvariantCulture) : "-";
 
     private string FlowHref(string eventType) =>
-        EventLinks.ToFlow(Settings, State.ActiveScope, eventType: eventType);
+        EventLinks.ToFlow(State.ActiveScope, eventType: eventType);
 
     private string FeedHref(string eventType) =>
-        EventLinks.ToFeedForType(Settings, State.ActiveScope, eventType);
+        EventLinks.ToFeedForType(State.ActiveScope, eventType);
 
     private string Signature() =>
         string.Join(

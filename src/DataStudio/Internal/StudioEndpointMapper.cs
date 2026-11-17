@@ -140,12 +140,6 @@ internal static class StudioEndpointMapper
 
         string studioPath = settings.TrimmedPath;
 
-        // A shell whose modules all keep their own segment (every module keeps its own segment) has no page at the mount itself: its front address leads to the
-        // first module's home. A circuit's own navigation to it is handled by the router (StudioRoutes).
-        RouteHandlerBuilder? front = descriptor.Root is null && descriptor.First is { } first
-            ? MapStudioFront(builder, studioPath, first.HomeRoute)
-            : null;
-
         // The pages already carry their compile-time root in their @page directives, so the components root is mapped
         // at the application root and everything it produced is re-rooted below.
         RazorComponentsEndpointConventionBuilder components = builder
@@ -229,7 +223,6 @@ internal static class StudioEndpointMapper
             // FallbackPolicy.
             components.RequireAuthorization(policyName);
             frameworkFiles?.RequireAuthorization(policyName);
-            front?.RequireAuthorization(policyName);
         }
         else
         {
@@ -260,22 +253,8 @@ internal static class StudioEndpointMapper
         components.Add(endpointBuilder =>
             endpointBuilder.Metadata.Add(IsStudioPage(endpointBuilder, descriptor.PageAssemblies) ? pageMarker : circuitMarker));
 
-        front?.WithMetadata(pageMarker);
-
-        return new StudioConventionBuilder(components, front, frameworkFiles);
+        return new StudioConventionBuilder(components, frameworkFiles);
     }
-
-    /// <summary>
-    /// The shell's front address when no module is the root: <c>{mount}</c> answers a temporary redirect to the first module's home, keeping the
-    /// query string (a scope in a pasted link survives). Governed exactly as the pages are: the shell's policy when there is one, else whatever the
-    /// caller says about the mapping.
-    /// </summary>
-    private static RouteHandlerBuilder MapStudioFront(IEndpointRouteBuilder builder, string studioPath, string homeRoute) =>
-        builder.MapGet(
-            studioPath,
-            (HttpContext context) => Results.Redirect(
-                string.Concat(context.Request.PathBase.Value, studioPath, "/", homeRoute, context.Request.QueryString.Value),
-                permanent: false));
 
     /// <summary>
     /// Moves one endpoint of the studio's own <c>MapRazorComponents</c> call under the mount path.
@@ -313,16 +292,17 @@ internal static class StudioEndpointMapper
             return;
         }
 
-        if (RootOf(componentType, pageAssemblies) is not { } assembly || !IsUnder(rawText, assembly.CompileTimeRoot))
+        // The shell's own root is "/", which every one of its pages is below.
+        if (RootOf(componentType, pageAssemblies) is not { } assembly || !IsUnder(rawText, assembly.CompileTimeRoot.TrimEnd('/')))
         {
             return;
         }
 
-        // A module's pages keep their root as a segment under the mount (D34): /orders/list is {mount}/orders/list.
-        routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(
-            assembly.KeepsRoot
-                ? string.Concat(studioPath, rawText)
-                : string.Concat(studioPath, rawText.AsSpan(assembly.CompileTimeRoot.Length)));
+        // Every page's address below the mount is its template, root segment included (v2 step 5): /marten/documents is {mount}/marten/documents,
+        // the shell's /activity is {mount}/activity and its "/" is the mount itself. A module is never a root of the mount.
+        string address = rawText.Length == 1 ? string.Empty : rawText;
+        string pattern = studioPath + address;
+        routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(pattern.Length == 0 ? "/" : pattern);
     }
 
     /// <summary>The page assembly of <paramref name="componentType" />, or <see langword="null" /> when it is not a page assembly.</summary>

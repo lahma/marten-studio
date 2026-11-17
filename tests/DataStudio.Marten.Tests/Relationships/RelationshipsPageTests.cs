@@ -33,7 +33,7 @@ public class RelationshipsPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenSpine.Routes.Match("relationships")
+        MartenSpine.Routes.Match("postgres/relationships")
             .Should().NotBeNull()
             .And.Subject.As<Microsoft.AspNetCore.Components.RouteData>()
             .PageType.Should().Be<RelationshipsPage>();
@@ -121,7 +121,7 @@ public class RelationshipsPageTests
 
         string href = node.GetAttribute("href") ?? string.Empty;
 
-        href.Should().StartWith("documents/order", "the link goes through StudioLink, relative to the studio root");
+        href.Should().StartWith("marten/documents/order", "the link goes through StudioLink, relative to the studio root");
         href.Should().Contain("store=default", "a pasted link has to reopen the same scope (D9)");
     }
 

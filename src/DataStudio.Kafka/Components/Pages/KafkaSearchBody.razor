@@ -15,7 +15,6 @@
 @inject KafkaExportService ExportService
 @inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
-@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaSearchBody> Logger
@@ -611,7 +610,7 @@
     // The confirmation dialog counts: while it waits, nothing else may plan or continue and replace the plan it is about to start.
     private bool busy => planning || running || confirmOpen;
 
-    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+    private string TopicsHref => KafkaAddress.Href(KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     private bool CanSearch => !busy && selected.Count > 0 && windowProblem is null;
 
@@ -1494,7 +1493,6 @@
 
     private string RecordHref(KafkaMatch match) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RecordRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, match.Topic),
@@ -1503,7 +1501,6 @@
 
     private string RelatedHref(KafkaMatch match) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RelatedRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, match.Topic),

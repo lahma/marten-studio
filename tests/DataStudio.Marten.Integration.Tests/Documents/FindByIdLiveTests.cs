@@ -96,7 +96,7 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         both.Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
         both.Hits[0].Title.Should().Be("find_note " + shared);
         both.Hits[0].TenantChip.Should().BeNull();
-        both.Hits[0].Url.Should().Contain("documents/find_note/doc").And.Contain("id=" + shared);
+        both.Hits[0].Url.Should().Contain("marten/documents/find_note/doc").And.Contain("id=" + shared);
         both.Searched.Should().Contain("2 document types", "the phrase counts the visible types, which is what the rail shows");
         both.Searched.Should().Contain("streams");
 
@@ -120,7 +120,7 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         FindResult byHash = await find.FindAsync(Whole, "#1", Token);
         FindHit sequence = byHash.Hits.Should().ContainSingle().Subject;
         sequence.Kind.Should().Be("Event");
-        sequence.Url.Should().Contain("events/streams/s").And.Contain("id=" + shared).And.Contain("v=1").And.NotContain("tenant=");
+        sequence.Url.Should().Contain("marten/events/streams/s").And.Contain("id=" + shared).And.Contain("v=1").And.NotContain("tenant=");
         sequence.TenantChip.Should().BeNull();
         sequence.Scope.Should().Be(onScreen);
         (await find.FindAsync(Whole, "1", Token)).Hits.Select(static x => x.Kind).Should().Contain("Event");

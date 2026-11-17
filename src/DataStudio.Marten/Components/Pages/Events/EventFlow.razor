@@ -409,11 +409,11 @@
 
     private EventFlowHrefs Hrefs() => new(
         FeedHref,
-        EventLinks.To(Settings, EventLinks.FeedRoute, State.ActiveScope, []),
+        EventLinks.To(EventLinks.FeedRoute, State.ActiveScope, []),
         ProjectionHref,
         CollectionHref,
         TableHref,
-        EventLinks.To(Settings, EventLinks.StreamsRoute, State.ActiveScope, []));
+        EventLinks.To(EventLinks.StreamsRoute, State.ActiveScope, []));
 
     private async Task OnProjectionChangedAsync(ChangeEventArgs args) => await ChangeFilterAsync(Blank(args.Value?.ToString()), eventType, includeOwn);
 
@@ -445,9 +445,9 @@
     // ---------------------------------------------------------------------------------------------
 
     private string FlowHref(string? flowProjection, string? flowType, bool own) =>
-        EventLinks.ToFlow(Settings, State.ActiveScope, flowProjection, flowType, own);
+        EventLinks.ToFlow(State.ActiveScope, flowProjection, flowType, own);
 
-    private string FeedHref(string alias) => EventLinks.ToFeedForType(Settings, State.ActiveScope, alias);
+    private string FeedHref(string alias) => EventLinks.ToFeedForType(State.ActiveScope, alias);
 
     /// <summary>
     /// The Projections page, scrolled to one projection's row. A composite's member has no row of its own (its shards are the
@@ -462,14 +462,14 @@
             top = parent;
         }
 
-        return EventLinks.ToProjection(Settings, State.ActiveScope, top);
+        return EventLinks.ToProjection(State.ActiveScope, top);
     }
 
     private string CollectionHref(string alias) => Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 
-    private string TableHref(string schema, string name) => DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name);
+    private string TableHref(string schema, string name) => DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, name);
 
-    private string StreamsHref => EventLinks.To(Settings, EventLinks.StreamsRoute, State.ActiveScope, []);
+    private string StreamsHref => EventLinks.To(EventLinks.StreamsRoute, State.ActiveScope, []);
 
     /// <summary>The by-projection table's order: each top-level source, then - indented - the members of a composite.</summary>
     private static IReadOnlyList<FlowSource> Order(EventFlowModel flow)

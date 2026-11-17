@@ -209,7 +209,7 @@ public class LargeRowsBrowserTests(BrowserSuiteFixture browsers, LargeRowsBrowse
         // No scope in the URL, on purpose: the studio writes it in once the circuit has attached, which is
         // how a measurement below knows the page is live before it presses anything (StudioPage.GoAsync).
         string rowsUrl = host.StudioUrl(
-            "database/object?schema=" + LargeRowsBrowserFixture.Schema + "&name=" + LargeRowsBrowserFixture.Table + "&tab=rows");
+            "postgres/database/object?schema=" + LargeRowsBrowserFixture.Schema + "&name=" + LargeRowsBrowserFixture.Table + "&tab=rows");
 
         await BrowserScenario.RunAsync(browsers.Browser, "large-rows", host, "admin", async studio =>
         {

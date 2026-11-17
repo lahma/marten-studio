@@ -27,7 +27,7 @@ public class StudioLinksTests
 
         PostgresFinding mapped = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance, "store", Scope);
 
-        mapped.StudioPath.Should().Be("health?store=main&db=db1#" + HealthReportFinding.AnchorFor(finding));
+        mapped.StudioPath.Should().Be("postgres/health?store=main&db=db1#" + HealthReportFinding.AnchorFor(finding));
         mapped.StudioPath.Should().Contain("#finding-");
         mapped.StudioLinks.Should().BeEmpty();
     }
@@ -38,12 +38,12 @@ public class StudioLinksTests
         HealthCheckInfo info = Info("T03", HealthArea.Tables);
         HealthFinding finding = Finding(info, "Index is invalid") with
         {
-            Link = new HealthLink("Open the index advisor", "statements", [new KeyValuePair<string, string?>("key", "value")]),
+            Link = new HealthLink("Open the index advisor", "postgres/statements", [new KeyValuePair<string, string?>("key", "value")]),
         };
 
         PostgresFinding mapped = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance, "store", Scope);
 
-        mapped.StudioLinks.Should().Equal(new PostgresPageLink { Label = "Open the index advisor", Path = "statements?key=value&store=main&db=db1" });
+        mapped.StudioLinks.Should().Equal(new PostgresPageLink { Label = "Open the index advisor", Path = "postgres/statements?key=value&store=main&db=db1" });
     }
 
     [Theory]
@@ -57,18 +57,18 @@ public class StudioLinksTests
 
     /// <summary>Every member's exact path: the route its page's own link helper names, the tab's view parameter where it has one, then the scope.</summary>
     [Theory]
-    [InlineData("Health", "health?store=main&db=db1")]
-    [InlineData("Sessions", "database/sessions?store=main&db=db1")]
-    [InlineData("Blocking", "database/sessions?view=blocking&store=main&db=db1")]
-    [InlineData("Statements", "statements?store=main&db=db1")]
-    [InlineData("Maintenance", "maintenance?store=main&db=db1")]
-    [InlineData("Storage", "storage?store=main&db=db1")]
-    [InlineData("Server", "server?store=main&db=db1")]
-    [InlineData("Plan", "plan?store=main&db=db1")]
-    [InlineData("Holders", "database/sessions?view=holders&store=main&db=db1")]
-    [InlineData("Replication", "replication?store=main&db=db1")]
-    [InlineData("Overview", "?store=main&db=db1")]
-    [InlineData("Connection", "database/connection?store=main&db=db1")]
+    [InlineData("Health", "postgres/health?store=main&db=db1")]
+    [InlineData("Sessions", "postgres/database/sessions?store=main&db=db1")]
+    [InlineData("Blocking", "postgres/database/sessions?view=blocking&store=main&db=db1")]
+    [InlineData("Statements", "postgres/statements?store=main&db=db1")]
+    [InlineData("Maintenance", "postgres/maintenance?store=main&db=db1")]
+    [InlineData("Storage", "postgres/storage?store=main&db=db1")]
+    [InlineData("Server", "postgres/server?store=main&db=db1")]
+    [InlineData("Plan", "postgres/plan?store=main&db=db1")]
+    [InlineData("Holders", "postgres/database/sessions?view=holders&store=main&db=db1")]
+    [InlineData("Replication", "postgres/replication?store=main&db=db1")]
+    [InlineData("Overview", "postgres?store=main&db=db1")]
+    [InlineData("Connection", "postgres/database/connection?store=main&db=db1")]
     public void Every_page_has_its_exact_path_and_the_table_names_every_member(string page, string path)
     {
         Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), Enum.Parse<PostgresPage>(page)).Should().Be(path);
@@ -83,11 +83,11 @@ public class StudioLinksTests
     }
 
     [Fact]
-    public void The_overview_is_the_studios_front_page_so_its_path_is_the_query_alone_and_still_carries_the_scope()
+    public void The_overview_is_the_postgres_modules_home_so_its_path_is_the_segment_and_still_carries_the_scope()
     {
         string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresPage.Overview);
 
-        path.Should().StartWith("?").And.Contain("store=main").And.Contain("db=db1");
+        path.Should().StartWith("postgres?").And.Contain("store=main").And.Contain("db=db1");
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class StudioLinksTests
         // Issue #55: the one spelling the page's own link (ConnectionLinks) and the diagnostics API share, so a host's link and a
         // visitor's cannot drift; both studios mount it (Marten Studio's navigation names the same route).
         path.Should().StartWith(DataStudio.Postgres.Services.Connection.ConnectionLinks.Route + "?").And.Contain("store=main").And.Contain("db=db1");
-        PostgresStudioDescriptor.Instance.Navigation(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "database/connection");
+        PostgresStudioDescriptor.Instance.Navigation(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "postgres/database/connection");
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class StudioLinksTests
     [Fact]
     public void A_name_with_a_slash_or_a_space_is_percent_encoded() =>
         Service().GetStudioPath(new PostgresDatabaseRef("a/b c", "d e"), PostgresPage.Health)
-            .Should().Be("health?store=a%2Fb%20c&db=d%20e");
+            .Should().Be("postgres/health?store=a%2Fb%20c&db=d%20e");
 
     [Fact]
     public void An_unknown_page_and_a_null_database_throw()

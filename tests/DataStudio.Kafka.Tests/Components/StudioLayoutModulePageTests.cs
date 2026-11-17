@@ -66,7 +66,7 @@ public class StudioLayoutModulePageTests
     {
         using KafkaStudioHarness harness = Harness();
 
-        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/postgres/health");
 
         layout.FindAll(".ms-header-find").Should().NotBeEmpty();
         layout.FindAll("#ms-cluster-select").Should().BeEmpty();
@@ -117,7 +117,7 @@ public class StudioLayoutModulePageTests
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         harness.Authorization.AllowHost(static _ => false);
 
-        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/postgres/health");
 
         layout.WaitForAssertion(() => layout.Find(".ms-empty-title").TextContent.Should().Be("Not authorized"));
         Heading(layout).Should().NotBe("Activity", "the bypass is keyed on the page's assembly, not global");
@@ -156,11 +156,11 @@ public class StudioLayoutModulePageTests
         StudioScope? before = harness.Context.State.ActiveScope;
         harness.Authorization.HostCalls.Should().BeEmpty("the premise: the host's gate was not asked on the module's page");
 
-        harness.Navigation.Simulate("studio/activity", intercepted: true);
+        harness.Navigation.Simulate("studio/postgres/health", intercepted: true);
 
         layout.WaitForAssertion(() => harness.Context.CurrentUri.Should().Contain("store=default"));
         harness.Context.State.ActiveScope.Should().Be(before, "the host's scope waited in memory");
-        layout.WaitForAssertion(() => Heading(layout).Should().Be("Activity"));
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Health"));
         harness.Authorization.HostCalls.Should().NotBeEmpty("the host's scope gate is asked again on the way back");
     }
 
@@ -168,7 +168,7 @@ public class StudioLayoutModulePageTests
     public async Task A_click_from_a_host_page_to_a_kafka_page_does_not_move_the_host_scope()
     {
         using KafkaStudioHarness harness = Harness();
-        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/postgres/health");
         StudioScope? before = harness.Context.State.ActiveScope;
 
         harness.Navigation.Simulate("studio/kafka?store=elsewhere&tenant=t", intercepted: true);

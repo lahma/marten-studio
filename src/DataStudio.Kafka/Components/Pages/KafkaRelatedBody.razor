@@ -9,7 +9,6 @@
 @inject KafkaSearchService Search
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
-@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaRelatedBody> Logger
@@ -419,7 +418,7 @@
 
     private bool CanSearch => !busy && selected.Count > 0 && windowProblem is null && lanes.Any(static x => x.IsScanned);
 
-    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+    private string TopicsHref => KafkaAddress.Href(KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     protected override async Task OnInitializedAsync()
     {
@@ -1069,7 +1068,6 @@
 
     private string RecordHref(KafkaMatch match) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RecordRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, match.Topic),
@@ -1077,7 +1075,7 @@
             (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
 
     private string TopicHref(string topic) =>
-        KafkaAddress.Href(Settings, KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+        KafkaAddress.Href(KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
 
     private static string TimeTitle(KafkaMatch match) =>
         match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture) + " (" + match.TimestampType + ")";

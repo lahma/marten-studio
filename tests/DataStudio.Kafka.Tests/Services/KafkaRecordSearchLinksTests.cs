@@ -9,8 +9,6 @@ using DataStudio.Marten.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Kafka.Tests.Services;
 
 /// <summary>
@@ -37,7 +35,7 @@ public class KafkaRecordSearchLinksTests
         }));
 
     private static KafkaRecordSearchLinks Links(KafkaSearchRig rig) =>
-        new(rig.Engine.Provider, rig.Studio.Context.Services.GetRequiredService<IStudioSettings>());
+        new(rig.Engine.Provider);
 
     [Fact]
     public async Task The_label_is_the_modules()
@@ -198,7 +196,7 @@ public class KafkaRecordSearchLinksTests
         await using ServiceProvider provider = services.BuildServiceProvider();
         await using KafkaSearchRig rig = Rig();
 
-        KafkaRecordSearchLinks links = new(provider, rig.Studio.Context.Services.GetRequiredService<IStudioSettings>());
+        KafkaRecordSearchLinks links = new(provider);
 
         links.ToSearch(Document()).Should().BeNull();
         links.ToSearch(Document()).Should().BeNull();

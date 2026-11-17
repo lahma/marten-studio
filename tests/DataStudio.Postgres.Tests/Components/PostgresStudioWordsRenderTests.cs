@@ -56,7 +56,7 @@ public class PostgresStudioWordsRenderTests
     public async Task The_database_page_points_a_Marten_stores_objects_at_Marten_Studio_and_names_no_MartenStudio_option()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("studio/database");
+        context.Navigate("studio/postgres/database");
 
         var page = context.Render<DatabaseObjects>();
 
@@ -108,7 +108,7 @@ public class PostgresStudioWordsRenderTests
 
     private static string RenderDatabase(PostgresStudioComponentContext context)
     {
-        context.Navigate("studio/database");
+        context.Navigate("studio/postgres/database");
         return Rendered(context.Render<DatabaseObjects>(), ".ms-db-kind-tabs");
     }
 

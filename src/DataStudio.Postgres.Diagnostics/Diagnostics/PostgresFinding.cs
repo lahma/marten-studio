@@ -78,7 +78,7 @@ public sealed record PostgresFinding
 
     /// <summary>
     /// The finding's card on the studio's Health page, for this database, relative to the studio's mount path with no
-    /// leading slash (<see cref="PostgresPageLink" />). Empty for a finding built outside the studio.
+    /// leading slash, starting with <c>postgres/</c> (<see cref="PostgresPageLink" />). Empty for a finding built outside the studio.
     /// </summary>
     public string StudioPath { get; init; } = "";
 

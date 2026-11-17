@@ -24,7 +24,7 @@ public class StreamsPageTests
         IRenderedComponent<Streams> page = context.Render<Streams>();
 
         page.Find("tbody tr a").GetAttribute("href").Should()
-            .StartWith("events/streams/s?id=" + StreamId);
+            .StartWith("marten/events/streams/s?id=" + StreamId);
         page.TextOfAll(".ms-event-chip").Should().Contain("Order");
         page.Find("tbody tr td:nth-of-type(3)").TextContent.Trim().Should().Be("3");
     }
@@ -82,7 +82,7 @@ public class StreamsPageTests
         IElement row = page.Find("tbody tr.ms-table-row");
 
         row.QuerySelectorAll("a").Should().ContainSingle()
-            .Which.GetAttribute("href").Should().StartWith("events/streams/s?id=");
+            .Which.GetAttribute("href").Should().StartWith("marten/events/streams/s?id=");
         row.TextContent.Should().NotContain("Open in feed");
 
         IElement copy = row.QuerySelectorAll("button").Should().ContainSingle().Subject;
@@ -216,7 +216,7 @@ public class StreamsPageTests
     public async Task The_recently_active_ordering_is_asked_for_by_the_url()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("studio/events/streams?order=recent&archived=1");
+        context.Navigate("studio/marten/events/streams?order=recent&archived=1");
 
         context.Render<Streams>();
 

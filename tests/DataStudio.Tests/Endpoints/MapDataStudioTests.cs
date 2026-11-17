@@ -4,7 +4,6 @@ using DataStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,8 +12,8 @@ namespace DataStudio.Tests.Endpoints;
 
 /// <summary>
 /// <c>MapDataStudio()</c> and the shell's startup guard (v2 step 4), on real endpoint metadata with no server: the mount, the pattern that wins over it,
-/// the refusals, the guard's words with one module and with two, and a host whose only module keeps its own segment (decision 8) - which has no page
-/// at the mount, leads its front address to the module and holds Activity on a rail of the shell's own.
+/// the refusals, the guard's words with one module and with two, and a host whose only module is Kafka (v2 step 5) - which has the shell's front page at
+/// the mount, whose page sends the visitor to the module, and holds Activity on a rail of the shell's own.
 /// </summary>
 public class MapDataStudioTests
 {
@@ -26,8 +25,6 @@ public class MapDataStudioTests
         public string Key => "other";
 
         public string ProductName => "Other";
-
-        public bool IsRoot => false;
 
         public IReadOnlyList<StudioPageAssembly> PageAssemblies => [];
 
@@ -42,6 +39,8 @@ public class MapDataStudioTests
         public Type? ScopeGate => null;
 
         public string HomeRoute => "other";
+
+        public string Summary => "Other things.";
 
         public string ExposedSentence => "Its pages show the other thing.";
 
@@ -104,9 +103,9 @@ public class MapDataStudioTests
 
         IEnumerable<string?> patterns = Patterns(app);
 
-        patterns.Should().Contain("/studio/kafka").And.Contain("/studio/activity");
+        patterns.Should().Contain("/studio").And.Contain("/studio/kafka").And.Contain("/studio/activity");
         patterns.Should().Contain("/studio/_blazor/negotiate").And.Contain("/studio/_framework/blazor.web.js").And.Contain("/studio/_content/DataStudio/{**path}");
-        patterns.Where(static x => x is not null && x.StartsWith("/postgres", StringComparison.Ordinal)).Should().BeEmpty("no module here is the root, and the shell's page root is stripped");
+        patterns.Where(static x => x is not null && x.StartsWith("/postgres", StringComparison.Ordinal)).Should().BeEmpty("no page is served at its compile-time root: every address is below the mount");
     }
 
     [Fact]
@@ -229,37 +228,22 @@ public class MapDataStudioTests
     // -------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task A_kafka_only_host_has_no_root_and_no_page_at_the_mount()
+    public async Task A_kafka_only_host_has_the_one_module_and_the_shells_front_page_at_the_mount()
     {
         await using WebApplication app = CreateApp();
         app.MapDataStudio().AllowAnonymous();
         StudioShellDescriptor descriptor = app.Services.GetRequiredService<StudioShellDescriptor>();
 
-        descriptor.Root.Should().BeNull();
-        descriptor.First!.Key.Should().Be("kafka");
-        descriptor.PageAssemblies.Select(static x => x.Assembly).Should().Contain(typeof(StudioShellDescriptor).Assembly, "the shell's own page is there whatever the modules are");
+        descriptor.Modules.Should().ContainSingle().Which.Key.Should().Be("kafka");
+        descriptor.PageAssemblies.Select(static x => x.Assembly).Should().Contain(typeof(StudioShellDescriptor).Assembly, "the shell's own pages are there whatever the modules are");
         RouteEndpoints(app).Where(static x => x.RoutePattern.RawText == "/studio").Should().ContainSingle()
-            .Which.Metadata.OfType<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>().Should().BeEmpty("the one endpoint at the mount is the redirect, not a page");
+            .Which.Metadata.OfType<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>().Should().ContainSingle()
+            .Which.Type.FullName.Should().Be("DataStudio.Components.Pages.Front", "the one endpoint at the mount is a page of the shell, which sends the visitor to the one module");
+        descriptor.Routes.Match("")!.PageType.FullName.Should().Be("DataStudio.Components.Pages.Front");
     }
 
     [Fact]
-    public async Task The_front_address_of_a_kafka_only_host_redirects_to_the_modules_home_keeping_the_query()
-    {
-        await using WebApplication app = CreateApp();
-        app.MapDataStudio().AllowAnonymous();
-        RouteEndpoint front = RouteEndpoints(app).Single(static x => x.RoutePattern.RawText == "/studio");
-
-        DefaultHttpContext context = new() { RequestServices = app.Services };
-        context.Request.PathBase = "/app";
-        context.Request.QueryString = new QueryString("?cluster=primary");
-        await front.RequestDelegate!(context);
-
-        context.Response.StatusCode.Should().Be(StatusCodes.Status302Found, "a redirect that can change, never a permanent one");
-        context.Response.Headers.Location.ToString().Should().Be("/app/studio/kafka?cluster=primary");
-    }
-
-    [Fact]
-    public async Task The_front_redirect_is_governed_like_every_page()
+    public async Task The_front_page_is_governed_like_every_page()
     {
         await using WebApplication governed = CreateApp(
             static shell => shell.AuthorizationPolicy = "ops",
@@ -292,12 +276,12 @@ public class MapDataStudioTests
     }
 
     [Fact]
-    public async Task A_module_that_holds_Activity_itself_leaves_the_shell_no_section()
+    public async Task A_module_with_an_Activity_entry_of_its_own_leaves_the_shells_section_in_place()
     {
         await using WebApplication app = CreateApp(configureServices: static services => services.AddSingleton<IStudioModule, ActivityModule>());
         StudioShellDescriptor descriptor = app.Services.GetRequiredService<StudioShellDescriptor>();
 
-        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Mine");
+        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Mine", "System");
     }
 
     private sealed class ActivityModule : IStudioModule
@@ -306,11 +290,9 @@ public class MapDataStudioTests
 
         public string ProductName => "Mine";
 
-        public bool IsRoot => false;
-
         public IReadOnlyList<StudioPageAssembly> PageAssemblies => [];
 
-        public IReadOnlyList<StudioNavSection> Navigation => [new StudioNavSection("Mine", [new StudioNavItem("Activity of mine", "activity", "list")])];
+        public IReadOnlyList<StudioNavSection> Navigation => [new StudioNavSection("Mine", [new StudioNavItem("Activity of mine", "mine/activity", "list")])];
 
         public Type? ScopeSelector => null;
 
@@ -321,6 +303,8 @@ public class MapDataStudioTests
         public Type? ScopeGate => null;
 
         public string HomeRoute => "mine";
+
+        public string Summary => "Mine.";
 
         public string ExposedSentence => "Mine.";
 

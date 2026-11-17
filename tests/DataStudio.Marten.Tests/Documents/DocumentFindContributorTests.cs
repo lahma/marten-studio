@@ -1,4 +1,3 @@
-using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Find;
 using DataStudio.Marten.Tests.Support;
@@ -19,7 +18,7 @@ public class DocumentFindContributorTests
     private static readonly StudioScope Matched = new("default", "primary", null);
 
     private static DocumentFindContributor Contributor(FakeDocumentDataService documents, FakeFindScopes? scopes = null) =>
-        new(documents, scopes ?? new FakeFindScopes(FakeFindScopes.Context(Matched)), MartenStudioSettings.Of(new MartenOptions()));
+        new(documents, scopes ?? new FakeFindScopes(FakeFindScopes.Context(Matched)));
 
     private static DocumentFindHit Hit(string alias, string id, params DocumentFindRow[] rows) =>
         new(alias, 120, id, rows, 0, false);
@@ -34,7 +33,7 @@ public class DocumentFindContributorTests
         FindHit hit = found.Hits.Should().ContainSingle().Subject;
         hit.Kind.Should().Be("Document");
         hit.Title.Should().Be("customer c-1");
-        hit.Url.Should().Contain("documents/customer/doc").And.Contain("id=c-1").And.Contain("db=primary");
+        hit.Url.Should().Contain("marten/documents/customer/doc").And.Contain("id=c-1").And.Contain("db=primary");
         hit.Scope.Should().Be(Matched);
         hit.TenantChip.Should().BeNull();
         hit.Mark.Should().BeNull();

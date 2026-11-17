@@ -22,12 +22,12 @@ namespace DataStudio.Marten.Tests.Database;
 public class RowDetailPageTests
 {
     private const string TriggerRow =
-        "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
+        "studio/postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
 
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenSpine.Routes.Match("database/row")!.PageType.Should().Be<DetailPage>();
+        MartenSpine.Routes.Match("postgres/database/row")!.PageType.Should().Be<DetailPage>();
     }
 
     [Fact]
@@ -72,8 +72,7 @@ public class RowDetailPageTests
 
         row = page.FindAll(".ms-row-kv-row")[calendar];
         row.QuerySelector(".ms-row-value-text")!.TextContent.Should().HaveLength(600);
-        // MartenStudio's own spelling, unchanged since the option became a settings member (PS-3a); PostgresStudio's
-        // sentence names PostgresOptions.MaxInlineValueBytes instead.
+        // The sentence names the option of the module that is mounted: a Postgres host's names PostgresOptions.MaxInlineValueBytes instead.
         row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(MartenOptions.MaxInlineValueBytes)");
     }
 
@@ -85,7 +84,7 @@ public class RowDetailPageTests
         var page = Render(context, TriggerRow);
 
         string group = FilterHref(page, "trigger_group")!;
-        group.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        group.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
         Query(group, "q").Should().Be("trigger_group = DEFAULT");
         Query(group, "store").Should().Be("default");
 
@@ -123,14 +122,14 @@ public class RowDetailPageTests
         outbound.Should().HaveCount(4);
 
         string parent = outbound[0].QuerySelector("a.ms-row-ref-key")!.GetAttribute("href")!;
-        parent.Should().StartWith("database/row?schema=quartz&name=qrtz_job_details&key.sched_name=QuartzScheduler&key.job_name=job-0&key.job_group=DEFAULT");
+        parent.Should().StartWith("postgres/database/row?schema=quartz&name=qrtz_job_details&key.sched_name=QuartzScheduler&key.job_name=job-0&key.job_group=DEFAULT");
         outbound[0].QuerySelector(".ms-graph-table-chip")!.TextContent.Should().Contain("qrtz_job_details");
 
         outbound[1].QuerySelector(".ms-badge-warning")!.TextContent.Should().Be("missing");
         outbound[1].QuerySelector(".ms-related-missing")!.TextContent.Should().Be("(QuartzScheduler, job-0, DEFAULT)");
 
         outbound[2].QuerySelector("a.ms-row-ref-key")!.GetAttribute("href")
-            .Should().StartWith("documents/customer/doc?").And.Contain("id=6f9619ff-8b86-d011-b42d-00cf4fc964ff").And.Contain("store=default");
+            .Should().StartWith("marten/documents/customer/doc?").And.Contain("id=6f9619ff-8b86-d011-b42d-00cf4fc964ff").And.Contain("store=default");
 
         outbound[3].TextContent.Should().Contain("a table you cannot see");
         outbound[3].QuerySelector("a").Should().BeNull();
@@ -152,7 +151,7 @@ public class RowDetailPageTests
 
         inbound[1].QuerySelector(".ms-referenced-count")!.TextContent.Should().Be("1,000+");
         string href = inbound[1].QuerySelector("a.ms-row-ref-link")!.GetAttribute("href")!;
-        href.Should().StartWith("database/object?schema=quartz&name=qrtz_fired_triggers&tab=rows");
+        href.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_fired_triggers&tab=rows");
         Query(href, "q").Should().Be("sched_name = QuartzScheduler trigger_name = trigger-00 trigger_group = DEFAULT");
         inbound[1].QuerySelector(".ms-referenced-ondelete")!.TextContent.Should().Be("on delete no action");
     }
@@ -194,18 +193,18 @@ public class RowDetailPageTests
             FakeTableRows.Schema,
             FakeTableRows.Table,
             [.. Enumerable.Range(0, 3).Select(static x => Ordered(FakeTableRows.KeyOf(x)))],
-            "database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+            "postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
 
-        const string from = "&from=database%2Fobject%3Fschema%3Dquartz%26name%3Dqrtz_triggers%26tab%3Drows";
+        const string from = "&from=postgres%2Fdatabase%2Fobject%3Fschema%3Dquartz%26name%3Dqrtz_triggers%26tab%3Drows";
         var page = Render(context,
-            "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-01&key.trigger_group=reports" + from);
+            "studio/postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-01&key.trigger_group=reports" + from);
 
         IReadOnlyList<IElement> arrows = page.FindAll(".ms-row-detail-actions .ms-doc-detail-nav a");
         arrows[0].GetAttribute("href").Should().Contain("key.trigger_name=trigger-00").And.Contain("from=");
         arrows[1].GetAttribute("href").Should().Contain("key.trigger_name=trigger-02");
 
         page.FindAll(".ms-row-detail-actions a").Single(static x => x.TextContent == "Back to the rows")
-            .GetAttribute("href").Should().Be("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+            .GetAttribute("href").Should().Be("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
     }
 
     [Fact]
@@ -216,7 +215,7 @@ public class RowDetailPageTests
         var page = Render(context, TriggerRow + "&from=javascript%3Aalert(1)");
 
         string back = page.FindAll(".ms-row-detail-actions a").Single(static x => x.TextContent == "Back to the rows").GetAttribute("href")!;
-        back.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        back.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
         page.Markup.Should().NotContain("javascript:");
     }
 
@@ -277,7 +276,7 @@ public class RowDetailPageTests
     {
         await using var context = await RowUiData.ContextAsync();
 
-        var page = Render(context, "studio/database/row?schema=legacy&name=audit_log");
+        var page = Render(context, "studio/postgres/database/row?schema=legacy&name=audit_log");
 
         page.Find(".ms-row-keyless .ms-empty-description").TextContent
             .Should().Be("This table has no key, so a row cannot be linked; expand it in the grid.");
@@ -287,10 +286,10 @@ public class RowDetailPageTests
             DatabaseRefusal.NotApplicable,
             "legacy.audit_log has no key, so a row of it cannot be opened on its own; its rows are shown inline.");
 
-        page = Render(context, "studio/database/row?schema=legacy&name=audit_log&key.id=7");
+        page = Render(context, "studio/postgres/database/row?schema=legacy&name=audit_log&key.id=7");
 
         page.Find(".ms-row-keyless").TextContent.Should().Contain("its rows are shown inline");
-        page.Find(".ms-row-keyless a").GetAttribute("href").Should().StartWith("database/object?schema=legacy&name=audit_log&tab=rows");
+        page.Find(".ms-row-keyless a").GetAttribute("href").Should().StartWith("postgres/database/object?schema=legacy&name=audit_log&tab=rows");
     }
 
     [Fact]

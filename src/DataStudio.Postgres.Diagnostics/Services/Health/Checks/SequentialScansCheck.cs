@@ -227,7 +227,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             Link = declared is { Kind: StudioTableKind.DocumentTable, Alias: { } alias }
                 ? new HealthLink(
                     "Open the index advisor in Query",
-                    "query",
+                    PostgresRoutes.Page("query"),
                     [new KeyValuePair<string, string?>("mode", "marten"), new KeyValuePair<string, string?>("type", alias)])
                 : null,
         };

@@ -88,7 +88,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
             {
                 await TurnOnAsync(studio.Page, fixture.Root, BloatedTable);
 
-                await studio.GoAsync(fixture.Root.StudioUrl("health"));
+                await studio.GoAsync(fixture.Root.StudioUrl("postgres/health"));
 
                 ILocator t07 = studio.Page.Locator(Visible("t07"));
                 await UntilShownAsync(t07, HealthRefresh(studio.Page), NextSweep, "T07 after the bloated-table switch was turned on");
@@ -129,7 +129,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 (await recorded.JsonValueAsync<string>()).Should().Contain("see the Health page", "the toast says where to look");
 
                 // A new circuit: the mute is still there, read back from localStorage.
-                await studio.GoAsync(fixture.Root.StudioUrl("health"));
+                await studio.GoAsync(fixture.Root.StudioUrl("postgres/health"));
                 await studio.Page.Locator(".ms-health-muted > summary").WaitForAsync();
                 (await studio.Page.Locator(Muted("t07")).CountAsync()).Should().Be(1, "T07 is still muted after a reload");
                 (await studio.Page.Locator(Visible("t07")).CountAsync()).Should().Be(0);
@@ -188,7 +188,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 await TurnOnAsync(admin.Page, host, PinnedGap);
 
                 // Database › Sessions as admin: the summary, and the details that name the session.
-                await admin.GoAsync(host.StudioUrl("database/sessions"));
+                await admin.GoAsync(host.StudioUrl("postgres/database/sessions"));
                 await admin.Page.Locator(".ms-sessions-stats").WaitForAsync();
 
                 ILocator named = admin.Page.Locator(".ms-sessions-table td", new PageLocatorOptions { HasTextString = IdleSessionName });
@@ -200,7 +200,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
 
                 await BrowserScenario.RunAsync(fixture.Browser, "health-sessions-viewer", host, "viewer", async viewer =>
                 {
-                    await viewer.GoAsync(host.StudioUrl("database/sessions"));
+                    await viewer.GoAsync(host.StudioUrl("postgres/database/sessions"));
                     await viewer.Page.Locator(".ms-sessions-stats").WaitForAsync();
 
                     ILocator idle = viewer.Page.Locator(".ms-sessions-table td", new PageLocatorOptions { HasTextString = "idle in transaction" });
@@ -216,7 +216,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 });
 
                 // C04 and D01, once their minute has passed - the two minutes run side by side.
-                await admin.GoAsync(host.StudioUrl("health"));
+                await admin.GoAsync(host.StudioUrl("postgres/health"));
 
                 ILocator c04 = admin.Page.Locator(Visible("c04"));
                 ILocator d01 = admin.Page.Locator(Visible("d01"));
@@ -226,7 +226,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 (await c04.InnerTextAsync()).Should().Contain(IdleSessionName, "admin passes the activity gate, so C04 names the session");
 
                 // The Projections screen draws D01 from the same sweep, without starting one.
-                await admin.GoAsync(host.StudioUrl("projections"));
+                await admin.GoAsync(host.StudioUrl("marten/projections"));
                 ILocator banner = admin.Page.Locator("section.ms-health-banner-d01");
                 await banner.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
                 (await banner.InnerTextAsync()).Should().Contain("D01");
@@ -234,7 +234,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
 
                 await BrowserScenario.RunAsync(fixture.Browser, "health-withheld-viewer", host, "viewer", async viewer =>
                 {
-                    await viewer.GoAsync(host.StudioUrl("health"));
+                    await viewer.GoAsync(host.StudioUrl("postgres/health"));
 
                     ILocator withheld = viewer.Page.Locator(Visible("c04"));
                     await UntilShownAsync(withheld, HealthRefresh(viewer.Page), NextSweep, "C04 on viewer's Health page");
@@ -302,13 +302,13 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
 
         await BrowserScenario.RunAsync(fixture.Browser, "health-d02-banner", host, "admin", async studio =>
         {
-            await studio.GoAsync(host.StudioUrl("health"));
+            await studio.GoAsync(host.StudioUrl("postgres/health"));
 
             ILocator d02 = studio.Page.Locator(Visible("d02"));
             await UntilShownAsync(d02, HealthRefresh(studio.Page), NextSweep, "D02 on a host that runs no daemon");
             (await d02.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Critical");
 
-            await studio.GoAsync(host.StudioUrl("projections"));
+            await studio.GoAsync(host.StudioUrl("marten/projections"));
             ILocator banner = studio.Page.Locator("section.ms-health-banner-d02");
             await banner.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await banner.GetAttributeAsync("class")).Should().Contain("ms-alert-error", "D02 is Critical");

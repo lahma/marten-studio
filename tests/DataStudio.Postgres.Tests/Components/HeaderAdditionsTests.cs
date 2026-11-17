@@ -70,7 +70,7 @@ public class HeaderAdditionsTests
     public void Copy_link_puts_the_address_with_its_scope_on_the_clipboard()
     {
         using PostgresStudioComponentContext context = Context();
-        context.Navigate("database?store=default&db=default");
+        context.Navigate("postgres/database?store=default&db=default");
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
 
         IRenderedComponent<CopyLinkButton> button = context.Render<CopyLinkButton>();

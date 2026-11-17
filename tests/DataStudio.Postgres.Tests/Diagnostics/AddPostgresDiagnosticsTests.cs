@@ -49,7 +49,7 @@ public class AddPostgresDiagnosticsTests
 
         // The studio's paths are relative, as they always were, and meaningless where no UI is mounted.
         diagnostics.GetStudioPath(new PostgresDatabaseRef("default", "app"), PostgresPage.Health)
-            .Should().Be("health?store=default&db=app");
+            .Should().Be("postgres/health?store=default&db=app");
     }
 
     [Fact]

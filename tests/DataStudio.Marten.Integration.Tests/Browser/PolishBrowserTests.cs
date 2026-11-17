@@ -30,7 +30,7 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, name, fixture.Root, "admin", async studio =>
         {
             await studio.Page.SetViewportSizeAsync(1280, 800);
-            await studio.GoAsync(fixture.Root.StudioUrl("maintenance"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/maintenance"));
             await studio.Page.Locator(".ms-maint-table").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             if (widerMetrics)
@@ -63,21 +63,21 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
             await studio.Page.SetViewportSizeAsync(1280, 800);
 
             await studio.GoAsync(fixture.Root.StudioUrl(
-                "query?mode=linq&target=events&predicate=" + Uri.EscapeDataString("Version > 0") + "&orderby=" + Uri.EscapeDataString("NoSuchMember desc")));
+                "postgres/query?mode=linq&target=events&predicate=" + Uri.EscapeDataString("Version > 0") + "&orderby=" + Uri.EscapeDataString("NoSuchMember desc")));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await studio.Page.Locator(".ms-query-run").ClickAsync();
             ILocator order = studio.Page.Locator(".ms-query-linq-order-error .ms-query-caret");
             await order.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await order.BoundingBoxAsync())!.Width.Should().BeGreaterThanOrEqualTo(ExcerptFloor, "the Order-by's excerpt is not squeezed by its message");
 
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events&predicate=" + Uri.EscapeDataString("NoSuchMember > 0")));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events&predicate=" + Uri.EscapeDataString("NoSuchMember > 0")));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await studio.Page.Locator(".ms-query-run").ClickAsync();
             ILocator predicate = studio.Page.Locator(".ms-query-editor-status .ms-query-caret");
             await predicate.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await predicate.BoundingBoxAsync())!.Width.Should().BeGreaterThanOrEqualTo(ExcerptFloor, "the predicate's excerpt is not squeezed by its message");
 
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=sql&sql=" + Uri.EscapeDataString("select * from nosuchtable_xyz where a = 1")));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=sql&sql=" + Uri.EscapeDataString("select * from nosuchtable_xyz where a = 1")));
             await studio.Page.Locator(".ms-query-run").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await studio.Page.Locator(".ms-query-run").First.ClickAsync();
             ILocator console = studio.Page.Locator(".ms-query-error .ms-query-caret");
@@ -98,7 +98,7 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
         await BrowserScenario.RunAsync(fixture.Browser, "polish-linq-recent", fixture.Root, "admin", async studio =>
         {
             await studio.Page.SetViewportSizeAsync(1280, 800);
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
@@ -110,7 +110,7 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
             (await recent.First.TextContentAsync())!.Trim().Should().Be("Version > 0");
 
             // A reload: the list is read back from the browser, and picking the entry fills both boxes.
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await recent.First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await recent.First.ClickAsync();
@@ -131,7 +131,7 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
             otherKeys.Should().BeEmpty("a LINQ entry is under no other mode's key");
 
             // And the SQL console's drawer, once it has read its own list, does not show it.
-            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=sql"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=sql"));
             await studio.Page.Locator(".ms-query-drawer").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await studio.Page.WaitForFunctionAsync(
                 "() => document.querySelector('.ms-query-drawer-recent') === null || document.querySelector('.ms-query-drawer-recent .ms-query-drawer-pick') === null",

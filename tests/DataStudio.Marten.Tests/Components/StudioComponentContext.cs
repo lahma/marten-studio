@@ -318,6 +318,28 @@ internal class StudioComponentContext : BunitContext
         return this;
     }
 
+    /// <summary>
+    /// Renders a component. The shell's own chrome (the layout, the rail, the header's scope and search) is rendered on the Marten module's home when the
+    /// test put the browser nowhere: that is a page of a module, which is where the layout draws the module's scope selector and search, and a page of no module
+    /// (the document root, where bUnit's navigation manager starts) draws neither. A test that navigated goes where it said.
+    /// </summary>
+    public new IRenderedComponent<TComponent> Render<TComponent>(Action<ComponentParameterCollectionBuilder<TComponent>>? parameterBuilder = null)
+        where TComponent : IComponent
+    {
+        if (typeof(TComponent) == typeof(DataStudio.Components.Layout.StudioLayout)
+            || typeof(TComponent) == typeof(DataStudio.Components.Layout.NavMenu)
+            || typeof(TComponent) == typeof(DataStudio.Postgres.Components.Layout.ScopeSelector))
+        {
+            NavigationManager navigation = Services.GetRequiredService<NavigationManager>();
+            if (string.Equals(navigation.Uri, navigation.BaseUri, StringComparison.Ordinal))
+            {
+                navigation.NavigateTo("studio/marten");
+            }
+        }
+
+        return base.Render(parameterBuilder);
+    }
+
     /// <summary>Puts the browser on <paramref name="relativeUri" /> before a page is rendered.</summary>
     public StudioComponentContext Navigate(string relativeUri)
     {

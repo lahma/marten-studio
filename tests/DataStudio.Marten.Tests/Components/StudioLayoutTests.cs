@@ -121,10 +121,11 @@ public class StudioLayoutTests
 
         var credit = layout.Find(".ms-rail-credit");
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
-        lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
+        lines.Should().HaveCount(4, "the shell and its version, each module composed into it, the licence and the author, a line each");
         lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
-        lines[1].Should().Be("MIT licensed");
-        lines[2].Should().Be("by Marko Lahma");
+        lines[1].Should().Be("Marten Studio");
+        lines[2].Should().Be("MIT licensed");
+        lines[3].Should().Be("by Marko Lahma");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
             "https://github.com/lahma/marten-studio/blob/main/LICENSE");
     }
@@ -421,7 +422,7 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
 
-        layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Database", "Events", "Operations", "System");
+        layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Database", "Events", "Operations", "System", "Studio");
 
         // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
         // information architecture is legible from the first version. This list grows one packet at a
@@ -470,27 +471,27 @@ public class StudioLayoutTests
         // The shell roots the document at the studio itself, so links are relative to the studio root and
         // an empty href resolves to it.
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
-            "",
-            "documents",
-            "query",
-            "plan",
-            "database",
-            "database/connection",
-            "relationships",
-            "events/streams",
-            "events/feed",
-            "events/types",
-            "events/flow",
-            "events/dead-letters",
-            "health",
-            "statements",
-            "maintenance",
-            "storage",
-            "replication",
-            "projections",
-            "schema",
-            "server",
-            "config",
+            "marten",
+            "marten/documents",
+            "postgres/query",
+            "postgres/plan",
+            "postgres/database",
+            "postgres/database/connection",
+            "postgres/relationships",
+            "marten/events/streams",
+            "marten/events/feed",
+            "marten/events/types",
+            "marten/events/flow",
+            "marten/events/dead-letters",
+            "postgres/health",
+            "postgres/statements",
+            "postgres/maintenance",
+            "postgres/storage",
+            "postgres/replication",
+            "marten/projections",
+            "marten/schema",
+            "postgres/server",
+            "marten/config",
             "activity");
     }
 
@@ -507,27 +508,27 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
-            "",
-            "documents",
-            "query",
-            "plan",
-            "database",
-            "database/connection",
-            "relationships",
-            "events/streams",
-            "events/feed",
-            "events/types",
-            "events/flow",
-            "events/dead-letters",
-            "health",
-            "statements",
-            "maintenance",
-            "storage",
-            "replication",
-            "projections",
-            "schema",
-            "server",
-            "config",
+            "marten",
+            "marten/documents",
+            "postgres/query",
+            "postgres/plan",
+            "postgres/database",
+            "postgres/database/connection",
+            "postgres/relationships",
+            "marten/events/streams",
+            "marten/events/feed",
+            "marten/events/types",
+            "marten/events/flow",
+            "marten/events/dead-letters",
+            "postgres/health",
+            "postgres/statements",
+            "postgres/maintenance",
+            "postgres/storage",
+            "postgres/replication",
+            "marten/projections",
+            "marten/schema",
+            "postgres/server",
+            "marten/config",
             "activity");
     }
 
@@ -543,11 +544,11 @@ public class StudioLayoutTests
 
         var layout = RenderLayout(context);
 
-        IElement tables = layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "database");
+        IElement tables = layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "postgres/database");
         tables.GetAttribute("title").Should().Be("Tables, views, functions, triggers, sequences and types");
         tables.QuerySelector(".ms-nav-link-text")!.TextContent.Trim().Should().Be("Tables");
 
-        layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "relationships")
+        layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "postgres/relationships")
             .GetAttribute("title").Should().Be("Relationships", "an entry with no tooltip of its own is titled with its label");
     }
 
@@ -556,11 +557,11 @@ public class StudioLayoutTests
     /// what does it, and a row page that a later packet builds is covered before it exists.
     /// </summary>
     [Theory]
-    [InlineData("studio/database", "database")]
-    [InlineData("studio/database?schema=quartz&kind=views", "database")]
-    [InlineData("studio/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "database")]
-    [InlineData("studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "database")]
-    [InlineData("studio/relationships", "relationships")]
+    [InlineData("studio/postgres/database", "postgres/database")]
+    [InlineData("studio/postgres/database?schema=quartz&kind=views", "postgres/database")]
+    [InlineData("studio/postgres/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "postgres/database")]
+    [InlineData("studio/postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "postgres/database")]
+    [InlineData("studio/postgres/relationships", "postgres/relationships")]
     public void The_database_entry_stays_lit_on_every_page_below_it(string uri, string active)
     {
         using var context = new StudioComponentContext();
@@ -609,7 +610,7 @@ public class StudioLayoutTests
             .Should().Contain("Dead letters").And.Contain("Projections");
 
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should()
-            .Contain("events/dead-letters").And.Contain("projections");
+            .Contain("marten/events/dead-letters").And.Contain("marten/projections");
     }
 
     /// <summary>
@@ -986,7 +987,7 @@ public class StudioLayoutTests
             .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
 
         // On a studio page: the shell writes the scope only into one (1.2-UX-FIX-FU4).
-        context.Navigate("studio");
+        context.Navigate("studio/marten");
 
         var layout = RenderLayout(context);
         layout.Find("#ms-store-select").Change("IInvoicingStore");
@@ -1002,7 +1003,7 @@ public class StudioLayoutTests
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "localhost.marten")
             .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
-        context.Navigate("marten?store=IInvoicingStore");
+        context.Navigate("studio/marten?store=IInvoicingStore");
 
         RenderLayout(context);
 
@@ -1014,7 +1015,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext();
         context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
-        context.Navigate("marten?store=somebody-elses-store");
+        context.Navigate("studio/marten?store=somebody-elses-store");
 
         RenderLayout(context);
 
@@ -1037,7 +1038,7 @@ public class StudioLayoutTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         context.Catalog.DescribeGate = gate;
 
-        context.Navigate("marten?store=default&db=db-b");
+        context.Navigate("studio/marten?store=default&db=db-b");
         NavigationManager navigation = context.Services.GetRequiredService<NavigationManager>();
         List<string> locations = [];
         navigation.LocationChanged += (_, args) => locations.Add(args.Location);
@@ -1065,7 +1066,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext().WithPolicy("default");
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
-        context.Navigate("studio");
+        context.Navigate("studio/marten");
 
         var layout = RenderLayout(context);
         layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));
@@ -1099,7 +1100,7 @@ public class StudioLayoutTests
 
         layout.WaitForAssertion(() =>
         {
-            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Where(static x => x != "activity")];
             hrefs.Should().NotBeEmpty().And.OnlyContain(static x => x != null && x.Contains("store=default&db=db-a&tenant=acme", StringComparison.Ordinal));
         });
 
@@ -1107,7 +1108,7 @@ public class StudioLayoutTests
 
         layout.WaitForAssertion(() =>
         {
-            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Where(static x => x != "activity")];
             hrefs.Should().OnlyContain(static x => x != null && x.Contains("store=default&db=db-b", StringComparison.Ordinal));
         });
     }

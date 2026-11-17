@@ -56,7 +56,7 @@ public class OrphanedProgressionCheckTests
         finding.Evidence.Should().Contain(new HealthEvidence("Rows by name", "TripsBeforeRename:All at 12"));
         string.Join(" ", finding.Evidence.Select(static x => x.Value)).Should().NotContain("acme").And.NotContain("globex");
         finding.Title.Should().NotContain("acme");
-        finding.Link!.Route.Should().Be("projections");
+        finding.Link!.Route.Should().Be("marten/projections");
         finding.Link.Label.Should().Be("Open the projections screen");
         finding.Caveat.Should().StartWith("Whether to remove one is the host's decision, and this check removes nothing.")
             .And.Contain("Capabilities.CorrectProgression");

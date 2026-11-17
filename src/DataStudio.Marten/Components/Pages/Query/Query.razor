@@ -1,5 +1,6 @@
 @using System.Globalization
 @using DataStudio.Marten.Internal.Sql
+@using DataStudio.Marten.Services.Documents
 @using DataStudio.Marten.Services.Live
 @using DataStudio.Marten.Services.Query
 @using DataStudio.Postgres.Services.Settings
@@ -1112,7 +1113,7 @@
     }
 
     private string DocumentLink(string documentAlias, string id) =>
-        StudioLink.To(Settings, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") +
+        StudioLink.To(DocumentLinks.Root + "/" + Uri.EscapeDataString(documentAlias) + "/doc") +
         "?id=" + Uri.EscapeDataString(id);
 
     private static IReadOnlyList<(string Title, string Snippet, string? Alias)> ExampleTuples(

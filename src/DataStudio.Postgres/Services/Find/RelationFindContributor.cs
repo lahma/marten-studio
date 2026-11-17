@@ -70,7 +70,7 @@ internal sealed class RelationFindContributor : IFindContributor
                 hits.Add(new FindHit(
                     Kind: DatabasePresentation.KindLabel(item.Kind) is { } label ? char.ToUpperInvariant(label[0]) + label[1..] : "Table",
                     Title: qualified,
-                    Url: DatabaseLinks.ToObject(settings, descriptor, scope, item.Schema, item.Name),
+                    Url: DatabaseLinks.ToObject(descriptor, scope, item.Schema, item.Name),
                     Scope: scope,
                     Id: qualified,
                     Detail: item.Comment));

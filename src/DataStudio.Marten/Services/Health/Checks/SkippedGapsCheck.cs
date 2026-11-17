@@ -4,6 +4,7 @@ using Marten;
 using Marten.Events;
 
 using DataStudio.Marten.Internal.Sql;
+using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Services.Projections;
 using DataStudio.Postgres.Services.Health;
 
@@ -81,7 +82,7 @@ internal sealed class SkippedGapsCheck : HealthCheck<SkippedGapsFacts>
     internal static readonly TimeSpan DayWindow = TimeSpan.FromDays(1);
 
     /// <summary>The projections screen, where D01's Explain sits beside a held mark.</summary>
-    internal const string ProjectionsRoute = "projections";
+    internal const string ProjectionsRoute = EventLinks.ProjectionsRoute;
 
     /// <inheritdoc />
     public override async Task<SkippedGapsFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)

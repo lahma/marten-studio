@@ -4,7 +4,6 @@
 @using DataStudio.Postgres.Services
 @inject StudioState State
 @inject IOptions<MartenOptions> Options
-@inject IStudioSettings Settings
 
 @* M3: the dead-letter page's two views - the list and the groups - as links, so the view is in the query string (D9),
    and, on the list, the group it was opened on with a way back. Its own component so the list page changes by a line. *@
@@ -40,7 +39,7 @@
     [Parameter]
     public string? Group { get; set; }
 
-    private string ListHref => EventLinks.To(Settings, EventLinks.DeadLettersRoute, State.ActiveScope);
+    private string ListHref => EventLinks.To(EventLinks.DeadLettersRoute, State.ActiveScope);
 
-    private string GroupedHref => EventLinks.To(Settings, EventLinks.DeadLettersRoute, State.ActiveScope, [new("view", "grouped")]);
+    private string GroupedHref => EventLinks.To(EventLinks.DeadLettersRoute, State.ActiveScope, [new("view", "grouped")]);
 }

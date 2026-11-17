@@ -503,7 +503,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
             Link = document is { Alias: { } alias }
                 ? new HealthLink(
                     "Open the index advisor in Query",
-                    "query",
+                    PostgresRoutes.Page("query"),
                     [new KeyValuePair<string, string?>("mode", "marten"), new KeyValuePair<string, string?>("type", alias)])
                 : new HealthLink(
                     "Plan it in Statements, and ask what if",

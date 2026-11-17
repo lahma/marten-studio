@@ -38,9 +38,9 @@ public class DiagnosticsServiceTests
         string path = Diagnostics(harness).GetStudioPath(Database(harness), PostgresPage.Connection);
 
         // Issue #55: the same page, the same route and the store's scope, in both studios; Marten Studio re-roots it under /marten.
-        path.Should().StartWith("database/connection?store=default&db=");
+        path.Should().StartWith("postgres/database/connection?store=default&db=");
         DataStudio.Marten.Services.MartenStudioDescriptor.Instance.Navigation(DataStudio.Marten.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)
-            .Should().Contain(x => x.Route == "database/connection");
+            .Should().Contain(x => x.Route == "postgres/database/connection");
     }
 
     [Fact]

@@ -220,7 +220,7 @@ public class StatementsPageTests
         page.Find(".ms-stmts-caveat").TextContent.Should().Contain("as the data source's own Postgres role");
         page.Find(".ms-stmts-studio").TextContent.Should().Contain("With no SqlConsoleRole set, every statement the studio runs here runs as");
 
-        rows[0].QuerySelector(".ms-plan-open")!.GetAttribute("href").Should().StartWith("statements?queryid=1",
+        rows[0].QuerySelector(".ms-plan-open")!.GetAttribute("href").Should().StartWith("postgres/statements?queryid=1",
             "a statement whose text may be read links to its drill-in, by queryid (D9)");
         withheld.QuerySelector(".ms-plan-open").Should().BeNull("a withheld text has no plan to open");
         page.FindAll(".ms-plan-drill").Should().BeEmpty("no queryid in the address, no drill-in");
@@ -260,7 +260,7 @@ public class StatementsPageTests
         page.Find(".ms-plan-caption").TextContent.Should().StartWith("The plan is PostgreSQL's generic plan");
         page.FindAll(".ms-plan-insight-code").Select(static x => x.TextContent).Should().Equal("P07");
         page.Find(".ms-plan-not-judged").TextContent.Should().Contain("P04 Sequential scan with a selective filter");
-        page.Find(".ms-plan-drill-close").GetAttribute("href").Should().StartWith("statements").And.NotContain("queryid");
+        page.Find(".ms-plan-drill-close").GetAttribute("href").Should().StartWith("postgres/statements").And.NotContain("queryid");
         page.FindAll(".ms-plan-raw").Should().BeEmpty("a drill-in's plan is masked for the visitor, and its raw JSON is never handed over");
         page.FindAll(".ms-plan-drill [role=region]").Should().ContainSingle().Which.GetAttribute("aria-label").Should().Be("The generic plan of statement 1");
     }

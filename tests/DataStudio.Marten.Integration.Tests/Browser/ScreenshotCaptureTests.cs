@@ -93,7 +93,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         // Overview, both themes. The theme is set through the studio's own picker rather than through the
         // browser's colour-scheme preference, because that is the state a reader of the README is looking
         // at: an explicit `data-theme`, not whatever the machine that took the picture preferred.
-        await studio.GoAsync(host.StudioUrl());
+        await studio.GoAsync(host.StudioUrl("marten"));
         await studio.Page.Locator(".ms-overview-tiles .ms-stat-card").First.WaitForAsync();
         await studio.SetThemeAsync("light");
         await CaptureAsync(studio, directory, "overview-light");
@@ -103,7 +103,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         await studio.SetThemeAsync("light");
 
         // The documents browser: the rail, the grid and a row's preview.
-        await studio.GoAsync(host.StudioUrl("documents/customer"));
+        await studio.GoAsync(host.StudioUrl("marten/documents/customer"));
         await studio.Page.Locator(".ms-doc-table tbody tr.ms-doc-row").First.WaitForAsync();
         await CaptureAsync(studio, directory, "documents-list");
 
@@ -112,7 +112,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         await CaptureAsync(studio, directory, "document-detail");
 
         // One event stream, opened from the stream list.
-        await studio.GoAsync(host.StudioUrl("events/streams"));
+        await studio.GoAsync(host.StudioUrl("marten/events/streams"));
         await studio.Page.Locator(".ms-table tbody tr.ms-table-row .ms-id-cell a").First.ClickAsync();
         await studio.Page.Locator(".ms-page").First.WaitForAsync();
         await CaptureAsync(studio, directory, "stream-detail");
@@ -120,24 +120,24 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         // Dead letters. The demo poisons one stream on purpose and the async daemon is what writes the
         // entry, so this waits for the daemon rather than for a fixed delay - and captures the page
         // either way, because an empty dead-letter list is also a true picture of this screen.
-        await studio.GoAsync(host.StudioUrl("events/dead-letters"));
+        await studio.GoAsync(host.StudioUrl("marten/events/dead-letters"));
         await WaitForRowsAsync(studio, ".ms-page table.ms-table tbody tr.ms-table-row", TimeSpan.FromSeconds(60));
         await CaptureAsync(studio, directory, "dead-letters");
 
-        await studio.GoAsync(host.StudioUrl("projections"));
+        await studio.GoAsync(host.StudioUrl("marten/projections"));
         await studio.Page.Locator(".ms-page").First.WaitForAsync();
         await CaptureAsync(studio, directory, "projections");
 
         // Schema, on its Drift tab, after pressing the button that runs the check. Nothing on that page
         // reads the database until somebody presses it (hard rule 14), so a capture that did not press it
         // would be a picture of the "Not checked yet" empty state.
-        await studio.GoAsync(host.StudioUrl("schema"));
+        await studio.GoAsync(host.StudioUrl("marten/schema"));
         await studio.Page.Locator(".ms-schema-toolbar .ms-button-primary").ClickAsync();
         await studio.Page.Locator(".ms-kv-row").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 60_000 });
         await CaptureAsync(studio, directory, "schema-drift");
 
         // The screen the set never had.
-        await studio.GoAsync(host.StudioUrl("relationships"));
+        await studio.GoAsync(host.StudioUrl("postgres/relationships"));
         await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
         await CaptureAsync(studio, directory, "relationships");
 
@@ -168,7 +168,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         // The browser, on the Tables kind of the quartz schema: the rail with its schemas and pins (the
         // tables and views bands are object detail's since UX-6), the kind tabs, the owner filter and the
         // grid with the Quartz.NET hints.
-        await studio.GoAsync(host.StudioUrl("database?schema=quartz&kind=tables"));
+        await studio.GoAsync(host.StudioUrl("postgres/database?schema=quartz&kind=tables"));
         await studio.SetThemeAsync("light");
         await page.Locator("table.ms-db-relations tbody a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync();
         await page.Locator(".ms-db-rail-schemas .ms-rail-list .ms-rail-item").First.WaitForAsync();
@@ -176,7 +176,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
 
         // qrtz_triggers' Rows tab with a filter: the chip, the index verdict, the tick timestamps' date hints.
         await studio.GoAsync(host.StudioUrl(
-            "database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=" + Uri.EscapeDataString("trigger_state = WAITING")));
+            "postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=" + Uri.EscapeDataString("trigger_state = WAITING")));
         await page.Locator(".ms-row-filter-strip .ms-row-chip").First.WaitForAsync();
         await page.Locator(".ms-row-tab[data-state='loaded'][aria-busy='false']").WaitForAsync();
         await page.Locator(".ms-row-grid tbody .ms-row-date-hint").First.WaitForAsync();
@@ -191,7 +191,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
 
         // The Relationships screen in the Both view, narrowed to quartz: the document types' keys beside the
         // Quartz.NET tables' own.
-        await studio.GoAsync(host.StudioUrl("relationships?schema=quartz"));
+        await studio.GoAsync(host.StudioUrl("postgres/relationships?schema=quartz"));
         await page.Locator("svg.ms-graph-svg .ms-graph-node-table").First.WaitForAsync();
         (await page.Locator(".ms-graph-views button[aria-pressed='true']").InnerTextAsync()).Should().StartWith(
             "Both", "the capture is of the Both view");
@@ -247,7 +247,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
             await HealthBrowser.TurnOnAsync(page, host, bloatedTable);
             await HealthBrowser.TurnOnAsync(page, host, idleInTransaction);
 
-            await studio.GoAsync(host.StudioUrl("health"));
+            await studio.GoAsync(host.StudioUrl("postgres/health"));
             await studio.SetThemeAsync("light");
 
             await HealthBrowser.UntilShownAsync(

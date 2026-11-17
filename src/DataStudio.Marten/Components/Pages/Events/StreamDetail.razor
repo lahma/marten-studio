@@ -472,9 +472,9 @@
 
     private bool hasMoreEvents;
 
-    private string StreamsHref => EventLinks.To(Settings, EventLinks.StreamsRoute, State.ActiveScope);
+    private string StreamsHref => EventLinks.To(EventLinks.StreamsRoute, State.ActiveScope);
 
-    private string FeedHref => EventLinks.ToFeedForStream(Settings, State.ActiveScope, Id ?? string.Empty);
+    private string FeedHref => EventLinks.ToFeedForStream(State.ActiveScope, Id ?? string.Empty);
 
     private StreamState? searchRequestFor;
     private StudioRecordSearchRequest? searchRequest;
@@ -511,17 +511,17 @@
     /// <summary>The stepper (M1) on this stream, in the aggregate type picked, at the version on the panel.</summary>
     private string? StepHref => string.IsNullOrWhiteSpace(SelectedAggregate)
         ? null
-        : EventLinks.ToStep(Settings, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, SelectedVersion);
+        : EventLinks.ToStep(State.ActiveScope, Id ?? string.Empty, SelectedAggregate, SelectedVersion);
 
     private string ArchiveMessage =>
         $"Archiving marks stream {Id} and every one of its events as archived. Marten has no un-archive " +
         "operation, so this cannot be undone from here.";
 
     private string TypeHref(string eventType) =>
-        EventLinks.ToFeedForType(Settings, State.ActiveScope, eventType);
+        EventLinks.ToFeedForType(State.ActiveScope, eventType);
 
     private string? TagHref(string tagType, string value) =>
-        EventLinks.ToFeedForTag(Settings, State.ActiveScope, tagType, value);
+        EventLinks.ToFeedForTag(State.ActiveScope, tagType, value);
 
     private string CompactTitle(CompactionPlan plan) =>
         !mayCompact
@@ -1226,7 +1226,6 @@
 
     private string Href(long? version, string? aggregate) =>
         EventLinks.To(
-            Settings,
             EventLinks.StreamDetailRoute,
             State.ActiveScope,
             [

@@ -3,6 +3,7 @@ using System.Globalization;
 using JasperFx.Events.Projections;
 
 using DataStudio.Marten.Internal.Sql;
+using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Services.Projections;
 
 using DataStudio.Postgres.Services.Health;
@@ -56,7 +57,7 @@ internal sealed record OrphanedProgressionFacts(
 internal sealed class OrphanedProgressionCheck : HealthCheck<OrphanedProgressionFacts>
 {
     /// <summary>The projections screen, where the rows are listed with the statements that remove them.</summary>
-    internal const string ProjectionsRoute = "projections";
+    internal const string ProjectionsRoute = EventLinks.ProjectionsRoute;
 
     /// <summary>How many rows a finding names in its evidence; the rest are counted.</summary>
     internal const int NamedRows = 10;

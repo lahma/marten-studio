@@ -21,8 +21,8 @@ namespace DataStudio.Postgres.Components.Shared;
 /// complete is how this bug comes back: <c>data:</c>, <c>vbscript:</c>, a protocol-relative <c>//evil</c>,
 /// the <c>/\evil</c> that some browsers normalise to <c>//evil</c>, a percent-encoded or whitespace-split
 /// scheme. What is accepted instead is exactly one shape — a relative path, below the studio's own base,
-/// inside the one area the caller names (the documents list's <c>documents</c>, the database browser's
-/// <c>database/object</c>) — and everything else falls back to the page's own link, which is where "back" was
+/// inside the one area the caller names (the documents list's <c>marten/documents</c>, the database browser's
+/// <c>postgres/database/object</c>) — and everything else falls back to the page's own link, which is where "back" was
 /// going anyway.
 /// </para>
 /// </remarks>
@@ -30,7 +30,7 @@ internal static class SafeReturnLink
 {
     /// <summary>
     /// The value if it is a return link into <paramref name="root" />, or <see langword="null" />: the database
-    /// browser's row detail returns to <c>database/object</c>, a document to its collection under <c>documents</c>.
+    /// browser's row detail returns to <c>postgres/database/object</c>, a document to its collection under <c>marten/documents</c>.
     /// </summary>
     /// <param name="from">The <c>?from=</c> value, as the query string delivered it.</param>
     /// <param name="settings">The studio's settings, for the mount path.</param>

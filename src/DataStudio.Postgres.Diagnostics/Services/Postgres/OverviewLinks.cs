@@ -1,11 +1,10 @@
 namespace DataStudio.Postgres.Services.Postgres;
 
-/// <summary>The Overview's address: the studio's landing page, which is the studio's own root.</summary>
+/// <summary>The Postgres Overview's address: the Postgres module's home. In a Marten host that address sends the visitor to the Marten module's own home.</summary>
 internal static class OverviewLinks
 {
     /// <summary>
-    /// The page's route under the studio's path: empty. A relative address built from it is the query alone, which resolves
-    /// against the studio-rooted <c>&lt;base href&gt;</c> to the front page, with the scope carried.
+    /// The page's address below the mount: the module's own segment, which is its home.
     /// </summary>
-    public const string Route = "";
+    public const string Route = PostgresRoutes.Root;
 }

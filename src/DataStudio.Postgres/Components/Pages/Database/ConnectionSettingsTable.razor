@@ -100,7 +100,7 @@
                                                 @if (setting.AdviceCard is { } card)
                                                 {
                                                     <a class="ms-conn-advice"
-                                                       href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, card.Id)"
+                                                       href="@ConnectionLinks.To(Descriptor, State.ActiveScope, card.Id)"
                                                        aria-label="@("Advice about " + row.Keyword + ": " + card.Heading)"
                                                        title="@card.Heading">advice</a>
                                                 }

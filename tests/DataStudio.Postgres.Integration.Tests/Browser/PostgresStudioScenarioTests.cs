@@ -27,7 +27,7 @@ namespace DataStudio.Postgres.Integration.Tests.Browser;
 [Collection(BrowserSuite.Name)]
 public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
 {
-    private const string TriggersObject = "database/object?schema=quartz&name=qrtz_triggers";
+    private const string TriggersObject = "postgres/database/object?schema=quartz&name=qrtz_triggers";
 
     [BrowserFact]
     public async Task An_admin_signs_in_and_the_Overview_shows_the_server_and_the_admin_databases_tables()
@@ -36,7 +36,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             (await page.Locator("h1.ms-page-title").InnerTextAsync()).Trim().Should().Be("Overview");
             (await page.Locator(".ms-sidebar-brand-text").InnerTextAsync()).Trim().Should().Be("Data Studio", "DataStudioOptions.Title's default");
@@ -59,7 +59,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database"));
 
             ILocator triggers = RelationRow(page, "quartz.qrtz_triggers");
             await triggers.WaitForAsync();
@@ -75,7 +75,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             (await rows.CountAsync()).Should().BePositive("the sample seeds Quartz triggers");
 
             // A tenant database: the host source's tenant_a, by a pasted link.
-            await studio.GoAsync(fixture.Host.StudioUrl("database?store=tenants&db=tenant_a"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database?store=tenants&db=tenant_a"));
 
             ILocator customers = RelationRow(page, "public.customers");
             await customers.WaitForAsync();
@@ -126,7 +126,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("query?store=tenants&db=tenant_b"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/query?store=tenants&db=tenant_b"));
 
             ILocator editor = page.Locator("#ms-query-sql");
             await editor.WaitForAsync();
@@ -155,7 +155,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // A link reopens the page with the editor filled, the mode and the options set - and runs nothing.
-            await studio.GoAsync(fixture.Host.StudioUrl("plan?store=tenants&db=tenant_b&mode=analyze&options=buffers,timing,verbose&sql="
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/plan?store=tenants&db=tenant_b&mode=analyze&options=buffers,timing,verbose&sql="
                 + Uri.EscapeDataString("select c.name from public.customers c order by c.name")));
 
             ILocator editor = page.Locator("#ms-plan-sql");
@@ -259,7 +259,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database/connection"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database/connection"));
             await page.Locator(".ms-conn-strip").WaitForAsync();
             await page.Locator("#conn-settings tbody tr").First.WaitForAsync();
             await page.Locator("#conn-observed dt").First.WaitForAsync();
@@ -284,8 +284,8 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
 
             // A fact links to its row: the link scrolls the page to it and the studio stays on this page.
             await page.Locator(".ms-conn-fact a", new PageLocatorOptions { HasTextString = "max" }).ClickAsync();
-            await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("database/connection.*#conn-row-maximum-pool-size$"));
-            page.Url.Should().Contain("database/connection").And.EndWith("#conn-row-maximum-pool-size");
+            await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("postgres/database/connection.*#conn-row-maximum-pool-size$"));
+            page.Url.Should().Contain("postgres/database/connection").And.EndWith("#conn-row-maximum-pool-size");
 
             // The application's sessions are the activity gate's: a table, or the sentence naming the option.
             await page.Locator("#conn-sessions table, #conn-sessions .ms-capability-disabled").First.WaitForAsync();
@@ -320,7 +320,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
 
             // A tenant database has its own connection; the page reads it the same way.
-            await studio.GoAsync(fixture.Host.StudioUrl("database/connection?store=tenants&db=tenant_a"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database/connection?store=tenants&db=tenant_a"));
             await page.Locator("#conn-observed dt").First.WaitForAsync();
             (await page.Locator(".ms-conn-fact dd").AllTextContentsAsync()).Should().Contain(static x => x.Contains("tenant_a", StringComparison.Ordinal));
 
@@ -335,7 +335,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("health?store=tenants&db=tenant_c"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/health?store=tenants&db=tenant_c"));
 
             ILocator checkedRows = page.Locator("table.ms-health-check-table tbody tr.ms-health-check-checked");
             await checkedRows.First.WaitForAsync();
@@ -360,7 +360,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // Each scope with a table of its own whose object page and rows are opened too.
-            foreach ((string scope, string table) in new[] { ("store=default&db=default", TriggersObject), ("store=tenants&db=tenant_a", "database/object?schema=public&name=customers") })
+            foreach ((string scope, string table) in new[] { ("store=default&db=default", TriggersObject), ("store=tenants&db=tenant_a", "postgres/database/object?schema=public&name=customers") })
             {
                 foreach ((string path, string ready) in Pages.Append((table + "&tab=rows", ".ms-row-grid tbody tr.ms-row-item")))
                 {
@@ -379,14 +379,14 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
     /// <summary>Every core page, and what says it has read what it reads.</summary>
     private static readonly (string Path, string Ready)[] Pages =
     [
-        ("", ".ms-pg-overview-server"),
-        ("database", ".ms-db-rail-schemas .ms-db-rail-name"),
-        ("database/sessions", ".ms-sessions-stats"),
-        ("database/connection", "#conn-settings tbody tr"),
-        ("relationships", ".ms-graph-toolbar, .ms-schema-note, .ms-alert"),
-        ("health", "table.ms-health-check-table tbody tr"),
-        ("query", "#ms-query-sql"),
-        ("plan", "#ms-plan-sql"),
+        ("postgres", ".ms-pg-overview-server"),
+        ("postgres/database", ".ms-db-rail-schemas .ms-db-rail-name"),
+        ("postgres/database/sessions", ".ms-sessions-stats"),
+        ("postgres/database/connection", "#conn-settings tbody tr"),
+        ("postgres/relationships", ".ms-graph-toolbar, .ms-schema-note, .ms-alert"),
+        ("postgres/health", "table.ms-health-check-table tbody tr"),
+        ("postgres/query", "#ms-query-sql"),
+        ("postgres/plan", "#ms-plan-sql"),
         ("activity", "h1.ms-page-title"),
     ];
 

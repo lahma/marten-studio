@@ -20,7 +20,7 @@ public class KafkaAddressTests
         using KafkaStudioHarness harness = new();
         IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
-        string href = KafkaAddress.Href(settings, KafkaAddress.SearchRoute, key, (KafkaAddress.TopicParameter, "orders.v1"));
+        string href = KafkaAddress.Href(KafkaAddress.SearchRoute, key, (KafkaAddress.TopicParameter, "orders.v1"));
         string absolute = "https://host" + (href.StartsWith('/') ? href : "/" + href);
 
         if (key.Contains('/', StringComparison.Ordinal))
@@ -39,6 +39,6 @@ public class KafkaAddressTests
         using KafkaStudioHarness harness = new();
         IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
-        KafkaAddress.Href(settings, KafkaAddress.SearchRoute, "wolverine/acme").Should().Contain("cluster=wolverine%2Facme");
+        KafkaAddress.Href(KafkaAddress.SearchRoute, "wolverine/acme").Should().Contain("cluster=wolverine%2Facme");
     }
 }

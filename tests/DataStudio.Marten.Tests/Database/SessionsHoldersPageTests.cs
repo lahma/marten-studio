@@ -91,7 +91,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions");
+            context.Navigate("studio/postgres/database/sessions");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-sessions-tabs .ms-tab").Should().HaveCount(3));
 
@@ -115,7 +115,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-table").Should().NotBeEmpty());
 
@@ -153,7 +153,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-groups").Should().ContainSingle());
 
@@ -192,7 +192,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-groups").Should().ContainSingle());
 
@@ -214,7 +214,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-groups").Should().ContainSingle());
 
@@ -254,7 +254,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-table").Should().NotBeEmpty());
             await check(page);
@@ -376,7 +376,7 @@ public class SessionsHoldersPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=holders");
+            context.Navigate("studio/postgres/database/sessions?view=holders");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-holders-table").Should().NotBeEmpty());
 

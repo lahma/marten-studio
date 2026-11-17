@@ -22,7 +22,7 @@ public class RowLinksTests
 
     private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
 
-    private static readonly IStudioLinks Links = new MartenStudioLinks(MartenStudioSettings.Of(Options));
+    private static readonly IStudioLinks Links = new MartenStudioLinks();
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
@@ -33,13 +33,13 @@ public class RowLinksTests
     [Fact]
     public void The_rows_link_opens_the_rows_tab_with_the_filter_and_the_scope()
     {
-        string url = DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
+        string url = DatabaseLinks.ToRows(Descriptor, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
 
-        url.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=");
+        url.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=");
         Query(url, "q").Should().Be("trigger_state = WAITING");
         Query(url, "store").Should().Be("default");
 
-        DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
+        DatabaseLinks.ToRows(Descriptor, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
     }
 
     [Theory]
@@ -60,7 +60,7 @@ public class RowLinksTests
             Scope,
             new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "billing", "invoice"));
 
-        href.Should().StartWith("documents/invoice");
+        href.Should().StartWith("marten/documents/invoice");
         Query(href!, "store").Should().Be("billing", "the alias means something in the store that declares it, not in this one");
         Query(href!, "db").Should().BeNull("the database is this store's; the page it lands on settles its own");
         Query(href!, "tenant").Should().BeNull();
@@ -77,15 +77,15 @@ public class RowLinksTests
     [Fact]
     public void A_return_link_into_the_object_page_is_kept_and_one_anywhere_else_is_not()
     {
-        SafeReturnLink.Sanitize("database/object?schema=quartz&name=qrtz_triggers&tab=rows", Settings, DatabaseLinks.ObjectRoute)
-            .Should().Be("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
-        SafeReturnLink.Sanitize("studio/database/object?schema=quartz", Settings, DatabaseLinks.ObjectRoute).Should().NotBeNull();
+        SafeReturnLink.Sanitize("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows", Settings, DatabaseLinks.ObjectRoute)
+            .Should().Be("postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        SafeReturnLink.Sanitize("studio/postgres/database/object?schema=quartz", Settings, DatabaseLinks.ObjectRoute).Should().NotBeNull();
 
-        SafeReturnLink.Sanitize("documents/customer", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
+        SafeReturnLink.Sanitize("marten/documents/customer", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
         SafeReturnLink.Sanitize("javascript:alert(1)", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
         SafeReturnLink.Sanitize("//evil.example/database/object", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
 
-        SafeReturnLink.Sanitize("documents/customer", Settings).Should().Be("documents/customer", "the documents list's rule is unchanged");
+        SafeReturnLink.Sanitize("marten/documents/customer", Settings).Should().Be("marten/documents/customer", "the documents list's rule is unchanged");
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -140,7 +140,7 @@ public class RowLinksTests
             [new("a", "2"), new("b", "x")],
         ];
 
-        state.RememberPage("s", "t", keys, "database/object?schema=s&name=t&tab=rows");
+        state.RememberPage("s", "t", keys, "postgres/database/object?schema=s&name=t&tab=rows");
 
         (IReadOnlyList<KeyValuePair<string, string>>? previous, IReadOnlyList<KeyValuePair<string, string>>? next) =
             state.Neighbours("s", "t", [new("b", "y"), new("a", "1")]);

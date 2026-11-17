@@ -34,15 +34,12 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     /// </summary>
     public required Func<IStudioSettings, IReadOnlyList<StudioNavSection>> Navigation { get; init; }
 
-    /// <summary>
-    /// The body the studio's shared root page (<c>StudioHome</c>) renders - MartenStudio's store overview. A component
-    /// with no <c>@page</c> of its own: the root route is the shared page's, so two studios' bodies never claim it twice.
-    /// </summary>
-    public required Type OverviewComponent { get; init; }
+    /// <summary>One sentence of what the module offers, drawn on the shell's front page under its name (<see cref="IStudioModule.Summary" />).</summary>
+    public required string Summary { get; init; }
 
     /// <summary>
     /// The body the studio's shared <c>query</c> page (<c>QueryPage</c>) renders - MartenStudio's three-mode page, or
-    /// the shared SQL console panel alone - as <see cref="OverviewComponent" />.
+    /// the shared SQL console panel alone. A component with no <c>@page</c> of its own, so two modules' bodies never claim the route twice.
     /// </summary>
     public required Type QueryComponent { get; init; }
 

@@ -214,14 +214,15 @@
 
     /// <summary>
     /// Whether the page <paramref name="uri" /> names is the database's (D34): the route table matches the address, and the matched
-    /// page's assembly decides. An address no page matches is the database's, as it was the host studio's.
+    /// page's assembly decides. An address no page matches is no module's, and neither is a page of the shell's own (the front page, Activity):
+    /// the database's scope waits in memory there, as it does on any other module's page.
     /// </summary>
     private bool IsMine(string uri)
     {
         if (StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { } relative
             || Shell.Routes.Match(relative, Settings) is not { } match)
         {
-            return true;
+            return false;
         }
 
         return Shell.ModuleOf(match.PageType) is { } module && string.Equals(module.Key, Descriptor.Key, StringComparison.Ordinal);

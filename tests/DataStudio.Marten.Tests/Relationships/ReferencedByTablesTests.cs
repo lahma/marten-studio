@@ -36,7 +36,7 @@ public class ReferencedByTablesTests
 
         item.QuerySelector(".ms-graph-table-chip")!.TextContent.Should().Contain("legacy.").And.Contain("customer_credit");
         item.QuerySelector(".ms-referenced-link")!.GetAttribute("href")
-            .Should().Be("database/object?schema=legacy&name=customer_credit");
+            .Should().Be("postgres/database/object?schema=legacy&name=customer_credit");
         item.QuerySelector(".ms-referenced-count")!.TextContent.Should().Be("1");
         item.QuerySelector(".ms-referenced-ondelete")!.TextContent.Should().Be("on delete cascade");
     }
@@ -257,7 +257,7 @@ public class ReferencedByTablesTests
 
     private static IRenderedComponent<DetailPage> RenderDetail(DocumentsComponentContext context)
     {
-        context.Navigate($"studio/documents/customer/doc?id={CustomerId}");
+        context.Navigate($"studio/marten/documents/customer/doc?id={CustomerId}");
         return context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 

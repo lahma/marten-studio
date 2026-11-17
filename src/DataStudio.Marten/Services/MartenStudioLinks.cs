@@ -1,4 +1,3 @@
-using DataStudio.Services.Settings;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Events;
@@ -18,33 +17,25 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal sealed class MartenStudioLinks : IStudioLinks
 {
-    private readonly IShellSettings settings;
-
-    public MartenStudioLinks(IShellSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        this.settings = settings;
-    }
+    /// <inheritdoc />
+    public string? ToDocuments(StudioScope? scope) => DocumentLinks.ToIndex(scope);
 
     /// <inheritdoc />
-    public string? ToDocuments(StudioScope? scope) => DocumentLinks.ToIndex(settings, scope);
+    public string? ToCollection(StudioScope? scope, string alias) => DocumentLinks.ToCollection(scope, alias);
 
     /// <inheritdoc />
-    public string? ToCollection(StudioScope? scope, string alias) => DocumentLinks.ToCollection(settings, scope, alias);
+    public string? ToDocument(StudioScope? scope, string alias, string id) => DocumentLinks.ToDocument(scope, alias, id);
 
     /// <inheritdoc />
-    public string? ToDocument(StudioScope? scope, string alias, string id) => DocumentLinks.ToDocument(settings, scope, alias, id);
+    public string? ToStreams(StudioScope? scope) => EventLinks.To(EventLinks.StreamsRoute, scope);
 
     /// <inheritdoc />
-    public string? ToStreams(StudioScope? scope) => EventLinks.To(settings, EventLinks.StreamsRoute, scope);
+    public string? ToFeed(StudioScope? scope) => EventLinks.To(EventLinks.FeedRoute, scope);
 
     /// <inheritdoc />
-    public string? ToFeed(StudioScope? scope) => EventLinks.To(settings, EventLinks.FeedRoute, scope);
-
-    /// <inheritdoc />
-    public string? ToProjections(StudioScope? scope) => EventLinks.To(settings, "projections", scope);
+    public string? ToProjections(StudioScope? scope) => EventLinks.To(EventLinks.ProjectionsRoute, scope);
 
     /// <inheritdoc />
     public string? ToSchema(StudioScope? scope, string tab = "tables") =>
-        EventLinks.To(settings, "schema", scope, [new KeyValuePair<string, string?>(DatabaseLinks.TabParameter, tab)]);
+        EventLinks.To(MartenRoutes.Page("schema"), scope, [new KeyValuePair<string, string?>(DatabaseLinks.TabParameter, tab)]);
 }

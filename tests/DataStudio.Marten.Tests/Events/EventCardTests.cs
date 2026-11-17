@@ -348,13 +348,13 @@ public class EventCardTests
             parameters => parameters
                 .Add(c => c.ShowStream, true)
                 .Add(c => c.StreamId, "order-17")
-                .Add(c => c.StreamHref, "events/streams/s?id=order-17"));
+                .Add(c => c.StreamHref, "marten/events/streams/s?id=order-17"));
 
         card.FindAll(".ms-event-card-header").Should().ContainSingle();
 
         IElement header = card.Find(".ms-event-card-header");
         header.QuerySelector(".ms-event-card-stream a")!.GetAttribute("href").Should()
-            .Be("events/streams/s?id=order-17");
+            .Be("marten/events/streams/s?id=order-17");
         header.QuerySelector(".ms-event-card-seq")!.TextContent.Should().Be("#7");
     }
 

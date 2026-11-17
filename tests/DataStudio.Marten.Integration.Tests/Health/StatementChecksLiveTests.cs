@@ -118,7 +118,7 @@ public class StatementChecksLiveTests(PostgresFixture postgres, StatementsServer
             .Contain("Seq Scan on mt_doc_statementtarget, reading every row to filter on a JSON member the recorded statement does not name",
                 "Marten writes the member's name as a constant, which pg_stat_statements records as a placeholder");
         finding.Finding.Remedy!.Code.Should().Contain("opts.Schema.For<StatementTarget>().Index(x => x.FilteredMember);");
-        finding.Finding.Link!.Route.Should().Be("query");
+        finding.Finding.Link!.Route.Should().Be("postgres/query");
         finding.Finding.Caveat.Should().Contain("generic plan");
 
         // Show SQL names no table, and the plan's own entry says where its text came from instead of printing it.

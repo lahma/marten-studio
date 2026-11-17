@@ -260,7 +260,7 @@ public class PostgresStudioVersionGuardTests
     }
 
     /// <summary>
-    /// Both public methods - <c>AddMarten</c> on the studio's builder and <c>AddMartenStudio</c> on the health checks builder - and the guard
+    /// Both public methods - <c>AddMarten</c> on the studio's builder and <c>AddMartenDiagnostics</c> on the health checks builder - and the guard
     /// name no PostgresStudio type or member - in a call, a field, a token or a local - so the JIT can compile them, and
     /// the guard can explain, when DataStudio.Postgres.dll is absent.
     /// </summary>

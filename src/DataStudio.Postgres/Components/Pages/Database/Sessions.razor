@@ -146,12 +146,12 @@
 
         <nav class="ms-tabs ms-sessions-tabs" aria-label="Sections of Sessions">
             <a class="@(BlockingTab || HoldersTab ? "ms-tab" : "ms-tab ms-tab-active")"
-               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)"
+               href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope)"
                aria-current="@(BlockingTab || HoldersTab ? null : "page")">
                 Sessions
             </a>
             <a class="@(BlockingTab ? "ms-tab ms-tab-active" : "ms-tab")"
-               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.BlockingView)"
+               href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope, SessionLinks.BlockingView)"
                aria-current="@(BlockingTab ? "page" : null)">
                 Blocking
                 @if (summary.Blocking.Chains + summary.Blocking.Unrooted > 0)
@@ -160,7 +160,7 @@
                 }
             </a>
             <a class="@(HoldersTab ? "ms-tab ms-tab-active" : "ms-tab")"
-               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.HoldersView)"
+               href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope, SessionLinks.HoldersView)"
                aria-current="@(HoldersTab ? "page" : null)">
                 Holders
             </a>
@@ -513,7 +513,7 @@
     /// <summary>Whether Holders is the tab on screen: who holds the whole server's connections (issue #20).</summary>
     private bool HoldersTab => string.Equals(View, SessionLinks.HoldersView, StringComparison.OrdinalIgnoreCase);
 
-    private string DatabaseHref => DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope);
+    private string DatabaseHref => DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope);
 
     protected override void OnInitialized()
     {

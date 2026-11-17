@@ -172,8 +172,8 @@ public class RelationshipViewTests
     {
         RelationshipViews.Token(RelationshipViewMode.Both).Should().BeNull();
         DataStudio.Postgres.Services.Database.DatabaseLinks.ToRelationships(
-                MartenStudioSettings.Of(new MartenOptions()), MartenStudioDescriptor.Instance, new StudioScope("default", "db1", null), RelationshipViewMode.Tables, "quartz")
-            .Should().Be("relationships?store=default&db=db1&view=tables&schema=quartz");
+                MartenStudioDescriptor.Instance, new StudioScope("default", "db1", null), RelationshipViewMode.Tables, "quartz")
+            .Should().Be("postgres/relationships?store=default&db=db1&view=tables&schema=quartz");
     }
 
     [Fact]

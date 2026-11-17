@@ -67,26 +67,25 @@ public class StartupGuardTest
     }
 
     /// <summary>
-    /// The route table is built when the studio is mapped, so a relative route two pages claim fails the mapping call
-    /// itself - at startup, never at the first request for the page.
+    /// The composition is validated when the studio is mapped, so a root two page assemblies claim fails the mapping call
+    /// itself - at startup, never at the first request for a page. (A route two pages of one assembly claim is the route table's, built at the same time.)
     /// </summary>
     [Fact]
-    public async Task A_route_two_pages_claim_fails_the_mapping_call()
+    public async Task A_root_two_page_assemblies_claim_fails_the_mapping_call()
     {
-        // This test assembly's pages (StudioRouteTableTests' fixtures) claim /elsewhere/things/{…} twice; rooted at the
-        // empty root, every template here is in range, so the duplicate is the only fault.
+        // This test assembly claims the root the Postgres pages already use.
         StudioDescriptor descriptor = Clone(
             MartenStudioDescriptor.Instance,
             [
                 .. MartenStudioDescriptor.Instance.PageAssemblies,
-                new StudioPageAssembly(typeof(StartupGuardTest).Assembly, string.Empty),
+                new StudioPageAssembly(typeof(StartupGuardTest).Assembly, "/POSTGRES"),
             ]);
 
         await using var app = CreateApp(configureBuilder: builder => builder.Services.AddSingleton(descriptor));
 
         Action map = () => app.MapDataStudio().AllowAnonymous();
 
-        map.Should().Throw<InvalidOperationException>().WithMessage("*both claim the route*");
+        map.Should().Throw<InvalidOperationException>().WithMessage("*already use*");
     }
 
     private static StudioDescriptor Clone(
@@ -98,7 +97,7 @@ public class StartupGuardTest
         PageAssemblies = pageAssemblies,
         HealthCheckAssemblies = source.HealthCheckAssemblies,
         Navigation = source.Navigation,
-        OverviewComponent = source.OverviewComponent,
+        Summary = source.Summary,
         QueryComponent = source.QueryComponent,
         SourceQueryParameter = source.SourceQueryParameter,
         SourceNoun = source.SourceNoun,

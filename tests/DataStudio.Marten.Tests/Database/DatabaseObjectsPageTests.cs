@@ -33,7 +33,7 @@ public class DatabaseObjectsPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenSpine.Routes.Match("database")!.PageType.Should().Be<BrowserPage>();
+        MartenSpine.Routes.Match("postgres/database")!.PageType.Should().Be<BrowserPage>();
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -71,7 +71,7 @@ public class DatabaseObjectsPageTests
         IElement quartz = page.FindAll(".ms-db-rail-schemas a.ms-rail-link")
             .Single(x => x.QuerySelector(".ms-db-rail-name")!.TextContent.Trim() == FakeDatabaseObjects.Quartz);
 
-        quartz.GetAttribute("href").Should().StartWith("database?schema=quartz&kind=functions").And.Contain("store=default");
+        quartz.GetAttribute("href").Should().StartWith("postgres/database?schema=quartz&kind=functions").And.Contain("store=default");
     }
 
     /// <summary>
@@ -114,7 +114,7 @@ public class DatabaseObjectsPageTests
             .Should().Equal("13", "3", "6", "2", "2", "4");
 
         tabs[0].GetAttribute("aria-current").Should().Be("page");
-        tabs[1].GetAttribute("href").Should().StartWith("database?kind=views").And.Contain("store=default");
+        tabs[1].GetAttribute("href").Should().StartWith("postgres/database?kind=views").And.Contain("store=default");
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public class DatabaseObjectsPageTests
         IElement row = Row(page, "mt_doc_customer");
         IElement badge = row.QuerySelector("a.ms-db-owner-document")!;
 
-        badge.GetAttribute("href").Should().StartWith("documents/customer?").And.Contain("store=default");
+        badge.GetAttribute("href").Should().StartWith("marten/documents/customer?").And.Contain("store=default");
         badge.QuerySelector(".ms-collection-alias")!.TextContent.Trim().Should().Be("customer");
     }
 
@@ -275,7 +275,7 @@ public class DatabaseObjectsPageTests
         var page = DatabasePageData.RenderBrowser(context);
 
         Row(page, "mt_events").QuerySelector("a.ms-db-owner-events")!.GetAttribute("href")
-            .Should().StartWith("events/streams").And.Contain("store=default");
+            .Should().StartWith("marten/events/streams").And.Contain("store=default");
     }
 
     [Fact]
@@ -600,8 +600,8 @@ public class DatabaseObjectsPageTests
         IElement row = page.FindAll(".ms-db-triggers tbody tr").First(x => x.TextContent.Contains("orders_audit", StringComparison.Ordinal));
         List<string?> hrefs = [.. row.QuerySelectorAll("a.ms-db-name").Select(x => x.GetAttribute("href"))];
 
-        hrefs[0].Should().StartWith("database/object?schema=legacy&name=orders");
-        hrefs[1].Should().StartWith("database?schema=legacy&kind=functions&q=audit");
+        hrefs[0].Should().StartWith("postgres/database/object?schema=legacy&name=orders");
+        hrefs[1].Should().StartWith("postgres/database?schema=legacy&kind=functions&q=audit");
         row.TextContent.Should().Contain("AFTER").And.Contain("INSERT OR UPDATE").And.Contain("row");
     }
 
@@ -642,7 +642,7 @@ public class DatabaseObjectsPageTests
 
         IElement owned = SequenceRow(page, "orders_id_seq");
         owned.QuerySelector("a.ms-db-name")!.TextContent.Trim().Should().Be("legacy.orders.id");
-        owned.QuerySelector("a.ms-db-name")!.GetAttribute("href").Should().StartWith("database/object?schema=legacy&name=orders&tab=columns");
+        owned.QuerySelector("a.ms-db-name")!.GetAttribute("href").Should().StartWith("postgres/database/object?schema=legacy&name=orders&tab=columns");
         owned.QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("read");
 
         context.DatabaseObjects.SequenceValue = new DatabaseSequenceValue(

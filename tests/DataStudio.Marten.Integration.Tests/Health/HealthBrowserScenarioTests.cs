@@ -38,7 +38,7 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
     {
         await BrowserScenario.RunAsync(fixture.Browser, "health", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("health"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/health"));
 
             ILocator s02 = studio.Page.Locator(SynchronousCommit);
             await s02.WaitForAsync();
@@ -69,7 +69,7 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
             await studio.Page.Locator(MutedSummary).WaitForAsync();
 
             // The mute lives in this browser's localStorage, so a fresh page load - a new circuit - still has it.
-            await studio.GoAsync(fixture.Root.StudioUrl("health"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/health"));
             await studio.Page.Locator(MutedSummary).WaitForAsync();
             (await studio.Page.Locator(SynchronousCommit).CountAsync()).Should().Be(0);
 
@@ -114,7 +114,7 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
                 }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
                 """);
 
-            await studio.GoAsync(fixture.Root.StudioUrl("health") + "#" + anchor);
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/health") + "#" + anchor);
 
             ILocator card = studio.Page.Locator("#" + anchor);
             await card.WaitForAsync();

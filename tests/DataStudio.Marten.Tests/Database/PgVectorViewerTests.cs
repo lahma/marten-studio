@@ -394,13 +394,13 @@ public class PgVectorViewerTests
             [],
             null);
 
-        context.Navigate("/marten/schema?tab=tables");
+        context.Navigate("studio/marten/schema?tab=tables");
         var tables = context.Render<SchemaPage>();
 
         tables.FindAll(".ms-schema-vectors .ms-vector-badge").Select(static x => x.TextContent)
             .Should().Equal("embedding vector(3)", "summary halfvec(3)");
 
-        context.Navigate("/marten/schema?tab=indexes");
+        context.Navigate("studio/marten/schema?tab=indexes");
         var indexes = context.Render<SchemaPage>();
 
         indexes.Find(".ms-vector-index-method").TextContent.Should().Be("pgvector HNSW");

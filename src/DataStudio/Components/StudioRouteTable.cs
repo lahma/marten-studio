@@ -34,8 +34,8 @@ namespace DataStudio.Components;
 /// <para>
 /// <b>Built from a list of (assembly, compile-time root) pairs</b> - <c>StudioDescriptor.PageAssemblies</c> -
 /// rather than from this assembly alone, because a studio's pages may live in more than one assembly and each
-/// assembly declares its own root. Every template is stored relative to its assembly's root, so two assemblies'
-/// pages share one relative route space.
+/// assembly declares its own root. Every template is stored as its address below the mount, root segment included, so two
+/// assemblies' pages share one relative route space.
 /// </para>
 /// <para>
 /// <b>Two failures are thrown when the table is first built, not discovered at request time.</b> A template not
@@ -62,32 +62,23 @@ internal sealed class StudioRouteTable
     {
     }
 
-    /// <summary>Builds the table from explicit components, each with the compile-time root its templates must start with.</summary>
+    /// <summary>
+    /// Builds the table from explicit components, each with the compile-time root its templates must start with. A page's relative route is its
+    /// template without the leading slash, always (v2 step 5): <c>/orders/list</c> is <c>orders/list</c>, and the shell's own <c>/activity</c> is
+    /// <c>activity</c>.
+    /// </summary>
     /// <param name="pages">The routable components, each with its assembly's root.</param>
     /// <exception cref="InvalidOperationException">
     /// A template is not under its root, or two templates claim the same relative route.
     /// </exception>
     internal StudioRouteTable(IEnumerable<(Type Page, string CompileTimeRoot)> pages)
-        : this(pages?.Select(static x => (x.Page, x.CompileTimeRoot, KeepsRoot: false)) ?? throw new ArgumentNullException(nameof(pages)))
-    {
-    }
-
-    /// <summary>
-    /// Builds the table from explicit components, each with its root and whether its assembly keeps it (D34): a root-keeping
-    /// assembly's relative routes start with the root's own segment, <c>/orders/list</c> being <c>orders/list</c>.
-    /// </summary>
-    /// <param name="pages">The routable components, each with its assembly's root and whether it keeps it.</param>
-    /// <exception cref="InvalidOperationException">
-    /// A template is not under its root, or two templates claim the same relative route.
-    /// </exception>
-    internal StudioRouteTable(IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> pages)
     {
         ArgumentNullException.ThrowIfNull(pages);
 
         routes = Build(pages);
     }
 
-    private static IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> Pages(IEnumerable<StudioPageAssembly> pageAssemblies)
+    private static IEnumerable<(Type Page, string CompileTimeRoot)> Pages(IEnumerable<StudioPageAssembly> pageAssemblies)
     {
         ArgumentNullException.ThrowIfNull(pageAssemblies);
 
@@ -97,7 +88,7 @@ internal sealed class StudioRouteTable
             {
                 if (typeof(IComponent).IsAssignableFrom(type))
                 {
-                    yield return (type, pageAssembly.CompileTimeRoot, pageAssembly.KeepsRoot);
+                    yield return (type, pageAssembly.CompileTimeRoot);
                 }
             }
         }
@@ -191,7 +182,7 @@ internal sealed class StudioRouteTable
         return true;
     }
 
-    private static List<RouteEntry> Build(IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> pages)
+    private static List<RouteEntry> Build(IEnumerable<(Type Page, string CompileTimeRoot)> pages)
     {
         List<RouteEntry> built = [];
 
@@ -199,13 +190,17 @@ internal sealed class StudioRouteTable
         // are one route to the endpoint router and to this table alike.
         Dictionary<string, Type> claimed = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach ((Type type, string root, bool keepsRoot) in pages)
+        foreach ((Type type, string root) in pages)
         {
+            // The shell's own root is "/", which is no prefix of a segment: every template is below it.
+            string prefix = root.TrimEnd('/');
+
             foreach (RouteAttribute attribute in type.GetCustomAttributes<RouteAttribute>())
             {
                 string template = attribute.Template;
-                if (!template.StartsWith(root, StringComparison.OrdinalIgnoreCase)
-                    || (template.Length > root.Length && template[root.Length] != '/'))
+                if (!template.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || (template.Length > prefix.Length && template[prefix.Length] != '/')
+                    || template.Length == 0 || template[0] != '/')
                 {
                     // Fail fast: such a page would get a server-side endpoint from MapRazorComponents
                     // but could never be matched here, silently breaking interactive navigation to it
@@ -214,8 +209,8 @@ internal sealed class StudioRouteTable
                         $"'{root}'. All dashboard page templates in {type.Assembly.GetName().Name} must start with '{root}'.");
                 }
 
-                string remainder = keepsRoot ? template : template.Substring(root.Length);
-                string[] segments = remainder.Length == 0 ? [] : remainder.TrimStart('/').Split('/');
+                // The address below the mount is the template without its leading slash, whatever the root.
+                string[] segments = template.Length == 1 ? [] : template.TrimStart('/').Split('/');
 
                 string shape = string.Join('/', segments.Select(static x => x.Length > 1 && x[0] == '{' ? "{}" : x));
                 if (claimed.TryGetValue(shape, out Type? first) && first != type)

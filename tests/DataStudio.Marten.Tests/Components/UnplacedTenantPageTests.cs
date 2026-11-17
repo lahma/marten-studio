@@ -69,7 +69,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", placedIn);
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=initech");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}&tenant=initech");
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -92,7 +92,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", null);
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"studio/events/streams/s?id={StreamId}&tenant=initech");
+        context.Navigate($"studio/marten/events/streams/s?id={StreamId}&tenant=initech");
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
@@ -106,7 +106,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", "db-b");
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"studio/events/streams/s?id={StreamId}&tenant=initech");
+        context.Navigate($"studio/marten/events/streams/s?id={StreamId}&tenant=initech");
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
@@ -125,7 +125,7 @@ public class UnplacedTenantPageTests
     /// </summary>
     private static Shell StartShell(bool unplaced)
     {
-        ClickableNavigationManager navigation = new("http://localhost/studio/documents/customer/doc?id=" + Id + "&tenant=initech");
+        ClickableNavigationManager navigation = new("http://localhost/studio/marten/documents/customer/doc?id=" + Id + "&tenant=initech");
 
         StudioComponentContext context = new(services =>
         {
@@ -182,11 +182,11 @@ public class UnplacedTenantPageTests
         await using Shell shell = StartShell(unplaced: true);
 
         // A rail link: the scope on screen, which the circuit is already on. Nothing applies it, so the placement stays in the state.
-        shell.Navigation.Click("?store=default&db=db-a");
+        shell.Navigation.Click("marten?store=default&db=db-a");
         await shell.Routes.InvokeAsync(() => { });
         shell.Context.State.IsTenantUnplaced(null, null, "initech").Should().BeTrue("the premise: the unplaced address is still remembered");
 
-        shell.Navigation.HistoryMove("?store=default");
+        shell.Navigation.HistoryMove("marten?store=default");
 
         shell.Routes.WaitForAssertion(() => shell.Navigation.Uri.Should().Contain("db=db-a", "an address that names no database is rewritten to the whole scope"));
     }
@@ -198,7 +198,7 @@ public class UnplacedTenantPageTests
         await using Shell shell = StartShell(unplaced: true);
         shell.Context.State.IsTenantUnplaced(null, null, "initech").Should().BeTrue("the premise");
 
-        shell.Navigation.Click("?store=nowhere&db=db-q");
+        shell.Navigation.Click("marten?store=nowhere&db=db-q");
 
         shell.Routes.WaitForAssertion(() => shell.Navigation.Uri.Should().Contain("store=default").And.NotContain("nowhere"));
     }
@@ -221,7 +221,7 @@ public class UnplacedTenantPageTests
         TaskCompletionSource gateB = new(TaskCreationOptions.RunContinuationsAsynchronously);
         context.Catalog.PlaceGates.Enqueue(gateA);
         context.Catalog.PlaceGates.Enqueue(gateB);
-        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=initech");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}&tenant=initech");
 
         // The page's own call is A, held. B is the same address again, as the shell's own call would be.
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
@@ -283,7 +283,7 @@ public class UnplacedTenantPageTests
     {
         using DocumentsComponentContext context = TwoDatabases();
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=a&tenant=b&db=d1&db=d2");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}&tenant=a&tenant=b&db=d1&db=d2");
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         await page.InvokeAsync(() => { });
@@ -292,7 +292,7 @@ public class UnplacedTenantPageTests
         page.Instance.DatabaseId.Should().Be("d1");
 
         (string? store, string? database, string? tenant) = StudioScopeQuery.Read(
-            "http://localhost/studio/documents/customer/doc?store=s1&store=s2&id=" + Id + "&tenant=a&tenant=b&db=d1&db=d2",
+            "http://localhost/studio/marten/documents/customer/doc?store=s1&store=s2&id=" + Id + "&tenant=a&tenant=b&db=d1&db=d2",
             "store");
 
         (store, database, tenant).Should().Be(("s1", "d1", "a"));

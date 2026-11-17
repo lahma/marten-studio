@@ -17,7 +17,7 @@ public class ShortcutSheetBrowserTests(BrowserSuiteFixture fixture)
         BrowserScenario.RunAsync(fixture.Browser, "pg-shortcut-sheet", fixture.Host, "admin", async studio =>
         {
             IPage page = studio.Page;
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             await page.Locator("a.ms-nav-link").First.FocusAsync();
             string expected = await page.EvaluateAsync<string>("() => document.activeElement.getAttribute('href')") ?? string.Empty;
@@ -59,7 +59,7 @@ public class ShortcutSheetBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(width, height);
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             await page.Keyboard.PressAsync("Shift+Slash");
             await page.WaitForFunctionAsync("() => { const d = document.getElementById('ms-shortcuts'); return d !== null && d.open && d.matches(':modal'); }", null, Wait);
@@ -85,7 +85,7 @@ public class ShortcutSheetBrowserTests(BrowserSuiteFixture fixture)
         BrowserScenario.RunAsync(fixture.Browser, "pg-shortcut-sheet-in-editor", fixture.Host, "admin", async studio =>
         {
             IPage page = studio.Page;
-            await studio.GoAsync(fixture.Host.StudioUrl("query"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/query"));
 
             ILocator editor = page.Locator("#ms-query-sql");
             await editor.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });

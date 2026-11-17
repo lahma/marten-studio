@@ -30,7 +30,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
             await WaitForTheBoxAsync(studio);
 
             await page.Locator("body").PressAsync("/");
@@ -51,7 +51,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             await page.Keyboard.PressAsync("Enter");
 
             await page.WaitForURLAsync(static url => url.Contains("name=qrtz_triggers", StringComparison.Ordinal), new PageWaitForURLOptions { Timeout = 30_000 });
-            page.Url.Should().Contain("database/object");
+            page.Url.Should().Contain("postgres/database/object");
 
             studio.AssertNoPageFetch("opening a find result");
             studio.AssertClean("finding a table by its name");
@@ -63,7 +63,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("query"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/query"));
             await studio.WaitForInteractiveAsync();
 
             ILocator editor = page.Locator("textarea").First;
@@ -86,7 +86,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
             {
                 IPage page = studio.Page;
 
-                await studio.GoAsync(fixture.Host.StudioUrl());
+                await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
                 await WaitForTheBoxAsync(studio);
 
                 (await page.Locator(".ms-find-toggle").IsVisibleAsync()).Should().BeTrue();

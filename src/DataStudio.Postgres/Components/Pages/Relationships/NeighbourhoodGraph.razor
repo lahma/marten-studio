@@ -225,7 +225,7 @@
         Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 
     private string TableHref(string tableSchema, string name) =>
-        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, tableSchema, name, DatabaseObjectTab.Relationships);
+        DatabaseLinks.ToObject(Descriptor, State.ActiveScope, tableSchema, name, DatabaseObjectTab.Relationships);
 
     private Task OnScopeChangedAsync() => InvokeAsync(async () =>
     {

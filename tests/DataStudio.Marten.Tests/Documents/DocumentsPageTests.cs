@@ -148,7 +148,7 @@ public class DocumentsPageTests
 
         page.FindAll(".ms-doc-row").Should().HaveCount(2);
         page.Find(".ms-doc-id").GetAttribute("href")
-            .Should().Contain("documents/customer/doc?")
+            .Should().Contain("marten/documents/customer/doc?")
             .And.Contain("id=8f1d5a6e-0000-0000-0000-000000000001");
     }
 
@@ -354,7 +354,7 @@ public class DocumentsPageTests
         using var context = new DocumentsComponentContext();
         context.Data.Rail = FakeDocuments.Rail();
         context.Data.Page = FakeDocuments.Page(rows: [FakeDocuments.Row("1")], hasMore: true);
-        context.Navigate("studio/documents/customer?paging=offset&page=500&size=50");
+        context.Navigate("studio/marten/documents/customer?paging=offset&page=500&size=50");
 
         var page = Render(context, "customer");
 

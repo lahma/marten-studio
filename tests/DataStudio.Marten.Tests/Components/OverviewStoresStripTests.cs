@@ -22,8 +22,8 @@ public class OverviewStoresStripTests
 
         page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim()).Should().Equal("Default", "Other");
 
-        page.FindAll(".ms-stores-strip-link").Select(static x => x.GetAttribute("href")).Should().Equal("?store=default", "?store=other");
-        page.Find(".ms-stores-strip-all").GetAttribute("href").Should().Be("stores?store=default&db=localhost.marten", "the link keeps the scope");
+        page.FindAll(".ms-stores-strip-link").Select(static x => x.GetAttribute("href")).Should().Equal("marten?store=default", "marten?store=other");
+        page.Find(".ms-stores-strip-all").GetAttribute("href").Should().Be("marten/stores?store=default&db=localhost.marten", "the link keeps the scope");
         page.Find(".ms-stores-strip-all").TextContent.Trim().Should().Be("All stores");
 
         page.FindAll(".ms-stores-strip-link").Single(static x => x.GetAttribute("aria-current") == "true").TextContent.Trim()
@@ -43,7 +43,7 @@ public class OverviewStoresStripTests
         IRenderedComponent<Overview> page = context.Render<Overview>();
 
         page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim()).Should().Equal("Default", "Broken (unavailable)");
-        page.FindAll(".ms-stores-strip-link")[1].GetAttribute("href").Should().Be("?store=broken");
+        page.FindAll(".ms-stores-strip-link")[1].GetAttribute("href").Should().Be("marten?store=broken");
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class OverviewStoresStripTests
 
         page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim())
             .Should().Equal(["Default", "Master table store (could not be listed)"], "one listed store and one that could not be listed are two stores");
-        page.Find(".ms-stores-strip-unlistable").GetAttribute("href").Should().StartWith("stores?");
+        page.Find(".ms-stores-strip-unlistable").GetAttribute("href").Should().StartWith("marten/stores?");
     }
 
     [Fact]

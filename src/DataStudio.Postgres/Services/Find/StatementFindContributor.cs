@@ -77,7 +77,7 @@ internal sealed class StatementFindContributor : IFindContributor
             hits.Add(new FindHit(
                 Kind: "Statement",
                 Title: "Statement " + key,
-                Url: StatementLinks.ToStatement(settings, descriptor, scope, queryId),
+                Url: StatementLinks.ToStatement(descriptor, scope, queryId),
                 Scope: scope,
                 Id: key,
                 Detail: Excerpt(row.Text)));

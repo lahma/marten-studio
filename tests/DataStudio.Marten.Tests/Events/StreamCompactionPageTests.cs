@@ -474,7 +474,7 @@ public class StreamCompactionPageTests
 
         IElement chip = page.Find(".ms-event-tag-chip");
         chip.QuerySelector(".ms-event-meta-key")!.TextContent.Should().Be("customer");
-        chip.QuerySelector("a")!.GetAttribute("href").Should().Contain("events/feed").And.Contain("tag=customer%3Dacme-1");
+        chip.QuerySelector("a")!.GetAttribute("href").Should().Contain("marten/events/feed").And.Contain("tag=customer%3Dacme-1");
         page.FindAll(".ms-event-tags-note").Should().BeEmpty();
     }
 
@@ -516,7 +516,7 @@ public class StreamCompactionPageTests
 
     private static IRenderedComponent<StreamDetail> Render(StudioComponentContext context)
     {
-        context.Navigate("studio/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/marten/events/streams/s?id=" + StreamId);
         return context.Render<StreamDetail>();
     }
 

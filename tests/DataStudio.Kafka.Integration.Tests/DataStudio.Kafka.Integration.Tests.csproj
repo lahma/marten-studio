@@ -49,6 +49,7 @@
     <Compile Include="../DataStudio.Kafka.Tests/Contract/ReaderAclContract.cs" Link="Contract/ReaderAclContract.cs" />
     <Compile Include="../DataStudio.Kafka.Tests/Contract/IContractCluster.cs" Link="Contract/IContractCluster.cs" />
     <Compile Include="../DataStudio.Kafka.Tests/Contract/EngineHarness.cs" Link="Contract/EngineHarness.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
   </ItemGroup>
 

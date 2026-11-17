@@ -106,9 +106,9 @@ public class AddKafkaTests
         StudioShellDescriptor second = after.GetRequiredService<StudioShellDescriptor>();
 
         first.Navigation.Select(static x => x.Title).Should().Equal(second.Navigation.Select(static x => x.Title));
-        first.Navigation.Select(static x => x.Title).Should().Equal("Data", "Database", "Operations", "Kafka", "System");
+        first.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Data", "Database", "Operations", "System", "Studio");
         first.PageAssemblies.Should().HaveCount(3, "the database's, the shell's Activity page and the module's");
-        first.Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
+        first.Modules.Select(static x => x.Key).Should().Equal("kafka", "postgres");
         first.Navigation.Single(static x => x.Title == "Kafka").ModuleKey.Should().Be("kafka");
     }
 
@@ -130,7 +130,7 @@ public class AddKafkaTests
         using ServiceProvider provider = Build(static services => services.AddDataStudio().AddPostgres());
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Instance);
-        provider.GetRequiredService<StudioShellDescriptor>().Modules.Should().ContainSingle().Which.IsRoot.Should().BeTrue("the database is the one module");
+        provider.GetRequiredService<StudioShellDescriptor>().Modules.Should().ContainSingle().Which.HomeRoute.Should().Be("postgres", "the database is the one module");
     }
 
     [Fact]
@@ -144,9 +144,9 @@ public class AddKafkaTests
 
         IStudioModule module = provider.GetRequiredService<StudioShellDescriptor>().Modules.Single(static x => x.Key == "kafka");
 
-        module.IsRoot.Should().BeFalse();
-        module.PageAssemblies.Should().ContainSingle().Which.KeepsRoot.Should().BeTrue();
-        module.PageAssemblies.Single().CompileTimeRoot.Should().Be("/kafka");
+        module.PageAssemblies.Should().ContainSingle().Which.CompileTimeRoot.Should().Be("/kafka");
+        module.HomeRoute.Should().Be("kafka");
+        module.Summary.Should().Be("Topics, record search and live tail of the application's clusters.");
         module.ProductName.Should().Be("KStudio for Apache Kafka®");
         module.CapabilityGroups.Should().ContainSingle().Which.Heading.Should().Be("KStudio for Apache Kafka® reads");
         module.CapabilityGroups.Single().Capabilities.Should().Equal(

@@ -43,6 +43,12 @@ internal sealed record StudioNavItem(
     /// closed). The database's keys are <c>DatabaseRailConditions</c>.
     /// </summary>
     public string? ShownWhen { get; init; }
+
+    /// <summary>
+    /// Whether the entry is lit by its own address alone, and not by every page below it: a module's Overview entry sits at the module's home
+    /// (<c>marten</c>), which is a prefix of every other page of the module. The other entries are lit by their page and its sub-pages.
+    /// </summary>
+    public bool Exact { get; init; }
 }
 
 /// <summary>What one sidebar badge renders as.</summary>

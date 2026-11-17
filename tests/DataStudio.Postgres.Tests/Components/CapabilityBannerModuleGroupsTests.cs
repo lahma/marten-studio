@@ -20,9 +20,7 @@ public class CapabilityBannerModuleGroupsTests
 
         public string ProductName => "Fake " + key;
 
-        public bool IsRoot => false;
-
-        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(FakeModule).Assembly, root) { KeepsRoot = true }];
+        public IReadOnlyList<StudioPageAssembly> PageAssemblies => [new(typeof(FakeModule).Assembly, root)];
 
         public IReadOnlyList<StudioNavSection> Navigation => [];
 
@@ -35,6 +33,8 @@ public class CapabilityBannerModuleGroupsTests
         public Type? ScopeGate => null;
 
         public string HomeRoute => key;
+
+        public string Summary => "A fake.";
 
         public string ExposedSentence => "Fake.";
 

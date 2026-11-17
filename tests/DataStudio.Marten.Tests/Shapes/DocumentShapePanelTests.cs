@@ -125,7 +125,7 @@ public class DocumentShapePanelTests
 
             IElement example = page.Find(".ms-shape-table a.ms-id-text");
             example.TextContent.Should().Be("doc-1");
-            example.GetAttribute("href").Should().Contain("documents/customer/doc").And.Contain("id=doc-1");
+            example.GetAttribute("href").Should().Contain("marten/documents/customer/doc").And.Contain("id=doc-1");
         }
     }
 

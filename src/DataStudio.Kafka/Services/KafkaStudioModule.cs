@@ -17,7 +17,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaOptions> options) : IStudi
     /// <summary>The compile-time root every Kafka page's <c>@page</c> starts with.</summary>
     internal const string PageRoot = "/kafka";
 
-    private readonly IReadOnlyList<StudioPageAssembly> pages = [new(typeof(KafkaStudioModule).Assembly, PageRoot) { KeepsRoot = true }];
+    private readonly IReadOnlyList<StudioPageAssembly> pages = [new(typeof(KafkaStudioModule).Assembly, PageRoot)];
     private readonly IReadOnlyList<StudioNavSection> navigation = Rail(options);
 
     /// <inheritdoc />
@@ -25,9 +25,6 @@ internal sealed class KafkaStudioModule(IOptions<KafkaOptions> options) : IStudi
 
     /// <inheritdoc />
     public string ProductName => KafkaStudioText.ProductName;
-
-    /// <inheritdoc />
-    public bool IsRoot => false;
 
     /// <inheritdoc />
     public IReadOnlyList<StudioPageAssembly> PageAssemblies => pages;
@@ -74,6 +71,9 @@ internal sealed class KafkaStudioModule(IOptions<KafkaOptions> options) : IStudi
 
     /// <inheritdoc />
     public string HomeRoute => "kafka";
+
+    /// <inheritdoc />
+    public string Summary => "Topics, record search and live tail of the application's clusters.";
 
     /// <inheritdoc />
     public string ExposedSentence => KafkaStudioText.ExposedSentence;

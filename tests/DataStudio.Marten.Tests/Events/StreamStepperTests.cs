@@ -24,7 +24,7 @@ public class StreamStepperTests
     {
         using StudioComponentContext context = await NewContextAsync();
 
-        context.Navigate("studio/events/streams/step");
+        context.Navigate("studio/marten/events/streams/step");
         IRenderedComponent<StreamStepper> page = context.Render<StreamStepper>();
 
         page.Find(".ms-empty-title").TextContent.Should().Be("No stream asked for");
@@ -102,7 +102,7 @@ public class StreamStepperTests
 
         page.FindAll(".ms-stepper-steps-item")[2].QuerySelector(".ms-stepper-marker-dead").Should().NotBeNull();
         page.Find(".ms-stepper-dead-letter").TextContent.Should().Contain("StepTally").And.Contain("InvalidOperationException");
-        page.Find(".ms-stepper-dead-letter a").GetAttribute("href").Should().Contain("events/dead-letters?seq=103");
+        page.Find(".ms-stepper-dead-letter a").GetAttribute("href").Should().Contain("marten/events/dead-letters?seq=103");
     }
 
     /// <summary>D9: every move is a navigation, and a move inside the window reads nothing; outside it, the next window.</summary>
@@ -270,11 +270,11 @@ public class StreamStepperTests
     {
         using StudioComponentContext context = await ArrangedAsync();
 
-        context.Navigate("studio/events/streams/s?id=" + StreamId + "&agg=" + Aggregate + "&v=2");
+        context.Navigate("studio/marten/events/streams/s?id=" + StreamId + "&agg=" + Aggregate + "&v=2");
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
         page.Find("a.ms-time-travel-step").GetAttribute("href").Should()
-            .Contain("events/streams/step?id=" + StreamId).And.Contain("agg=" + Aggregate).And.Contain("v=2");
+            .Contain("marten/events/streams/step?id=" + StreamId).And.Contain("agg=" + Aggregate).And.Contain("v=2");
     }
 
     /// <summary>The window every test steps: three events, the third one's fold threw and a dead letter names it.</summary>
@@ -325,7 +325,7 @@ public class StreamStepperTests
         return context;
     }
 
-    private static string Url(string extra) => "studio/events/streams/step?id=" + StreamId + extra;
+    private static string Url(string extra) => "studio/marten/events/streams/step?id=" + StreamId + extra;
 
     private static IRenderedComponent<StreamStepper> Render(StudioComponentContext context, string extra)
     {

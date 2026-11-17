@@ -53,7 +53,7 @@ public class PostgresStudioSampleHostTests
 
         using HttpClient admin = await SignInAsync(host, "admin");
 
-        using (HttpResponseMessage page = await admin.GetAsync(new Uri("/studio", UriKind.Relative), Token))
+        using (HttpResponseMessage page = await admin.GetAsync(new Uri("/studio/postgres", UriKind.Relative), Token))
         {
             page.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
 
@@ -64,7 +64,7 @@ public class PostgresStudioSampleHostTests
             html.Should().Contain("<option value=\"tenants\"", "the tenant databases are a second source, AddDatabaseSource(\"tenants\")");
         }
 
-        using (HttpResponseMessage tenants = await admin.GetAsync(new Uri("/studio?store=tenants", UriKind.Relative), Token))
+        using (HttpResponseMessage tenants = await admin.GetAsync(new Uri("/studio/postgres?store=tenants", UriKind.Relative), Token))
         {
             tenants.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
 

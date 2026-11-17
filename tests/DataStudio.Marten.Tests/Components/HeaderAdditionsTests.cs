@@ -164,7 +164,7 @@ public class HeaderAdditionsTests
     public void Clicking_it_copies_the_address_of_the_page_with_its_scope_and_says_so()
     {
         using StudioComponentContext context = Context();
-        context.Navigate("documents?store=default&db=localhost.marten&tenant=acme");
+        context.Navigate("marten/documents?store=default&db=localhost.marten&tenant=acme");
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
 
         IRenderedComponent<CopyLinkButton> button = context.Render<CopyLinkButton>();
@@ -196,7 +196,7 @@ public class HeaderAdditionsTests
     public void A_clipboard_that_would_not_take_it_shows_the_address_to_copy_by_hand()
     {
         using StudioComponentContext context = Context();
-        context.Navigate("query?store=default&db=localhost.marten");
+        context.Navigate("postgres/query?store=default&db=localhost.marten");
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(false);
 
         IRenderedComponent<CopyLinkButton> button = context.Render<CopyLinkButton>();
@@ -248,7 +248,7 @@ public class HeaderAdditionsTests
         button.Find("button.ms-copy-link-button").Click();
         button.FindAll(".ms-copy-link-fallback").Should().ContainSingle();
 
-        context.Navigate("events/streams");
+        context.Navigate("marten/events/streams");
 
         button.WaitForAssertion(() => button.FindAll(".ms-copy-link-fallback").Should().BeEmpty());
     }

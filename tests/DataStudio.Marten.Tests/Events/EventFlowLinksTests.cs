@@ -93,9 +93,9 @@ public class EventFlowLinksTests
     [Fact]
     public void A_link_to_a_projection_carries_the_scope_and_ends_in_its_anchor()
     {
-        string link = EventLinks.ToProjection(MartenStudioSettings.Of(new MartenOptions()), new DataStudio.Postgres.Services.StudioScope("default", "db1", null), "DailySales");
+        string link = EventLinks.ToProjection(new DataStudio.Postgres.Services.StudioScope("default", "db1", null), "DailySales");
 
-        link.Should().Be("projections?store=default&db=db1#projection-DailySales");
+        link.Should().Be("marten/projections?store=default&db=db1#projection-DailySales");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -115,7 +115,7 @@ public class EventFlowLinksTests
         row.GetAttribute("id").Should().Be("projection-DailySales");
         IElement link = row.QuerySelector("a.ms-projection-flow-link")!;
         link.TextContent.Should().Be("Show its flow");
-        link.GetAttribute("href").Should().StartWith("events/flow?projection=DailySales").And.Contain("store=default");
+        link.GetAttribute("href").Should().StartWith("marten/events/flow?projection=DailySales").And.Contain("store=default");
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public class EventFlowLinksTests
 
         IElement row = page.WaitForElement(ConfirmDialog + " .ms-rebuild-event-types");
         row.TextContent.Should().Contain("Event types read").And.Contain("order_placed (and Marten's own archived)");
-        row.QuerySelector("a.ms-rebuild-flow-link")!.GetAttribute("href").Should().StartWith("events/flow?projection=DailySales");
+        row.QuerySelector("a.ms-rebuild-flow-link")!.GetAttribute("href").Should().StartWith("marten/events/flow?projection=DailySales");
         context.EventData.EventFlowReads.Should().Be(1, "it comes from the flow's cached model, read once for the one dialog opened");
         context.EventData.EventFlowScopes.Single().Should().Be(context.Services.GetRequiredService<DataStudio.Postgres.Services.StudioState>().ActiveScope, "the scope the page is on");
     }
@@ -188,7 +188,7 @@ public class EventFlowLinksTests
 
         IReadOnlyList<IElement> links = page.FindAll("a.ms-event-flow-link");
         links.Should().ContainSingle();
-        links[0].GetAttribute("href").Should().StartWith("events/flow?type=OrderPlaced").And.Contain("store=default");
+        links[0].GetAttribute("href").Should().StartWith("marten/events/flow?type=OrderPlaced").And.Contain("store=default");
     }
 
     [Fact]
@@ -197,11 +197,11 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext();
         context.EventData.EventFlow = new EventFlowResult(EventFlowFixtures.Sample(), null);
         await context.ReadyAsync();
-        context.Navigate("studio/events/flow");
+        context.Navigate("studio/marten/events/flow");
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Events.EventFlow> page = context.Render<DataStudio.Marten.Components.Pages.Events.EventFlow>();
 
-        page.Find("tr[data-source='Orders'] a.ms-flow-source-link").GetAttribute("href").Should().StartWith("projections?").And.EndWith("#projection-Orders");
+        page.Find("tr[data-source='Orders'] a.ms-flow-source-link").GetAttribute("href").Should().StartWith("marten/projections?").And.EndWith("#projection-Orders");
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
-        context.Navigate("studio/projections#projection-DailySales");
+        context.Navigate("studio/marten/projections#projection-DailySales");
 
         IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
         page.WaitForElement("tr[data-projection='DailySales']");
@@ -274,7 +274,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
-        context.Navigate("studio/projections" + fragment);
+        context.Navigate("studio/marten/projections" + fragment);
 
         IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
         page.WaitForElement("tr[data-projection='DailySales']");
@@ -294,7 +294,7 @@ public class EventFlowLinksTests
     [Fact]
     public void A_flow_link_for_one_projection_filters_by_its_name_alone()
     {
-        EventLinks.ToFlow(MartenStudioSettings.Of(new MartenOptions()), null, "Orders").Should().Be("events/flow?projection=Orders");
+        EventLinks.ToFlow(null, "Orders").Should().Be("marten/events/flow?projection=Orders");
     }
 
     [Fact]
@@ -316,7 +316,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext();
         context.EventData.EventFlow = new EventFlowResult(model, null);
         await context.ReadyAsync();
-        context.Navigate("studio/events/flow");
+        context.Navigate("studio/marten/events/flow");
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Events.EventFlow> page = context.Render<DataStudio.Marten.Components.Pages.Events.EventFlow>();
 

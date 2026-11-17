@@ -57,7 +57,7 @@ public class OverviewTests
         page.WaitForAssertion(() => page.FindAll(".ms-overview-connection").Should().ContainSingle());
         string.Join(' ', page.Find(".ms-overview-connection").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries))
             .Should().Be("Connection: TLS verified (VerifyFull) · pool 100 · 2 things worth a look");
-        page.Find(".ms-overview-connection a").GetAttribute("href").Should().Contain("database/connection");
+        page.Find(".ms-overview-connection a").GetAttribute("href").Should().Contain("postgres/database/connection");
     }
 
     [Fact]
@@ -270,11 +270,11 @@ public class OverviewTests
         List<string> hrefs = [.. page.FindAll(".ms-overview-tiles a").Select(x => x.GetAttribute("href") ?? string.Empty)];
 
         hrefs.Should().HaveCount(7);
-        hrefs.Should().Contain(x => x.StartsWith("health?", StringComparison.Ordinal), "the Health tile opens the Health page");
-        hrefs.Should().Contain(x => x.StartsWith("events/streams?", StringComparison.Ordinal));
-        hrefs.Should().Contain(x => x.StartsWith("events/feed?", StringComparison.Ordinal));
-        hrefs.Should().Contain(x => x.StartsWith("events/dead-letters?", StringComparison.Ordinal));
-        hrefs.Should().Contain(x => x.StartsWith("projections?", StringComparison.Ordinal));
+        hrefs.Should().Contain(x => x.StartsWith("postgres/health?", StringComparison.Ordinal), "the Health tile opens the Health page");
+        hrefs.Should().Contain(x => x.StartsWith("marten/events/streams?", StringComparison.Ordinal));
+        hrefs.Should().Contain(x => x.StartsWith("marten/events/feed?", StringComparison.Ordinal));
+        hrefs.Should().Contain(x => x.StartsWith("marten/events/dead-letters?", StringComparison.Ordinal));
+        hrefs.Should().Contain(x => x.StartsWith("marten/projections?", StringComparison.Ordinal));
 
         // The scope rides on every one of them, so a pasted link opens the same database (D9).
         hrefs.Should().OnlyContain(x => x.Contains("store=default", StringComparison.Ordinal));
@@ -452,8 +452,8 @@ public class OverviewTests
         page.TextOfAll(".ms-overview-events .ms-overview-list-seq").Should().Equal("#9", "#8");
 
         page.FindAll(".ms-overview-events a").Select(x => x.GetAttribute("href")).Should()
-            .Contain(x => x!.StartsWith("events/streams/s?id=order-9", StringComparison.Ordinal))
-            .And.Contain(x => x!.StartsWith("events/feed?types=OrderPlaced", StringComparison.Ordinal));
+            .Contain(x => x!.StartsWith("marten/events/streams/s?id=order-9", StringComparison.Ordinal))
+            .And.Contain(x => x!.StartsWith("marten/events/feed?types=OrderPlaced", StringComparison.Ordinal));
 
         // Fifteen, the way the plan asks - and the request says so rather than the page trimming later.
         context.EventData.FeedRequests[^1].PageSize.Should().Be(15);

@@ -130,13 +130,13 @@ else
 
             case RowReferenceState.Present when reference is { TargetsRowKey: true, ParentKey: { } parentKey, Schema: { } schema, Table: { } table }:
                 @Parent(reference)
-                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRow(Settings, Descriptor, State.ActiveScope, schema, table, Ordered(parentKey, reference.LinkedColumns))" title="Open the row this points at">@RowPresentation.KeyTuple(Ordered(parentKey, reference.LinkedColumns))</a>
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRow(Descriptor, State.ActiveScope, schema, table, Ordered(parentKey, reference.LinkedColumns))" title="Open the row this points at">@RowPresentation.KeyTuple(Ordered(parentKey, reference.LinkedColumns))</a>
                 @NotValid(reference)
                 break;
 
             case RowReferenceState.Present when reference is { Schema: { } schema, Table: { } table }:
                 @Parent(reference)
-                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, schema, table, reference.ParentFilter)" title="The key references a unique key other than the row key: show the parent's rows that match">@Values(reference)</a>
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRows(Descriptor, State.ActiveScope, schema, table, reference.ParentFilter)" title="The key references a unique key other than the row key: show the parent's rows that match">@Values(reference)</a>
                 @NotValid(reference)
                 break;
 
@@ -164,7 +164,7 @@ else
     {
         if (reference is { Schema: { } schema, Table: { } table })
         {
-            <a class="ms-row-ref-table" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)">
+            <a class="ms-row-ref-table" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, table)">
                 <TableChip Schema="@schema" Name="@table" Hue="@RelationshipTableNode.SchemaHue(schema)" Small="true" />
             </a>
         }
@@ -183,7 +183,7 @@ else
         switch (reference.State)
         {
             case RowInboundState.Counted when reference.ChildFilter is { Length: > 0 } filter:
-                <a class="ms-row-ref-link" href="@DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, reference.Schema, reference.Table, filter)" title="@CountTitle(reference)">
+                <a class="ms-row-ref-link" href="@DatabaseLinks.ToRows(Descriptor, State.ActiveScope, reference.Schema, reference.Table, filter)" title="@CountTitle(reference)">
                     <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
                     <span class="ms-referenced-count">@CountText(reference)</span>
                 </a>

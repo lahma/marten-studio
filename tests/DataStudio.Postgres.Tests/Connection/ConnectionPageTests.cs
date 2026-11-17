@@ -80,7 +80,7 @@ public sealed class ConnectionPageTests
     public async Task A_fragment_the_page_names_is_scrolled_to_once_after_the_view_is_drawn(string fragment, string id)
     {
         await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
-        context.Navigate("studio/database/connection" + fragment);
+        context.Navigate("studio/postgres/database/connection" + fragment);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
 
@@ -100,7 +100,7 @@ public sealed class ConnectionPageTests
     public async Task No_fragment_or_one_the_page_does_not_own_scrolls_nothing(string fragment)
     {
         await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
-        context.Navigate("studio/database/connection" + fragment);
+        context.Navigate("studio/postgres/database/connection" + fragment);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
         await page.InvokeAsync(() => page.Find(".ms-conn-actions button").Click());

@@ -1,19 +1,40 @@
 @page "/postgres"
-@using DataStudio.Postgres.Services.Settings
-@inject StudioDescriptor Descriptor
+@using DataStudio.Services.Settings
+@inject StudioShellDescriptor Shell
+@inject NavigationManager Navigation
 
 @*
-    The studio's root page. One route, one endpoint, whatever studio is mapped: the body is the descriptor's
-    OverviewComponent - MartenStudio's store overview, another studio's own - and this page names no studio's
-    component itself (design PS5, §2.5).
+    The Postgres module's home, at {mount}/postgres: the Postgres overview.
 
-    A body slot rather than two routed components, because two components claiming the root would be two
-    endpoints on one pattern: an AmbiguousMatchException at request time, and a relative route the route table
-    refuses. The body keeps everything a page has - its <PageTitle>, its [SupplyParameterFromQuery] properties,
-    its scope subscription - because nothing about any of those depends on being the routed component.
-
-    The compile-time root is this assembly's (StudioPageAssembly); the endpoint mapping re-roots it under the
-    configured mount path like every other page.
+    A Marten host serves the same Postgres pages over its stores' databases, but its home is the Marten module's (its page at {mount}/marten), and
+    this address must not be a second copy of it: the visitor is sent there, with the query string they came with. That runs on the prerender, where
+    the framework turns it into the response's own redirect, and on the circuit, where it is a navigation. The module that owns this page decides: a
+    page never names the Marten module's address, so it is the module's HomeRoute that is followed.
 *@
 
-<DynamicComponent Type="@Descriptor.OverviewComponent" />
+@if (homeElsewhere is null)
+{
+    <PostgresOverview />
+}
+
+@code
+{
+    /// <summary>The home of the module this page belongs to, when it is not this module's own (<c>marten</c>); <see langword="null" /> for the Postgres module.</summary>
+    private string? homeElsewhere;
+
+    protected override void OnInitialized()
+    {
+        if (Shell.ModuleOf(typeof(StudioHome)) is not { } module || string.Equals(module.HomeRoute, PostgresRoutes.Root, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        homeElsewhere = module.HomeRoute;
+
+        // This page's own address, as the request spelled it (the prerender's base URI is the application's, the circuit's is the mount's, so a
+        // relative reference would be one or the other), with its last segment replaced by the module's home.
+        Uri current = new(Navigation.Uri);
+        string path = current.AbsolutePath.TrimEnd('/');
+        Navigation.NavigateTo(string.Concat(path.AsSpan(0, path.Length - PostgresRoutes.Root.Length), homeElsewhere, current.Query), replace: true);
+    }
+}

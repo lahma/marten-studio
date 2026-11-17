@@ -1,4 +1,3 @@
-using DataStudio.Services.Settings;
 using System.Globalization;
 
 using JasperFx.Events;
@@ -42,13 +41,11 @@ internal sealed class StreamFindContributor : IFindContributor
 
     private readonly IEventDataService events;
     private readonly IFindScopes scopes;
-    private readonly IShellSettings settings;
 
-    public StreamFindContributor(IEventDataService events, IFindScopes scopes, IShellSettings settings)
+    public StreamFindContributor(IEventDataService events, IFindScopes scopes)
     {
         this.events = events;
         this.scopes = scopes;
-        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -153,7 +150,7 @@ internal sealed class StreamFindContributor : IFindContributor
         return new FindContribution(hits, searched.Count == 0 ? null : string.Join(", ", searched), notes, restricted);
     }
 
-    private void AddStreamHits(
+    private static void AddStreamHits(
         List<FindHit> hits,
         string kind,
         FindContext context,
@@ -178,7 +175,7 @@ internal sealed class StreamFindContributor : IFindContributor
             hits.Add(new FindHit(
                 Kind: kind,
                 Title: title(row),
-                Url: EventLinks.ToStream(settings, at, row.Id),
+                Url: EventLinks.ToStream(at, row.Id),
                 Scope: at,
                 Id: identity + "\u001f" + row.Id,
                 TenantChip: rowTenant is null ? null : "tenant " + rowTenant,

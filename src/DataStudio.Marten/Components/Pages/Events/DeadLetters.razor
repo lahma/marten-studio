@@ -16,7 +16,6 @@
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenOptions> Options
-@inject IStudioSettings Settings
 
 <PageTitle>Dead letters</PageTitle>
 
@@ -1156,7 +1155,6 @@
 
     private string PageHref(int offset) =>
         EventLinks.To(
-            Settings,
             EventLinks.DeadLettersRoute,
             State.ActiveScope,
             [
@@ -1171,7 +1169,6 @@
     /// <summary>The same filters without the event's, back to every dead letter they match.</summary>
     private string WithoutSequenceHref =>
         EventLinks.To(
-            Settings,
             EventLinks.DeadLettersRoute,
             State.ActiveScope,
             [new("projection", Projection), new("shard", Shard), new("exception", Exception), new("group", Group)]);
@@ -1183,7 +1180,6 @@
     /// </summary>
     private string StepHref(EventRow offending, string projection) =>
         EventLinks.ToStep(
-            Settings,
             State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(offending.TenantId)
                 ? all with { TenantId = offending.TenantId }
                 : State.ActiveScope,
@@ -1198,7 +1194,6 @@
     /// </summary>
     private string StreamHref(string streamId, string? eventTenantId) =>
         EventLinks.ToStream(
-            Settings,
             State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(eventTenantId)
                 ? all with { TenantId = eventTenantId }
                 : State.ActiveScope,

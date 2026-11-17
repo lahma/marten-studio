@@ -12,7 +12,7 @@ namespace DataStudio.Marten.Tests.Components;
 
 /// <summary>
 /// The studio's own route matching, which exists because the built-in router can only match the
-/// compile-time <c>/marten</c> templates against the browser URL.
+/// compile-time templates (<c>/marten/...</c>, <c>/postgres/...</c>) against the browser URL, not against a mount path.
 /// </summary>
 /// <remarks>
 /// Every mount is studio-rooted now, so the two base URI shapes are no longer "default path" and "custom
@@ -43,8 +43,8 @@ public class StudioRouteTableTests
     // -------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The Marten module's pages are rooted at <c>/marten</c> and the shared database pages at <c>/postgres</c>, each re-rooted at the
-    /// mount path from its own root (design §2.5); the shell's own page (Activity) is the shell's to add, not the module's.
+    /// The Marten module's pages are rooted at <c>/marten</c> and the shared database pages at <c>/postgres</c>, each kept as the first segment of
+    /// its address below the mount path; the shell's own pages (the front page, Activity) are rooted at <c>/</c> and are the shell's to add, not the module's.
     /// </summary>
     [Fact]
     public void The_descriptor_names_both_studio_assemblies_and_the_shells_each_at_its_own_root()
@@ -54,33 +54,34 @@ public class StudioRouteTableTests
             new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"));
 
         typeof(StudioHome).Assembly.Should().NotBeSameAs(typeof(DataStudio.Marten.Components.Pages.Overview).Assembly, "the shared pages are an assembly of their own");
-        StudioShellDescriptor.ShellPages.Should().Be(new StudioPageAssembly(typeof(Activity).Assembly, "/postgres"), "the shell's page is the shell's");
+        StudioShellDescriptor.ShellPages.Should().Be(new StudioPageAssembly(typeof(Activity).Assembly, "/"), "the shell's pages are the shell's");
     }
 
     [Fact]
-    public void Each_assembly_s_pages_are_matched_below_its_own_root()
+    public void Each_assemblys_pages_are_matched_below_its_own_root_which_is_their_first_segment()
     {
         StudioRouteTable table = new(
         [
-            (typeof(Activity), "/postgres"),
+            (typeof(Activity), "/"),
             (typeof(DataStudio.Marten.Components.Pages.Projections.Projections), "/marten"),
             (typeof(ElsewherePage), "/elsewhere"),
         ]);
 
         table.Match("activity")!.PageType.Should().Be<Activity>();
-        table.Match("projections")!.PageType.Should().Be<DataStudio.Marten.Components.Pages.Projections.Projections>();
-        table.Match("other")!.PageType.Should().Be<ElsewherePage>();
-        table.Match("elsewhere/other").Should().BeNull("a template is stored relative to its own root");
-        table.Match("postgres/activity").Should().BeNull("the shared studio's root is stripped like any other");
+        table.Match("marten/projections")!.PageType.Should().Be<DataStudio.Marten.Components.Pages.Projections.Projections>();
+        table.Match("elsewhere/other")!.PageType.Should().Be<ElsewherePage>();
+        table.Match("projections").Should().BeNull("a template is stored with its root, never relative to it");
+        table.Match("other").Should().BeNull();
+        table.Match("postgres/activity").Should().BeNull("the shell's page is at the mount, not under the Postgres module's segment");
     }
 
     [Fact]
     public void A_route_two_pages_claim_is_refused_when_the_table_is_built()
     {
-        Action build = () => _ = new StudioRouteTable([(typeof(Activity), "/postgres"), (typeof(DuplicateActivityPage), "/elsewhere")]);
+        Action build = () => _ = new StudioRouteTable([(typeof(ElsewherePage), "/elsewhere"), (typeof(DuplicateOtherPage), "/elsewhere")]);
 
         build.Should().Throw<InvalidOperationException>()
-            .WithMessage("*Activity*DuplicateActivityPage*both claim the route '/activity'*");
+            .WithMessage("*ElsewherePage*DuplicateOtherPage*both claim the route '/elsewhere/other'*");
     }
 
     [Fact]
@@ -102,14 +103,14 @@ public class StudioRouteTableTests
     [Fact]
     public void Marten_studio_s_own_pages_build_one_table_with_no_duplicate()
     {
-        new StudioRouteTable(MartenSpine.Descriptor.PageAssemblies).Match("database/object").Should().NotBeNull();
+        new StudioRouteTable(MartenSpine.Descriptor.PageAssemblies).Match("postgres/database/object").Should().NotBeNull();
     }
 
     [Route("/elsewhere/other")]
     private sealed class ElsewherePage : ComponentBase;
 
-    [Route("/elsewhere/activity")]
-    private sealed class DuplicateActivityPage : ComponentBase;
+    [Route("/elsewhere/other")]
+    private sealed class DuplicateOtherPage : ComponentBase;
 
     [Route("/elsewhere/things/{id}")]
     private sealed class KeyedPage : ComponentBase;
@@ -118,13 +119,13 @@ public class StudioRouteTableTests
     private sealed class OtherKeyedPage : ComponentBase;
 
     [Theory]
-    [InlineData(null, "")]
-    [InlineData(null, "activity")]
-    [InlineData("/ops/marten", "")]
-    [InlineData("/ops/marten", "activity")]
-    public void A_link_is_the_path_below_the_studio_root_whatever_the_mount(string? path, string subPath)
+    [InlineData("")]
+    [InlineData("activity")]
+    [InlineData("marten/documents")]
+    [InlineData("postgres/query")]
+    public void A_link_is_the_whole_address_below_the_mount_whatever_the_mount(string subPath)
     {
-        StudioLink.To(Options(path), subPath).Should().Be(subPath);
+        StudioLink.To(subPath).Should().Be(subPath);
     }
 
     // -------------------------------------------------------------------------------------------
@@ -173,11 +174,13 @@ public class StudioRouteTableTests
     [Theory]
     [InlineData(null)]
     [InlineData("/ops/marten")]
-    public void The_studio_root_matches_the_overview(string? path)
+    public void The_mount_is_the_front_page_and_each_modules_home_is_its_own_segment(string? path)
     {
-        // The shared root page, whose body is the descriptor's overview (PS-1d); the overview itself has no @page.
-        Routes.Match("", Options(path))!.PageType.Should().Be<StudioHome>();
-        MartenSpine.Descriptor.OverviewComponent.Should().Be<Overview>();
+        // The shell's front page is at the mount; the Marten module's overview is its home page, and the Postgres module's home (in a Marten host a redirect
+        // to the Marten one) is the shared StudioHome.
+        Routes.Match("", Options(path))!.PageType.Should().Be<DataStudio.Components.Pages.Front>();
+        Routes.Match("marten", Options(path))!.PageType.Should().Be<Overview>();
+        Routes.Match("postgres", Options(path))!.PageType.Should().Be<StudioHome>();
     }
 
     [Theory]
@@ -185,17 +188,18 @@ public class StudioRouteTableTests
     [InlineData("/ops/marten")]
     public void The_query_route_matches_the_shared_query_page_whose_body_is_the_descriptors(string? path)
     {
-        Routes.Match("query", Options(path))!.PageType.Should().Be<QueryPage>();
+        Routes.Match("postgres/query", Options(path))!.PageType.Should().Be<QueryPage>();
+        Routes.Match("query", Options(path)).Should().BeNull("a 1.x address is not a page");
         MartenSpine.Descriptor.QueryComponent.Should().Be<DataStudio.Marten.Components.Pages.Query.Query>();
     }
 
-    /// <summary>X3 (issue #28): PostgresStudio's Plan page is below Marten Studio's root like every shared page - <c>/marten/plan</c>.</summary>
+    /// <summary>X3 (issue #28): the Postgres module's Plan page is below the Postgres module's segment in a Marten host too - <c>postgres/plan</c>.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("/ops/marten")]
-    public void The_plan_route_matches_the_shared_plan_page_under_the_marten_root(string? path)
+    public void The_plan_route_matches_the_shared_plan_page_under_the_postgres_segment(string? path)
     {
-        Routes.Match("plan", Options(path))!.PageType.Should().Be<DataStudio.Postgres.Components.Pages.Query.PlanPage>();
+        Routes.Match("postgres/plan", Options(path))!.PageType.Should().Be<DataStudio.Postgres.Components.Pages.Query.PlanPage>();
     }
 
     [Theory]

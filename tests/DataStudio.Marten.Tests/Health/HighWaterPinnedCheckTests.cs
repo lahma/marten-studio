@@ -70,7 +70,7 @@ public class HighWaterPinnedCheckTests
         finding.Evidence.Should().Contain(x => x.Label == "Not committed" && x.Value.StartsWith("sequence number 101;", StringComparison.Ordinal));
         finding.Evidence.Should().Contain(x => x.Label == "Waiting for" && x.Value.StartsWith("at least 2 min", StringComparison.Ordinal));
         finding.Remedy!.Code.Should().Contain("SkipStaleGapsDespiteLiveTransactionsAfter");
-        finding.Link!.Route.Should().Be("projections", "Explain is on the projections screen's D01 banner");
+        finding.Link!.Route.Should().Be("marten/projections", "Explain is on the projections screen's D01 banner");
         finding.Evidence.Select(static x => x.Label).Should().OnlyHaveUniqueItems();
     }
 

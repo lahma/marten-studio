@@ -1,4 +1,3 @@
-using DataStudio.Marten.Services;
 using JasperFx.Events;
 
 using DataStudio.Marten.Services.Events;
@@ -37,10 +36,10 @@ public class EventFindContributorTests
         new(scope ?? Matched, shape, tenants ?? FindTenants.Unrestricted);
 
     private static StreamFindContributor Streams(FakeEventDataService events, FakeFindScopes scopes) =>
-        new(events, scopes, MartenStudioSettings.Of(new MartenOptions()));
+        new(events, scopes);
 
     private static EventSequenceFindContributor Sequences(FakeEventDataService events, FakeFindScopes scopes) =>
-        new(events, scopes, MartenStudioSettings.Of(new MartenOptions()));
+        new(events, scopes);
 
     [Fact]
     public async Task A_stream_id_asks_the_streams_read_for_that_id_with_archived_streams_and_room_for_several_tenants()
@@ -59,7 +58,7 @@ public class EventFindContributorTests
         hit.Kind.Should().Be("Stream");
         hit.Title.Should().Be("Stream " + StreamId);
         hit.Detail.Should().Be("Order, 5 events");
-        hit.Url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId).And.Contain("db=primary");
+        hit.Url.Should().Contain("marten/events/streams/s").And.Contain("id=" + StreamId).And.Contain("db=primary");
         found.Searched.Should().Be("streams");
     }
 
@@ -148,7 +147,7 @@ public class EventFindContributorTests
         FindHit hit = found.Hits.Should().ContainSingle().Subject;
         hit.Kind.Should().Be("Natural key");
         hit.Title.Should().Be("Order.Number: stream " + StreamId);
-        hit.Url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId);
+        hit.Url.Should().Contain("marten/events/streams/s").And.Contain("id=" + StreamId);
         found.Searched.Should().Be("natural keys (Order.Number)");
     }
 
@@ -224,7 +223,7 @@ public class EventFindContributorTests
         hit.Kind.Should().Be("Event");
         hit.Title.Should().Be("Event #12");
         hit.Detail.Should().Be("OrderPlaced, version 3 of stream " + StreamId);
-        hit.Url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=3").And.Contain("tenant=acme");
+        hit.Url.Should().Contain("marten/events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=3").And.Contain("tenant=acme");
         found.Searched.Should().Be("event sequences");
     }
 
@@ -296,9 +295,9 @@ public class EventFindContributorTests
     [Fact]
     public void A_stream_link_at_an_event_names_the_stream_the_version_and_the_scope()
     {
-        string url = EventLinks.ToStreamAt(MartenStudioSettings.Of(new MartenOptions()), new StudioScope("default", "primary", "acme"), StreamId, 7);
+        string url = EventLinks.ToStreamAt(new StudioScope("default", "primary", "acme"), StreamId, 7);
 
-        url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=7")
+        url.Should().Contain("marten/events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=7")
             .And.Contain("store=default").And.Contain("db=primary").And.Contain("tenant=acme");
     }
 

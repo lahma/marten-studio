@@ -319,7 +319,7 @@ public class SchemaPageTests
         page.Markup.Should().Contain("96.0 KiB");
         page.Markup.Should().Contain("~1,200");
         page.Markup.Should().Contain("not analyzed");
-        page.Find(".ms-schema-owner .ms-collection-link").GetAttribute("href").Should().Contain("documents/customer");
+        page.Find(".ms-schema-owner .ms-collection-link").GetAttribute("href").Should().Contain("marten/documents/customer");
         page.Find(".ms-schema-owner .ms-collection-link").GetAttribute("href").Should().Contain("store=default");
     }
 

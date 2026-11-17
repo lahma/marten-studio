@@ -271,10 +271,10 @@ public class StudioScopeResolverTest
     [Fact]
     public void The_resource_is_built_from_the_scope_and_the_capability()
     {
-        var scope = new StudioScope("default", "server/database", "acme");
+        var scope = new StudioScope("default", "postgres/server/database", "acme");
 
-        scope.ToResource(null).Should().Be(new MartenStoreResource("default", "server/database", "acme", null));
-        scope.ToResource("EditDocuments").Should().Be(new MartenStoreResource("default", "server/database", "acme", "EditDocuments"));
+        scope.ToResource(null).Should().Be(new MartenStoreResource("default", "postgres/server/database", "acme", null));
+        scope.ToResource("EditDocuments").Should().Be(new MartenStoreResource("default", "postgres/server/database", "acme", "EditDocuments"));
     }
 
     // SEC-fix F1: the policies are asked the registered key and the matched identity, whatever the link spelled

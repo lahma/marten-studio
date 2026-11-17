@@ -5,8 +5,8 @@ namespace DataStudio.Postgres.Services.Statements;
 /// <summary>The Statements page's addresses: the list, and one statement's drill-in by its <c>queryid</c> (D9).</summary>
 internal static class StatementLinks
 {
-    /// <summary>The page's route under the studio's path.</summary>
-    public const string Route = "statements";
+    /// <summary>The page's address below the mount.</summary>
+    public const string Route = PostgresRoutes.Root + "/statements";
 
     /// <summary>The query-string name of the drill-in's statement.</summary>
     public const string QueryIdParameter = "queryid";

@@ -105,7 +105,7 @@
                                 @if (reference is { Schema: { } parentSchema, Table: { } parentTable })
                                 {
                                     <a class="ms-row-fk-marker"
-                                       href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, parentSchema, parentTable)"
+                                       href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, parentSchema, parentTable)"
                                        title="@($"Foreign key {reference.ForeignKey}: points at {parentSchema}.{parentTable}")">→ @parentTable</a>
                                 }
                                 else
@@ -476,7 +476,6 @@
     private string? RowHref(TableRowPage page, TableRow row) =>
         row.Key is { Count: > 0 } key && page.RowKey is not null
             ? DatabaseLinks.ToRow(
-                Settings,
                 Descriptor,
                 State.ActiveScope,
                 Schema,
@@ -530,7 +529,7 @@
             List<KeyValuePair<string, string>> parentKey = [.. key.ParentKey!
                 .Select(parent => values.First(x => string.Equals(x.Key, parent, StringComparison.Ordinal)))];
 
-            return (DatabaseLinks.ToRow(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table, parentKey),
+            return (DatabaseLinks.ToRow(Descriptor, State.ActiveScope, key.Schema, key.Table, parentKey),
                 "Open the " + key.Table + " row this points at " + RowPresentation.KeyTuple(parentKey));
         }
 
@@ -541,7 +540,7 @@
 
         string filter = RowFilterGrammar.Format(values.Select(static x => (x.Key, RowFilterOperator.Equal, (string?) x.Value)));
 
-        return (DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table, filter),
+        return (DatabaseLinks.ToRows(Descriptor, State.ActiveScope, key.Schema, key.Table, filter),
             "Show the rows of " + key.Table + " where " + filter);
     }
 

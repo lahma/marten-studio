@@ -187,7 +187,7 @@
                                 <td class="ms-db-cell-name">
                                     @if (key is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
                                     {
-                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
                                         <span class="ms-db-fk-columns">(@key.ColumnText(key.LinkedColumns))</span>
                                         @if (key.OtherEndOwnership is { IsMarten: true } owner)
                                         {
@@ -233,7 +233,7 @@
                         {
                             <tr @key="key.Schema + '\u001f' + key.Table + '\u001f' + key.Name">
                                 <td class="ms-db-cell-name">
-                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
+                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
                                     @if (key.Period)
                                     {
                                         <span class="ms-db-badge ms-db-badge-temporal" title="@PeriodTitle">PERIOD</span>

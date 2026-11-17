@@ -302,6 +302,7 @@ public class FindBoxTests
     {
         using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
         await context.ReadyAsync();
+        context.Navigate("studio/postgres/health");
 
         IRenderedComponent<StudioLayout> layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)));
 

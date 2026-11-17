@@ -57,7 +57,7 @@
                         @if (sequence is { OwnerSchema: { } ownerSchema, OwnerTable: { } ownerTable, OwnerColumn: { } ownerColumn })
                         {
                             <a class="ms-db-name"
-                               href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, ownerSchema, ownerTable, DatabaseObjectTab.Columns)"
+                               href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, ownerSchema, ownerTable, DatabaseObjectTab.Columns)"
                                title="The column this sequence belongs to: dropping the column drops the sequence">@(DatabaseLinks.QualifiedName(ownerSchema, ownerTable)).@ownerColumn</a>
                         }
                         else if (sequence.OwnedOutsideView)

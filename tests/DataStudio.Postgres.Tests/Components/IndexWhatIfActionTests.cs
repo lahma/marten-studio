@@ -154,7 +154,7 @@ public sealed class IndexWhatIfActionTests : IAsyncDisposable
         row.Cells[4].Should().Match<HealthActionCell>(static x => x.Mono && x.Copy && x.Text.StartsWith("CREATE INDEX CONCURRENTLY", StringComparison.Ordinal));
         HealthLink link = row.Cells[5].Link.Should().NotBeNull().And.Subject.As<HealthLink>();
         link.Label.Should().Be("Details on Statements");
-        link.Route.Should().Be("statements");
+        link.Route.Should().Be("postgres/statements");
         link.Query.Should().ContainSingle().Which.Should().Be(new KeyValuePair<string, string?>("advise", "public.orders"));
         result.Notes.Should().Contain(IndexAdvisor.Caveat);
     }

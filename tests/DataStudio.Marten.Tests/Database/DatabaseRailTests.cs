@@ -31,7 +31,7 @@ public class DatabaseRailTests
 
         List<IElement> pins = [.. page.FindAll(".ms-db-rail-pinned a.ms-rail-link")];
         pins.Select(x => x.TextContent.Trim()).Should().Equal("quartz.qrtz_triggers", "legacy.bad\"name");
-        pins[0].GetAttribute("href").Should().StartWith("database/object?schema=quartz&name=qrtz_triggers").And.Contain("store=default");
+        pins[0].GetAttribute("href").Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_triggers").And.Contain("store=default");
 
         page.Find(".ms-db-rail-pinned").TextContent.Should().NotContain("secret", "a pin in a schema the visitor cannot see is not offered as a dead link");
     }
@@ -291,7 +291,7 @@ public class DatabaseRailTests
         var page = DatabasePageData.RenderBrowser(context);
         int before = context.JSInterop.Invocations["martenStudio.disclosure.close"].Count;
 
-        context.Navigate("studio/database?schema=quartz");
+        context.Navigate("studio/postgres/database?schema=quartz");
         page.WaitForAssertion(() => page.Find(".ms-db-rail-schemas a.ms-rail-link-active").TextContent.Should().Contain("quartz"));
 
         var closes = context.JSInterop.Invocations["martenStudio.disclosure.close"];

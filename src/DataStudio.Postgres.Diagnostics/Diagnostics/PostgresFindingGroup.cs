@@ -36,7 +36,7 @@ public sealed record PostgresFindingGroup
     public int Count { get; init; }
 
     /// <summary>
-    /// Where to read more, relative to the studio's mount path with no leading slash (<see cref="PostgresPageLink" />): the
+    /// Where to read more, relative to the studio's mount path with no leading slash, starting with <c>postgres/</c> (<see cref="PostgresPageLink" />): the
     /// one finding's card on the Health page when <see cref="Count" /> is one, and the database's Health page when it is more
     /// - the path <see cref="IPostgresDiagnostics.GetStudioPath" /> returns for <see cref="PostgresPage.Health" />.
     /// Empty for findings built outside the studio.

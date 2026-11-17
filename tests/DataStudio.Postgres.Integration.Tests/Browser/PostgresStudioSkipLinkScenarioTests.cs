@@ -24,7 +24,7 @@ public class PostgresStudioSkipLinkScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
             await studio.WaitForCircuitAsync();
             string before = page.Url;
 

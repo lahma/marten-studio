@@ -11,7 +11,6 @@
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject IOptions<MartenOptions> Options
-@inject IStudioSettings Settings
 
 @* M3: the dead letters grouped by cause - Events > Dead letters with ?view=grouped. A component of its own, so the list
    page around it changes by a few lines. Opening a group is a link back to that list with ?group=, where every
@@ -485,7 +484,7 @@
     }
 
     private string OpenHref(DeadLetterGroup group) =>
-        EventLinks.To(Settings, EventLinks.DeadLettersRoute, State.ActiveScope, [new("group", group.Key.Encode())]);
+        EventLinks.To(EventLinks.DeadLettersRoute, State.ActiveScope, [new("group", group.Key.Encode())]);
 
     private static string Summary(DeadLetterGroupList read) =>
         Number(read.TotalLetters) + (read.TotalLetters == 1 ? " dead letter" : " dead letters") + " in "

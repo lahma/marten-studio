@@ -43,7 +43,7 @@ public class DocumentPageHardeningTests
             rows: [FakeDocuments.Row("id-1")],
             verdict: Verdict(search));
 
-        context.Navigate("studio/documents/customer?q=" + Uri.EscapeDataString(search));
+        context.Navigate("studio/marten/documents/customer?q=" + Uri.EscapeDataString(search));
         var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         // Rendered twice on purpose. Blazor only compares keys when it *diffs* two renders of the same
@@ -90,17 +90,17 @@ public class DocumentPageHardeningTests
     [InlineData("/studio/documents/customer")]
     [InlineData("data:text/html,<script>alert(1)</script>")]
     [InlineData("documents\\..\\..\\evil")]
-    [InlineData("query?mode=sql")]
+    [InlineData("postgres/query?mode=sql")]
     public void A_return_link_the_studio_did_not_write_is_not_rendered(string from)
     {
         SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().BeNull();
     }
 
     [Theory]
-    [InlineData("documents/customer")]
-    [InlineData("documents/customer?q=is:deleted&sort=id&dir=desc")]
-    [InlineData("documents")]
-    [InlineData("studio/documents/customer?page=2")]
+    [InlineData("marten/documents/customer")]
+    [InlineData("marten/documents/customer?q=is:deleted&sort=id&dir=desc")]
+    [InlineData("marten/documents")]
+    [InlineData("studio/marten/documents/customer?page=2")]
     public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
     {
         SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().Be(from);
@@ -113,7 +113,7 @@ public class DocumentPageHardeningTests
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         context.Navigate(
-            $"studio/documents/customer/doc?id={Id}&from=" +
+            $"studio/marten/documents/customer/doc?id={Id}&from=" +
             Uri.EscapeDataString("javascript:alert(document.domain)"));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
@@ -121,7 +121,7 @@ public class DocumentPageHardeningTests
         string href = page.Find(".ms-breadcrumb a:nth-of-type(2)").GetAttribute("href")!;
 
         href.Should().NotContain("javascript");
-        href.Should().StartWith("documents/customer", "the fallback is where back was going anyway");
+        href.Should().StartWith("marten/documents/customer", "the fallback is where back was going anyway");
     }
 
     [Fact]
@@ -130,8 +130,8 @@ public class DocumentPageHardeningTests
         using var context = new DocumentsComponentContext();
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
-        const string from = "documents/customer?q=ada&page=2";
-        context.Navigate($"studio/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
+        const string from = "marten/documents/customer?q=ada&page=2";
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -147,10 +147,10 @@ public class DocumentPageHardeningTests
     {
         using var context = new DocumentsComponentContext();
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
-        context.Browser.RememberPage("customer", ["other-id", Id, "next-id"], "documents/customer");
+        context.Browser.RememberPage("customer", ["other-id", Id, "next-id"], "marten/documents/customer");
 
         context.Navigate(
-            $"studio/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString("javascript:alert(1)"));
+            $"studio/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString("javascript:alert(1)"));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -190,7 +190,7 @@ public class DocumentPageHardeningTests
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true)
             .SetException(new Microsoft.JSInterop.JSDisconnectedException("the circuit closed"));
 
-        context.Navigate($"studio/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}");
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         // The header's own copy, through the detail page's CopyTextAsync, rather than the viewer's:

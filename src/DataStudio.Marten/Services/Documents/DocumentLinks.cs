@@ -1,9 +1,9 @@
-using DataStudio.Services.Settings;
 using System.Buffers.Text;
 using System.Globalization;
 using System.Text;
 
 using DataStudio.Components;
+using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Services.Query;
 
 using Microsoft.AspNetCore.WebUtilities;
@@ -25,20 +25,19 @@ namespace DataStudio.Marten.Services.Documents;
 internal static class DocumentLinks
 {
     /// <summary>The documents root.</summary>
-    public const string Root = "documents";
+    public const string Root = MartenRoutes.Root + "/documents";
 
     /// <summary>The link to the collections rail with nothing selected.</summary>
-    public static string ToIndex(IShellSettings settings, StudioScope? scope) =>
-        WithScope(StudioLink.To(settings, Root), scope);
+    public static string ToIndex(StudioScope? scope) =>
+        WithScope(StudioLink.To(Root), scope);
 
     /// <summary>The link to one collection's list.</summary>
     public static string ToCollection(
-        IShellSettings settings,
         StudioScope? scope,
         string alias,
         IReadOnlyDictionary<string, string?>? extra = null)
     {
-        var url = WithScope(StudioLink.To(settings, Root + "/" + Uri.EscapeDataString(alias)), scope);
+        var url = WithScope(StudioLink.To(Root + "/" + Uri.EscapeDataString(alias)), scope);
 
         if (extra is null)
         {
@@ -55,13 +54,12 @@ internal static class DocumentLinks
 
     /// <summary>The link to one document's detail page.</summary>
     public static string ToDocument(
-        IShellSettings settings,
         StudioScope? scope,
         string alias,
         string id,
         string? from = null)
     {
-        var url = WithScope(StudioLink.To(settings, Root + "/" + Uri.EscapeDataString(alias) + "/doc"), scope);
+        var url = WithScope(StudioLink.To(Root + "/" + Uri.EscapeDataString(alias) + "/doc"), scope);
 
         url = QueryHelpers.AddQueryString(url, "id", id);
 
@@ -72,16 +70,14 @@ internal static class DocumentLinks
     /// The link to one document's detail page from a caller that knows a store and a tenant and no database (D-CORR 7.2): it
     /// carries <c>store</c> and <c>tenant</c> and never <c>db</c>, and the page resolves the rest and authorizes it again.
     /// </summary>
-    /// <param name="settings">The studio's shell settings.</param>
     /// <param name="storeKey">The store, or <see langword="null" /> for the visitor's current one.</param>
     /// <param name="tenantId">The tenant, or <see langword="null" /> for none.</param>
     /// <param name="alias">The collection's alias.</param>
     /// <param name="id">The document id.</param>
-    public static string ToDocument(IShellSettings settings, string? storeKey, string? tenantId, string alias, string id)
+    public static string ToDocument(string? storeKey, string? tenantId, string alias, string id)
     {
-        ArgumentNullException.ThrowIfNull(settings);
 
-        var url = StudioLink.To(settings, Root + "/" + Uri.EscapeDataString(alias) + "/doc");
+        var url = StudioLink.To(Root + "/" + Uri.EscapeDataString(alias) + "/doc");
 
         if (!string.IsNullOrEmpty(storeKey))
         {
@@ -104,9 +100,9 @@ internal static class DocumentLinks
     /// is part of this screen's contract — "Open in Query" has to carry the collection and the filter the
     /// list is showing, or it is a button that loses the user's work.
     /// </remarks>
-    public static string ToQuery(IShellSettings settings, StudioScope? scope, string alias, string? where)
+    public static string ToQuery(StudioScope? scope, string alias, string? where)
     {
-        var url = WithScope(StudioLink.To(settings, "query"), scope);
+        var url = WithScope(StudioLink.To(EventLinks.QueryRoute), scope);
 
         url = QueryHelpers.AddQueryString(url, "type", alias);
 
@@ -114,9 +110,9 @@ internal static class DocumentLinks
     }
 
     /// <summary>The link to a stream's detail page, for the "view stream" affordance.</summary>
-    public static string ToStream(IShellSettings settings, StudioScope? scope, string id)
+    public static string ToStream(StudioScope? scope, string id)
     {
-        var url = WithScope(StudioLink.To(settings, "events/streams/s"), scope);
+        var url = WithScope(StudioLink.To(EventLinks.StreamDetailRoute), scope);
 
         return QueryHelpers.AddQueryString(url, "id", id);
     }

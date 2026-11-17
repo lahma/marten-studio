@@ -38,7 +38,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             {
                 IPage page = studio.Page;
 
-                await studio.GoAsync(fixture.Host.StudioUrl());
+                await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
                 await page.Locator(".ms-header-left > .ms-env-badge").WaitForAsync();
 
                 string[] problems = await page.EvaluateAsync<string[]>(
@@ -95,7 +95,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             await page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"], new BrowserContextGrantPermissionsOptions { Origin = fixture.Host.BaseAddress.GetLeftPart(UriPartial.Authority) });
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database"));
 
             await page.Locator(".ms-copy-link-button").ClickAsync();
             await page.Locator(".ms-copy-link-status", new PageLocatorOptions { HasTextString = "Link copied" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
@@ -119,7 +119,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
                 "(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('refused')) }, configurable: true });"
                 + " document.execCommand = () => false; })();");
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database"));
 
             await page.Locator(".ms-copy-link-button").ClickAsync();
 
@@ -147,7 +147,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             ILocator badge = page.Locator(".ms-header-left > .ms-env-badge");
             await badge.WaitForAsync();
@@ -181,7 +181,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             {
                 IPage page = studio.Page;
 
-                await studio.GoAsync(fixture.Host.StudioUrl());
+                await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
                 await page.Locator(".ms-header-left > .ms-env-badge").WaitForAsync();
 
                 string layout = await page.EvaluateAsync<string>(
@@ -228,7 +228,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
 
             ILocator link = page.Locator(".ms-header-right a.ms-back-link");
             await link.WaitForAsync();

@@ -39,7 +39,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task The_page_asks_the_script_to_reveal_the_card_the_fragment_names_once_the_cards_are_drawn()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-d01", K01, D01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-d01", K01, D01);
         context.JSInterop.Setup<bool>(Reveal, "finding-d01").SetResult(true);
 
         var page = context.Render<HealthPage>();
@@ -55,7 +55,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task A_refresh_after_it_does_not_scroll_the_visitor_back()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-d01", K01, D01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-d01", K01, D01);
         context.JSInterop.Setup<bool>(Reveal, "finding-d01").SetResult(true);
 
         var page = context.Render<HealthPage>();
@@ -72,7 +72,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task A_card_the_report_does_not_hold_is_said_to_be_gone_and_the_script_is_not_asked_for_it()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-c08-temp-files", K01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-c08-temp-files", K01);
 
         var page = context.Render<HealthPage>();
 
@@ -85,7 +85,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task A_card_the_script_cannot_find_is_said_to_be_gone_too()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-d01", D01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-d01", D01);
         context.JSInterop.Setup<bool>(Reveal, "finding-d01").SetResult(false);
 
         var page = context.Render<HealthPage>();
@@ -97,7 +97,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task An_encoded_fragment_names_the_same_card()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding%2Dd01", D01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding%2Dd01", D01);
         context.JSInterop.Setup<bool>(Reveal, "finding-d01").SetResult(true);
 
         var page = context.Render<HealthPage>();
@@ -107,10 +107,10 @@ public class HealthFindingLinkTests
     }
 
     [Theory]
-    [InlineData("studio/health")]
-    [InlineData("studio/health#")]
-    [InlineData("studio/health#top")]
-    [InlineData("studio/health?store=default#what-was-checked")]
+    [InlineData("studio/postgres/health")]
+    [InlineData("studio/postgres/health#")]
+    [InlineData("studio/postgres/health#top")]
+    [InlineData("studio/postgres/health?store=default#what-was-checked")]
     public async Task An_address_that_names_no_finding_card_costs_nothing(string address)
     {
         await using StudioComponentContext context = await ReadyAsync(address, K01);
@@ -129,7 +129,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task A_circuit_that_closed_under_the_call_says_nothing_and_breaks_nothing()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-d01", D01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-d01", D01);
         context.JSInterop.Setup<bool>(Reveal, "finding-d01").SetException(new JSDisconnectedException("the circuit is gone"));
 
         var page = context.Render<HealthPage>();
@@ -148,7 +148,7 @@ public class HealthFindingLinkTests
     public async Task A_link_to_an_accepted_finding_says_it_is_accepted_not_gone()
     {
         HealthFinding accepted = K01 with { Accepted = true, AcceptedReason = "Migrations run at deploy time." };
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-k01", accepted);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-k01", accepted);
 
         var page = context.Render<HealthPage>();
 
@@ -165,7 +165,7 @@ public class HealthFindingLinkTests
     [Fact]
     public async Task Muting_the_linked_finding_does_not_reveal_it_again()
     {
-        await using StudioComponentContext context = await ReadyAsync("studio/health#finding-k01", K01);
+        await using StudioComponentContext context = await ReadyAsync("studio/postgres/health#finding-k01", K01);
         context.JSInterop.Setup<bool>(Reveal, "finding-k01").SetResult(true);
 
         var page = context.Render<HealthPage>();

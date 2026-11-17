@@ -40,34 +40,31 @@ internal static class MartenDatabaseBridges
     extension(DatabaseLinks)
     {
         /// <summary>
-        /// One relation's detail page, with the registered settings and MartenStudio's descriptor. Callers: <c>Schema.razor</c> and
+        /// One relation's detail page, with MartenStudio's descriptor. Callers: <c>Schema.razor</c> and
         /// <c>ReferencedBy.razor</c>.
         /// </summary>
-        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="schema">The relation's schema.</param>
         /// <param name="name">The relation's name.</param>
         /// <param name="tab">The tab to open, or <see langword="null" />.</param>
         /// <param name="extra">Further parameters to carry.</param>
         public static string ToObject(
-            DataStudio.Postgres.Services.Settings.IStudioSettings settings,
             StudioScope? scope,
             string schema,
             string name,
             DatabaseObjectTab? tab = null,
             IReadOnlyList<KeyValuePair<string, string?>>? extra = null) =>
-            DatabaseLinks.ToObject(settings, MartenStudioDescriptor.Instance, scope, schema, name, tab, extra);
+            DatabaseLinks.ToObject(MartenStudioDescriptor.Instance, scope, schema, name, tab, extra);
 
         /// <summary>
-        /// A relation's Rows tab, with the registered settings and MartenStudio's descriptor. Caller: <c>ReferencedBy.razor</c>.
+        /// A relation's Rows tab, with MartenStudio's descriptor. Caller: <c>ReferencedBy.razor</c>.
         /// </summary>
-        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="schema">The relation's schema.</param>
         /// <param name="name">The relation's name.</param>
         /// <param name="filter">A row filter, or <see langword="null" />.</param>
-        public static string ToRows(DataStudio.Postgres.Services.Settings.IStudioSettings settings, StudioScope? scope, string schema, string name, string? filter = null) =>
-            DatabaseLinks.ToRows(settings, MartenStudioDescriptor.Instance, scope, schema, name, filter);
+        public static string ToRows(StudioScope? scope, string schema, string name, string? filter = null) =>
+            DatabaseLinks.ToRows(MartenStudioDescriptor.Instance, scope, schema, name, filter);
     }
 
     extension(SafeReturnLink)

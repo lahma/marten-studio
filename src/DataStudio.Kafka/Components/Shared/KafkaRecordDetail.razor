@@ -1,7 +1,6 @@
 @using System.Globalization
 @using DataStudio.Kafka.Core.Decoding
 @using DataStudio.Kafka.Core.Scanning
-@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject ToastService Toasts
 @inject IJSRuntime JsRuntime
@@ -234,7 +233,6 @@
 
     private string PermalinkHref() =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RecordRoute,
             Cluster,
             (KafkaAddress.TopicParameter, match!.Topic),
@@ -244,7 +242,6 @@
     /// <summary>Related records around this record: a link, so that opening it is a page of its own and runs nothing until the visitor presses its button.</summary>
     private string RelatedHref() =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RelatedRoute,
             Cluster,
             (KafkaAddress.TopicParameter, match!.Topic),

@@ -13,12 +13,12 @@ namespace DataStudio.Marten.Tests.Events;
 public class EventFlowDiagramTests
 {
     private static readonly EventFlowHrefs Hrefs = new(
-        static alias => "events/feed?types=" + alias + "&store=default",
-        "events/feed?store=default",
-        static _ => "projections?store=default",
-        static alias => "documents/" + alias + "?store=default",
-        static (schema, name) => "database/object?schema=" + schema + "&name=" + name + "&store=default",
-        "events/streams?store=default");
+        static alias => "marten/events/feed?types=" + alias + "&store=default",
+        "marten/events/feed?store=default",
+        static _ => "marten/projections?store=default",
+        static alias => "marten/documents/" + alias + "?store=default",
+        static (schema, name) => "postgres/database/object?schema=" + schema + "&name=" + name + "&store=default",
+        "marten/events/streams?store=default");
 
     private static EventFlowDrawing Draw(EventFlowModel model, EventFlowFilter? filter = null) =>
         EventFlowDiagram.Project(model, filter ?? EventFlowFilter.None, Hrefs);
@@ -78,10 +78,10 @@ public class EventFlowDiagramTests
         drawing.Drawn.Nodes.Single(static x => x.Key == "d:order").Shape.Should().Be(GraphNodeShape.Rounded);
         GraphDiagramNode table = drawing.Drawn.Nodes.Single(static x => x.Key == "t:public.flow_table");
         table.Shape.Should().Be(GraphNodeShape.Square);
-        table.Href.Should().Be("database/object?schema=public&name=flow_table&store=default");
+        table.Href.Should().Be("postgres/database/object?schema=public&name=flow_table&store=default");
         GraphDiagramNode live = drawing.Drawn.Nodes.Single(static x => x.Key == "a:Sample.Live");
         live.CssClass.Should().Be("ms-flow-node-live");
-        live.Href.Should().Be("events/streams?store=default");
+        live.Href.Should().Be("marten/events/streams?store=default");
         drawing.Drawn.Edges.Single(static x => x.Id == "w:Orders|a:Sample.Live").CssClass.Should().Be("ms-flow-edge-folds");
         drawing.Styles.Should().Equal("reads", "via", "writes", "folds");
     }
@@ -284,8 +284,8 @@ public class EventFlowDiagramTests
     {
         EventFlowDrawing drawing = Draw(EventFlowFixtures.Sample());
 
-        drawing.Drawn.Nodes.Single(static x => x.Key == "e:shipped").Href.Should().Be("events/feed?types=shipped&store=default");
-        drawing.Drawn.Nodes.Single(static x => x.Key == "p:Orders").Href.Should().Be("projections?store=default");
-        drawing.Drawn.Nodes.Single(static x => x.Key == "d:order").Href.Should().Be("documents/order?store=default");
+        drawing.Drawn.Nodes.Single(static x => x.Key == "e:shipped").Href.Should().Be("marten/events/feed?types=shipped&store=default");
+        drawing.Drawn.Nodes.Single(static x => x.Key == "p:Orders").Href.Should().Be("marten/projections?store=default");
+        drawing.Drawn.Nodes.Single(static x => x.Key == "d:order").Href.Should().Be("marten/documents/order?store=default");
     }
 }

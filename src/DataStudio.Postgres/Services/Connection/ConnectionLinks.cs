@@ -15,16 +15,14 @@ internal static class ConnectionLinks
     /// or a card on the page itself. The fragment is part of the link because the studio's <c>&lt;base href&gt;</c> is its
     /// root, so a bare <c>#row</c> would leave the page.
     /// </summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
     /// <param name="fragment">An element id on the page, or <see langword="null" />.</param>
-    public static string To(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string? fragment = null)
+    public static string To(StudioDescriptor descriptor, StudioScope? scope, string? fragment = null)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        string link = StudioScopeQuery.Append(StudioLink.To(settings, Route), scope, descriptor.SourceQueryParameter);
+        string link = StudioScopeQuery.Append(StudioLink.To(Route), scope, descriptor.SourceQueryParameter);
 
         return fragment is { Length: > 0 } ? link + "#" + Uri.EscapeDataString(fragment) : link;
     }

@@ -159,7 +159,7 @@
                 <ul class="ms-rail-list">
                     <li class="ms-rail-item" @key="@("sessions")">
                         <div class="ms-rail-entry">
-                            <a class="@LinkClass(false)" href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">
+                            <a class="@LinkClass(false)" href="@SessionLinks.ToSessions(Descriptor, State.ActiveScope)">
                                 <span class="ms-db-rail-name">Sessions and locks</span>
                             </a>
                         </div>
@@ -433,10 +433,10 @@
         filter.Length == 0 || text.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     private string SchemaHref(string? schema) =>
-        DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, schema, Category);
+        DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, schema, Category);
 
     private string ObjectHref(string schema, string name) =>
-        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name);
+        DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, name);
 
     private int TotalOf(DatabaseSchemaSummary? schema) =>
         schema is null ? Schemas.Sum(CountFor) : CountFor(schema);

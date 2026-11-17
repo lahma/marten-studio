@@ -20,7 +20,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             await page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"], new BrowserContextGrantPermissionsOptions { Origin = fixture.Root.BaseAddress.GetLeftPart(UriPartial.Authority) });
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             ILocator badge = page.Locator(".ms-header-left > .ms-env-badge");
             await badge.WaitForAsync();
@@ -55,7 +55,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(width, 800);
 
-            await studio.GoAsync(fixture.Root.StudioUrl() + "?tenant=acme");
+            await studio.GoAsync(fixture.Root.StudioUrl("marten") + "?tenant=acme");
             await page.Locator(".ms-header-left > .ms-env-badge").WaitForAsync();
             await page.Locator("#ms-tenant-select").WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Attached, Timeout = 30_000 });
             (await page.EvaluateAsync<string>("() => document.querySelector('#ms-tenant-select').value")).Should().Be("acme");
@@ -111,7 +111,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             ILocator link = page.Locator(".ms-header-right a.ms-back-link");
             await link.WaitForAsync();

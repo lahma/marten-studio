@@ -112,7 +112,7 @@ public class ConfirmsHoldToTheirScopeTests
         context.WithAllCapabilities();
         context.Data.Page = FakeDocuments.Page(rows: [.. Enumerable.Range(1, 3).Select(i => FakeDocuments.Row("id-" + i))]);
         context.Data.Rail = FakeDocuments.Rail(documents: [FakeDocuments.Collection("customer", softDeleted: true)]);
-        context.Navigate("studio/documents/customer");
+        context.Navigate("studio/marten/documents/customer");
 
         IRenderedComponent<ListPage> page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         page.Find(".ms-doc-select-all").Change(true);
@@ -151,7 +151,7 @@ public class ConfirmsHoldToTheirScopeTests
             IsRegistered = true,
             IdColumnType = DocumentIdColumnType.Uuid,
         });
-        context.Navigate("studio/documents/customer/doc?id=" + id);
+        context.Navigate("studio/marten/documents/customer/doc?id=" + id);
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         page.Find(".ms-doc-delete-btn").Click();

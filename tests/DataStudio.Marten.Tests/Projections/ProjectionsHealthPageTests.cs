@@ -172,7 +172,7 @@ public class ProjectionsHealthPageTests
         page.Find(".ms-health-banner-d01").GetAttribute("role").Should().Be("status");
         page.FindAll(".ms-health-banner").Should().HaveCount(2, "only D01 and D02 are this screen's");
         page.FindAll(".ms-no-daemon-banner").Should().BeEmpty("D02 says it, better, and once is enough");
-        page.Find(".ms-health-banner-d01 .ms-health-banner-link").GetAttribute("href").Should().Contain("health");
+        page.Find(".ms-health-banner-d01 .ms-health-banner-link").GetAttribute("href").Should().Contain("postgres/health");
     }
 
     /// <summary>No recent sweep: nothing is drawn, and nothing claims the store is healthy either.</summary>

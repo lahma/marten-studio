@@ -254,27 +254,27 @@ public class LargeDataBrowserTests(BrowserSuiteFixture browsers, LargeDataBrowse
 
         report.Check(
             "documents rail",
-            await MeasureAsync(studio, host.StudioUrl("documents"), ".ms-rail-list"),
+            await MeasureAsync(studio, host.StudioUrl("marten/documents"), ".ms-rail-list"),
             PageResponsivenessBudgets.DocumentsIndex);
 
         report.Check(
             "customer list page",
-            await MeasureAsync(studio, host.StudioUrl("documents/customer"), ".ms-doc-table tbody tr.ms-doc-row"),
+            await MeasureAsync(studio, host.StudioUrl("marten/documents/customer"), ".ms-doc-table tbody tr.ms-doc-row"),
             PageResponsivenessBudgets.DocumentsPage);
 
         report.Check(
             "event feed page",
-            await MeasureAsync(studio, host.StudioUrl("events/feed"), ".ms-page"),
+            await MeasureAsync(studio, host.StudioUrl("marten/events/feed"), ".ms-page"),
             PageResponsivenessBudgets.FeedPage);
 
         report.Check(
             "stream list page",
-            await MeasureAsync(studio, host.StudioUrl("events/streams"), ".ms-page"),
+            await MeasureAsync(studio, host.StudioUrl("marten/events/streams"), ".ms-page"),
             PageResponsivenessBudgets.StreamsPage);
 
         report.Check(
             "projections page",
-            await MeasureAsync(studio, host.StudioUrl("projections"), ".ms-page"),
+            await MeasureAsync(studio, host.StudioUrl("marten/projections"), ".ms-page"),
             PageResponsivenessBudgets.ProjectionsPage);
 
         // The circuit still attaches at this size, which is the other half of "the screen works": a page

@@ -327,7 +327,7 @@ public class DocumentWritePolicyTests
 
     private static IRenderedComponent<DetailPage> RenderDetail(DocumentsComponentContext context)
     {
-        context.Navigate($"studio/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}");
         return context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 

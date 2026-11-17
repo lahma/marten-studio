@@ -180,7 +180,7 @@ public class SchemaHealthColumnsPageTests
         var invalid = page.Find(".ms-schema-health-mark[data-code='T03']");
         invalid.TextContent.Trim().Should().Be("invalid");
         invalid.ClassList.Should().Contain("ms-index-flag-danger");
-        invalid.GetAttribute("href").Should().Contain("health").And.Contain("#finding-");
+        invalid.GetAttribute("href").Should().Contain("postgres/health").And.Contain("#finding-");
 
         page.Find(".ms-schema-health-mark[data-code='T04']").TextContent.Trim().Should().Be("redundant");
         page.FindAll(".ms-schema-health-mark").Should().HaveCount(2, "the partitions' finding is about no row on this tab");

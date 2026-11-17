@@ -348,7 +348,7 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var response = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using var response = await client.GetAsync(new Uri("/studio/marten", UriKind.Relative), Token);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
 
             var body = await response.Content.ReadAsStringAsync(Token);
@@ -394,7 +394,7 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var response = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using var response = await client.GetAsync(new Uri("/studio/marten", UriKind.Relative), Token);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
 
             var body = await response.Content.ReadAsStringAsync(Token);
@@ -445,12 +445,12 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var response = await client.GetAsync(new Uri("/ops/marten", UriKind.Relative), Token);
+            using var response = await client.GetAsync(new Uri("/ops/marten/marten", UriKind.Relative), Token);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             (await response.Content.ReadAsStringAsync(Token)).Should().Contain("<base href=\"/ops/marten/\"");
 
             // Route matching tolerates the trailing-slash form of the studio root.
-            using var slash = await client.GetAsync(new Uri("/ops/marten/", UriKind.Relative), Token);
+            using var slash = await client.GetAsync(new Uri("/ops/marten/marten/", UriKind.Relative), Token);
             slash.StatusCode.Should().Be(HttpStatusCode.OK);
         }
         finally
@@ -475,7 +475,7 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var response = await client.GetAsync(new Uri("/Ops/Marten", UriKind.Relative), Token);
+            using var response = await client.GetAsync(new Uri("/Ops/Marten/marten", UriKind.Relative), Token);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             (await response.Content.ReadAsStringAsync(Token)).Should().Contain("<base href=\"/Ops/Marten/\"");
         }
@@ -704,7 +704,7 @@ public class StudioEndpointsTest
             using var hostPage = await client.GetAsync(new Uri("/host-page", UriKind.Relative), Token);
             hostPage.StatusCode.Should().Be(HttpStatusCode.OK);
 
-            using var studioPage = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using var studioPage = await client.GetAsync(new Uri("/studio/marten", UriKind.Relative), Token);
             studioPage.StatusCode.Should().Be(HttpStatusCode.OK);
         }
         finally
@@ -810,7 +810,7 @@ public class StudioEndpointsTest
             using var anonymous = await client.PostAsync(new Uri("/studio/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
             anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-            using var page = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using var page = await client.GetAsync(new Uri("/studio/marten", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the pages were already refused; the circuit is what leaked");
 
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/studio/_blazor/negotiate?negotiateVersion=1", UriKind.Relative));
@@ -870,7 +870,7 @@ public class StudioEndpointsTest
             using var negotiate = await client.PostAsync(new Uri("/studio/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
             negotiate.StatusCode.Should().Be(HttpStatusCode.OK);
 
-            using var page = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using var page = await client.GetAsync(new Uri("/studio/marten", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.OK);
         }
         finally
@@ -946,7 +946,7 @@ public class StudioEndpointsTest
             using var script = await client.GetAsync(new Uri("/ops/marten/_framework/blazor.web.js", UriKind.Relative), Token);
             script.StatusCode.Should().Be(HttpStatusCode.OK);
 
-            using var page = await client.GetAsync(new Uri("/ops/marten", UriKind.Relative), Token);
+            using var page = await client.GetAsync(new Uri("/ops/marten/marten", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
         finally

@@ -128,7 +128,7 @@ public class MartenPreviewDialogTests
 
     private static IRenderedComponent<DetailPage> Edit(DocumentsComponentContext context)
     {
-        context.Navigate($"studio/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}");
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         page.Find(".ms-doc-edit-btn").Click();
         return page;

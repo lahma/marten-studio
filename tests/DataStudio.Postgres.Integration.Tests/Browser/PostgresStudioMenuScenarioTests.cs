@@ -20,7 +20,7 @@ namespace DataStudio.Postgres.Integration.Tests.Browser;
 [Collection(BrowserSuite.Name)]
 public class PostgresStudioMenuScenarioTests(BrowserSuiteFixture fixture)
 {
-    private const string HealthPath = "health?store=tenants&db=tenant_c";
+    private const string HealthPath = "postgres/health?store=tenants&db=tenant_c";
 
     /// <summary>How far below its button a menu may start: the stylesheet's gap, and a few pixels of rounding.</summary>
     private const double GapTolerance = 12;
@@ -59,7 +59,7 @@ public class PostgresStudioMenuScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl("database/object?schema=quartz&name=qrtz_triggers"));
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres/database/object?schema=quartz&name=qrtz_triggers"));
             await studio.WaitForCircuitAsync();
 
             ILocator button = page.Locator(".ms-db-copy-menu-button").First;
@@ -99,18 +99,18 @@ public class PostgresStudioMenuScenarioTests(BrowserSuiteFixture fixture)
         });
 
     [BrowserFact]
-    public Task The_rails_credit_stands_at_the_rails_foot_in_three_lines() =>
+    public Task The_rails_credit_stands_at_the_rails_foot_a_line_each_for_the_shell_the_module_the_licence_and_the_author() =>
         BrowserScenario.RunAsync(fixture.Browser, "rail-credit", fixture.Host, "admin", async studio =>
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(fixture.Host.StudioUrl());
+            await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
             await studio.WaitForCircuitAsync();
 
             ILocator credit = page.Locator(".ms-sidebar .ms-rail-credit");
             await credit.WaitForAsync();
 
-            (await credit.Locator(".ms-rail-credit-line").AllTextContentsAsync()).Select(static x => x.Trim()).Should().HaveCount(3);
+            (await credit.Locator(".ms-rail-credit-line").AllTextContentsAsync()).Select(static x => x.Trim()).Should().HaveCount(4);
 
             Box rail = await BoxAsync(page.Locator(".ms-sidebar-inner"));
             Box foot = await BoxAsync(credit);
@@ -151,7 +151,7 @@ public class PostgresStudioMenuScenarioTests(BrowserSuiteFixture fixture)
             {
                 IPage page = studio.Page;
 
-                await studio.GoAsync(fixture.Host.StudioUrl());
+                await studio.GoAsync(fixture.Host.StudioUrl("postgres"));
                 await studio.WaitForCircuitAsync();
                 await page.Locator(".ms-sidebar-nav .ms-nav-link").First.WaitForAsync();
 

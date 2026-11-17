@@ -62,7 +62,7 @@ public class HealthPageActionTests
             [
                 new HealthActionCell(Stream)
                 {
-                    Link = new HealthLink("Open the stream", "events/streams/s", [new("id", Stream)]),
+                    Link = new HealthLink("Open the stream", "marten/events/streams/s", [new("id", Stream)]),
                     Mono = true,
                     Copy = true,
                 },
@@ -210,7 +210,7 @@ public class HealthPageActionTests
 
         IElement link = region.QuerySelector("tbody td a")!;
         link.TextContent.Should().Be(Stream);
-        link.GetAttribute("href").Should().StartWith("events/streams/s?id=" + Stream).And.Contain("store=default").And.Contain("db=");
+        link.GetAttribute("href").Should().StartWith("marten/events/streams/s?id=" + Stream).And.Contain("store=default").And.Contain("db=");
         region.QuerySelector(".ms-copy-button")!.GetAttribute("aria-label").Should().Be("Copy stream");
         region.QuerySelectorAll("tbody td")[1].ClassList.Should().Contain("ms-table-cell-number");
         region.QuerySelectorAll("tbody td")[2].TextContent.Should().Contain("2026-11-01 08:00:00", "a time is drawn in the visitor's zone");

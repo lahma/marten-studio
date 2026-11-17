@@ -573,13 +573,13 @@
         string.Equals(State.ActiveScope?.StoreKey, store.Key, StringComparison.OrdinalIgnoreCase);
 
     private string OverviewHref(string storeKey, string identity) =>
-        EventLinks.To(StudioSettings, string.Empty, new StudioScope(storeKey, identity, null));
+        EventLinks.To(MartenRoutes.Root, new StudioScope(storeKey, identity, null));
 
     private string TenantsHref(string storeKey, string identity) =>
-        EventLinks.To(StudioSettings, MartenStudioDescriptor.TenantsRoute, new StudioScope(storeKey, identity, null));
+        EventLinks.To(MartenStudioDescriptor.TenantsRoute, new StudioScope(storeKey, identity, null));
 
     private string HealthHref(string storeKey, string identity) =>
-        HealthLinks.ToPage(StudioSettings, new StudioScope(storeKey, identity, null));
+        HealthLinks.ToPage(new StudioScope(storeKey, identity, null));
 
     /// <summary>
     /// The chip for a database's last sweep: the worst finding the visitor may see, and never green while any is withheld

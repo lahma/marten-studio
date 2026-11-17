@@ -38,7 +38,7 @@
             {
                 <button type="button" class="ms-button ms-button-primary ms-advisor-run" @onclick="() => RunAsync(null)" disabled="@(!interactive)">@(view is null ? "Run" : "Run again")</button>
             }
-            <a class="ms-button ms-advisor-close" href="@StatementLinks.ToStatements(Settings, Descriptor, State.ActiveScope)">Close</a>
+            <a class="ms-button ms-advisor-close" href="@StatementLinks.ToStatements(Descriptor, State.ActiveScope)">Close</a>
         </div>
     </div>
 
@@ -380,7 +380,7 @@
     /// keyed on the parameter and the scope and so keeps its result.
     /// </summary>
     private string StatementLink(long queryId) =>
-        StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, queryId)
+        StatementLinks.ToStatement(Descriptor, State.ActiveScope, queryId)
         + "&" + IndexAdvisor.AdviseParameter + "=" + Uri.EscapeDataString(Table ?? IndexAdvisor.AdviseAll);
 
     private static string TableTextCount(double value) => value.ToString("N0", CultureInfo.InvariantCulture);

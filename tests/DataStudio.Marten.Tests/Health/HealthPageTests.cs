@@ -243,14 +243,14 @@ public class HealthPageTests
         await using StudioComponentContext context = await ReadyAsync();
         context.Health.WithFindings(FakeHealthService.Finding("D06", HealthSeverity.Warning, "Dead letters accumulating", HealthArea.Daemon) with
         {
-            Link = new HealthLink("Open the dead letters", "events/dead-letters", [new("projection", "OrderSummary")]),
+            Link = new HealthLink("Open the dead letters", "marten/events/dead-letters", [new("projection", "OrderSummary")]),
         });
 
         var page = context.Render<HealthPage>();
 
         page.WaitForAssertion(() => page.Find(".ms-health-link a").TextContent.Should().Be("Open the dead letters"));
         page.Find(".ms-health-link a").GetAttribute("href").Should()
-            .StartWith("events/dead-letters?projection=OrderSummary").And.Contain("store=default");
+            .StartWith("marten/events/dead-letters?projection=OrderSummary").And.Contain("store=default");
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public class HealthPageTests
         page.WaitForAssertion(() => page.StatCardValue("Health").Should().Be("2 criticals"));
         page.StatCardClasses("Health").Should().Contain("ms-stat-card-danger");
         page.TextOfAll(".ms-overview-health-list .ms-overview-list-name").Should().Equal("Pinned", "Nobody runs the daemon", "AutoCreate in Production");
-        page.Find(".ms-overview-health-list a").GetAttribute("href").Should().StartWith("health?").And.EndWith("#finding-d01");
+        page.Find(".ms-overview-health-list a").GetAttribute("href").Should().StartWith("postgres/health?").And.EndWith("#finding-d01");
     }
 
     /// <summary>1.2-SCOPE-1-FIX: a tile is never green while a check could not run - "nothing to report" would say the sweep was complete.</summary>
@@ -397,7 +397,7 @@ public class HealthPageTests
 
         var nav = context.Render<NavMenu>();
 
-        IElement health = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "health");
+        IElement health = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "postgres/health");
         IElement badge = health.QuerySelector(".ms-nav-badge")!;
         badge.TextContent.Trim().Should().Be("3");
         badge.ClassList.Should().Contain("ms-nav-badge-danger");
@@ -412,7 +412,7 @@ public class HealthPageTests
 
         var nav = context.Render<NavMenu>();
 
-        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "health")
+        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "postgres/health")
             .QuerySelector(".ms-nav-badge").Should().BeNull();
     }
 

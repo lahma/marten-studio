@@ -1,5 +1,4 @@
 using DataStudio.Components;
-using DataStudio.Services.Settings;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace DataStudio.Kafka.Services;
@@ -188,13 +187,12 @@ internal static class KafkaAddress
         Query(uri).TryGetValue(name, out var values) ? [.. values.Where(static x => !string.IsNullOrEmpty(x)).Select(static x => x!)] : [];
 
     /// <summary>A link to <paramref name="route" /> below the studio, naming the cluster and the given parameters; a <see langword="null" /> value is left out.</summary>
-    /// <param name="settings">The studio's settings.</param>
     /// <param name="route">The route below the studio root (<c>kafka/topic</c>).</param>
     /// <param name="cluster">The cluster entry's key, or <see langword="null" /> to name none.</param>
     /// <param name="parameters">Further parameters in order.</param>
-    public static string Href(IShellSettings settings, string route, string? cluster, params (string Name, string? Value)[] parameters)
+    public static string Href(string route, string? cluster, params (string Name, string? Value)[] parameters)
     {
-        string href = StudioLink.To(settings, route);
+        string href = StudioLink.To(route);
 
         if (cluster is not null)
         {

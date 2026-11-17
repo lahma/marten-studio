@@ -637,7 +637,7 @@
 
     private void Navigate(RowsUrl next, bool replace = false) =>
         Navigation.NavigateTo(
-            DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, Schema, Name, DatabaseObjectTab.Rows, next.Pairs()),
+            DatabaseLinks.ToObject(Descriptor, State.ActiveScope, Schema, Name, DatabaseObjectTab.Rows, next.Pairs()),
             replace: replace);
 
     private List<string?> History => Browser.CursorHistory(Schema, Name);

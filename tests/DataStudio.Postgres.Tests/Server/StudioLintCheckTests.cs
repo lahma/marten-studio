@@ -145,6 +145,48 @@ public class StudioLintCheckTests
         verdict.Note.Should().Contain(why);
     }
 
+    // ---- K07 counts every module's capabilities (REVIEW-V2-B finding 1) ----------------------------------------------
+
+    private static readonly StudioModuleCapabilitiesOn KafkaOn = new("KStudio for Apache Kafka", ["SearchRecords", "ExportRecords"]);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void K07_is_not_quiet_while_another_modules_capability_is_on_whatever_the_database_modules_switch_says(bool moduleReadOnly)
+    {
+        // The module's own ReadOnly turns off only the module: Kafka's capabilities are another module's, and anyone can use them.
+        AnonymousStudioFacts facts = new(Options(readOnly: moduleReadOnly, on: [StudioCapability.RunSql]), true, "Production") { OtherModules = [KafkaOn] };
+
+        HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value.Contains("SearchRecords (KStudio for Apache Kafka)", StringComparison.Ordinal)
+            && x.Value.Contains("ExportRecords (KStudio for Apache Kafka)", StringComparison.Ordinal));
+        finding.WhyItMatters.Should().Contain("KStudio for Apache Kafka decide what it reaches of its own");
+    }
+
+    [Fact]
+    public void K07_with_the_database_modules_capabilities_off_and_another_modules_on_is_a_finding_that_names_only_the_modules_that_have_one()
+    {
+        AnonymousStudioFacts facts = new(Options(readOnly: true), true, "Development") { OtherModules = [KafkaOn] };
+
+        HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Single(static x => x.Label == "Capabilities on").Value.Should().Be("SearchRecords (KStudio for Apache Kafka), ExportRecords (KStudio for Apache Kafka)");
+    }
+
+    [Fact]
+    public void K07_is_quiet_only_when_no_module_has_a_capability_on()
+    {
+        AnonymousStudioFacts none = new(Options(readOnly: true), true, "Production") { OtherModules = [] };
+
+        HealthVerdict verdict = new AnonymousStudioCheck().Evaluate(none, Evaluation());
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("every capability off (MartenOptions.ReadOnly): it browses and changes nothing");
+    }
+
     // ---- the switch that is on ----------------------------------------------------------------------------------------
 
     [Fact]

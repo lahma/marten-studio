@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services.Events;
 using DataStudio.Postgres.Services.Health;
 
 namespace DataStudio.Marten.Services.Health.Checks;
@@ -226,7 +227,7 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
                 + "least this long: the advisor samples only while the Health page or the Overview is open. If no daemon has run "
                 + "since Marten recorded the pin, this is the last thing one saw (see D02). Explain, on the projections screen, "
                 + "asks the questions Marten's own gap-liveness probe asks and names the sessions to anyone allowed to see them.",
-            Link = new HealthLink("Explain it on the projections screen", "projections"),
+            Link = new HealthLink("Explain it on the projections screen", EventLinks.ProjectionsRoute),
             Remedy = new HealthRemedy(
                 "// Optional: bound how long a transaction that may still commit can hold the mark.\n"
                 + "opts.Projections.SkipStaleGapsDespiteLiveTransactionsAfter = TimeSpan.FromMinutes(30);",

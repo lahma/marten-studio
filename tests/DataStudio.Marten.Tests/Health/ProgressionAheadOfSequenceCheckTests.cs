@@ -98,7 +98,7 @@ public class ProgressionAheadOfSequenceCheckTests
         finding.Remedy!.Code.Should().Contain("await store.Advanced.TryCorrectProgressInDatabaseAsync(cancellationToken);");
         finding.Remedy.Explanation.Should().Contain("only while the mark is above it");
         finding.WhyItMatters.Should().Contain(ProgressionAheadOfSequenceCheck.Causes);
-        finding.Link!.Route.Should().Be("projections");
+        finding.Link!.Route.Should().Be("marten/projections");
         finding.Evidence.Select(static x => x.Label).Should().OnlyHaveUniqueItems();
     }
 
@@ -317,7 +317,7 @@ public class ProgressionAheadOfSequenceCheckTests
         done.Remedy.Explanation.Should().Contain("Past the mark itself: DailySales:All at 80.", "a shard at the mark is not past it")
             .And.Contain("from 2 - so events appended since the reset at or below 1 are not replayed by it")
             .And.Contain("A floor below what a subscription has already processed repeats its side effects");
-        done.Link!.Route.Should().Be("projections", "the rebuild and the rewind are on the projections screen");
+        done.Link!.Route.Should().Be("marten/projections", "the rebuild and the rewind are on the projections screen");
 
         // The commonest state, the review's: mark 30, a RESTART, events 1 to 30. Before the repair the sequence has handed
         // out nothing, and a rewind to 0 would replay 1 to 30 to a shard that has processed them; after it, the floor is 30.

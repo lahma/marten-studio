@@ -25,7 +25,7 @@ internal static class MaintenanceLinkBuilder
                 .SelectMany(static x => x.Items)
                 .Any(x => string.Equals(x.Route, MaintenanceLinks.Route, StringComparison.Ordinal) && (x.IsShown?.Invoke(settings) ?? true));
 
-            return offered ? StudioScopeQuery.Append(StudioLink.To(settings, MaintenanceLinks.Route), scope, descriptor.SourceQueryParameter) : null;
+            return offered ? StudioScopeQuery.Append(StudioLink.To(MaintenanceLinks.Route), scope, descriptor.SourceQueryParameter) : null;
         }
     }
 }

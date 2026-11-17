@@ -57,13 +57,13 @@ public class RegisteredSettingsLinkTests
 
         string link = site switch
         {
-            "StudioLink.To" => StudioLink.To(settings, "documents/orders/doc"),
-            "HealthLinks.ToPage" => HealthLinks.ToPage(settings, Scope),
-            "HealthLinks.ToFinding" => HealthLinks.ToFinding(settings, Scope, Finding()),
-            "DatabaseLinks.ToObject" => DatabaseLinks.ToObject(settings, Scope, "public", "orders"),
-            "DatabaseLinks.ToRows" => DatabaseLinks.ToRows(settings, Scope, "public", "orders", "id = 1"),
-            "DocumentLinks.ToDocument" => DocumentLinks.ToDocument(settings, Scope, "orders", "7"),
-            "EventLinks.To" => EventLinks.To(settings, EventLinks.StreamsRoute, Scope),
+            "StudioLink.To" => StudioLink.To("marten/documents/orders/doc"),
+            "HealthLinks.ToPage" => HealthLinks.ToPage(Scope),
+            "HealthLinks.ToFinding" => HealthLinks.ToFinding(Scope, Finding()),
+            "DatabaseLinks.ToObject" => DatabaseLinks.ToObject(Scope, "public", "orders"),
+            "DatabaseLinks.ToRows" => DatabaseLinks.ToRows(Scope, "public", "orders", "id = 1"),
+            "DocumentLinks.ToDocument" => DocumentLinks.ToDocument(Scope, "orders", "7"),
+            "EventLinks.To" => EventLinks.To(EventLinks.StreamsRoute, Scope),
             _ => throw new InvalidOperationException(site),
         };
 

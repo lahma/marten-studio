@@ -48,7 +48,7 @@
                                accessible name), which leaves a sighted mouse user with ten icons and no
                                way to read what they are. The tooltip is that way. An entry whose one-word
                                label undersells it - "Tables" is six kinds of object - says more there. *@
-                            <a class="ms-nav-link @NavClass(item.Route)" href="@Link(section, item.Route)" title="@(item.Title ?? item.Label)">
+                            <a class="ms-nav-link @NavClass(item, item.Route)" href="@Link(section, item.Route)" title="@(item.Title ?? item.Label)">
                                 @Icon(item.Icon)
                                 <span class="ms-nav-link-text">@item.Label</span>
                                 @if (BadgeFor(item.BadgeKey) is { } badge)
@@ -70,9 +70,9 @@
 
     <p class="ms-rail-credit">
         <span class="ms-rail-credit-line">@Settings.ProductName @StudioVersion</span>
-        @foreach (IStudioModule module in Shell.Modules.Where(static x => !x.IsRoot))
+        @foreach (IStudioModule module in Shell.Modules)
         {
-            @* A module is named where the product is (D34); the root is the studio itself, which the line above names; with none the markup is what it was. *@
+            @* The credit names the shell on its first line, and then every module composed into it (D34), none of them the studio itself. *@
             <span class="ms-rail-credit-line" @key="module.Key">@module.ProductName</span>
         }
         <span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
@@ -282,7 +282,7 @@
     /// </summary>
     private string Link(StudioNavSection section, string subPath)
     {
-        string href = StudioLink.To(Settings, subPath);
+        string href = StudioLink.To(subPath);
         return RailOf(section) is { } rail ? rail.Decorate(href) : href;
     }
 
@@ -296,7 +296,7 @@
         currentRelativePath = relative is null ? null : Shell.Routes.ResolveLeaf(relative, Settings);
     }
 
-    private string NavClass(string route)
+    private string NavClass(StudioNavItem item, string route)
     {
         string? relativePath = currentRelativePath;
         if (relativePath is null)
@@ -304,10 +304,10 @@
             return string.Empty;
         }
 
-        // Exact match for the studio root, prefix match for sub-pages.
-        if (route.Length == 0)
+        // Exact match for a module's overview (its home is the prefix of every page of the module), prefix match for sub-pages.
+        if (item.Exact)
         {
-            return relativePath.Length == 0 ? "ms-nav-active" : string.Empty;
+            return string.Equals(relativePath, route, StringComparison.OrdinalIgnoreCase) ? "ms-nav-active" : string.Empty;
         }
 
         // The most specific entry wins: under a studio whose sidebar has both "database" and "database/sessions", the

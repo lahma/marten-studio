@@ -1,4 +1,3 @@
-using DataStudio.Services.Settings;
 using System.Globalization;
 
 using DataStudio.Marten.Services.Events;
@@ -28,13 +27,11 @@ internal sealed class EventSequenceFindContributor : IFindContributor
 {
     private readonly IEventDataService events;
     private readonly IFindScopes scopes;
-    private readonly IShellSettings settings;
 
-    public EventSequenceFindContributor(IEventDataService events, IFindScopes scopes, IShellSettings settings)
+    public EventSequenceFindContributor(IEventDataService events, IFindScopes scopes)
     {
         this.events = events;
         this.scopes = scopes;
-        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -88,7 +85,7 @@ internal sealed class EventSequenceFindContributor : IFindContributor
                 new FindHit(
                     Kind: "Event",
                     Title: "Event #" + number,
-                    Url: EventLinks.ToStreamAt(settings, at, row.StreamId, row.Version),
+                    Url: EventLinks.ToStreamAt(at, row.StreamId, row.Version),
                     Scope: at,
                     Id: number,
                     TenantChip: rowTenant is null ? null : "tenant " + rowTenant,

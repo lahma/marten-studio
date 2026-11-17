@@ -241,7 +241,7 @@ public class SchemaScriptGatePageTests
         var page = RenderTab(context, "tables");
 
         page.Find(".ms-schema-object-link").GetAttribute("href").Should().Be(
-            DatabaseLinks.ToObject(context.Services.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>(), new DataStudio.Postgres.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
+            DatabaseLinks.ToObject(new DataStudio.Postgres.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
     }
 
     // ------------------------------------------------------------------------------------------------

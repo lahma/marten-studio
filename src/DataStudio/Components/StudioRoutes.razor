@@ -20,7 +20,7 @@ else
         <div class="ms-page">
             <h1>Not found</h1>
             <p class="ms-muted">The requested page was not found.</p>
-            <a href="@StudioLink.To(Settings, "")" class="ms-button">Back to the overview</a>
+            <a href="@StudioLink.To("")" class="ms-button">Back to the overview</a>
         </div>
     </LayoutView>
 }
@@ -51,40 +51,11 @@ else
         Navigation.LocationChanged += OnLocationChanged;
         routeData = Match(Navigation.Uri);
         (lastPath, lastFragment) = SplitLocation(Navigation.Uri);
-
-        // A prerender redirects with the framework's own exception, a circuit navigates: either way the front address never draws "Not found".
-        if (routeData is null && FrontTarget(Navigation.Uri) is { } front)
-        {
-            Navigation.NavigateTo(front, replace: true);
-        }
-    }
-
-    /// <summary>
-    /// Where the shell's own front address leads, or <see langword="null" /> for any other address: with no module at the mount itself (a shell
-    /// of modules that each keep their own segment) there is no page there, and the visitor is sent to the first module's home, with the query
-    /// string it came with.
-    /// </summary>
-    private string? FrontTarget(string uri)
-    {
-        if (Descriptor.Root is not null
-            || Descriptor.First is not { } first
-            || StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { Length: 0 })
-        {
-            return null;
-        }
-
-        return StudioLink.To(Settings, first.HomeRoute) + new Uri(uri).Query;
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         RouteData? next = Match(e.Location);
-
-        if (next is null && FrontTarget(e.Location) is { } front)
-        {
-            Navigation.NavigateTo(front, replace: true);
-            return;
-        }
 
         if (next is null && e.IsNavigationIntercepted && interceptionOn)
         {

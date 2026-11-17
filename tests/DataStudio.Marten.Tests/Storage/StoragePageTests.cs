@@ -189,7 +189,7 @@ public class StoragePageTests
         owners.Should().Equal(["application", WithheldNames.Token, "Quartz.NET"], "a withheld table's ownership would say what kind of schema it sits in");
         page.Markup.Should().NotContain("salaries").And.NotContain("mt_doc_hiddendocument").And.NotContain("HiddenDocument");
         page.Find(".ms-storage-withheld").TextContent.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
-        page.Find(".ms-storage-table tbody tr td:first-child a").GetAttribute("href").Should().Contain("database/object").And.Contain("name=orders");
+        page.Find(".ms-storage-table tbody tr td:first-child a").GetAttribute("href").Should().Contain("postgres/database/object").And.Contain("name=orders");
         page.Markup.Should().Contain("ms-storage-bar");
     }
 
@@ -251,7 +251,7 @@ public class StoragePageTests
         StudioScope scope = new("default", "localhost.marten", null);
         StorageView view = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), scope, static () => Task.FromResult<DatabaseGate?>(Gate()));
 
-        view.MaintenanceLink.Should().Be("maintenance?store=default&db=localhost.marten");
+        view.MaintenanceLink.Should().Be("postgres/maintenance?store=default&db=localhost.marten");
 
         FakeStorageService storage = new() { View = view };
         await using (StudioComponentContext context = await ContextAsync(storage))
@@ -261,7 +261,7 @@ public class StoragePageTests
 
             AngleSharp.Dom.IElement link = page.Find(".ms-storage-estimates a");
             link.TextContent.Should().Be("Maintenance");
-            link.GetAttribute("href").Should().Be("maintenance?store=default&db=localhost.marten");
+            link.GetAttribute("href").Should().Be("postgres/maintenance?store=default&db=localhost.marten");
         }
 
         DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenOptions());
@@ -291,7 +291,7 @@ public class StoragePageTests
                     ],
                 }),
             ],
-            OverviewComponent = descriptor.OverviewComponent,
+            Summary = descriptor.Summary,
             QueryComponent = descriptor.QueryComponent,
             SourceQueryParameter = descriptor.SourceQueryParameter,
             SourceNoun = descriptor.SourceNoun,

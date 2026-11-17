@@ -415,7 +415,7 @@ namespace DataStudio.Marten.Tests.Health
             first.Mono.Should().BeTrue();
             first.Copy.Should().BeTrue();
             first.Link.Should().NotBeNull();
-            first.Link!.Route.Should().Be("events/streams/s");
+            first.Link!.Route.Should().Be("marten/events/streams/s");
             first.Link.Query.Should().ContainSingle().Which.Should().Be(new KeyValuePair<string, string?>("id", "11111111-1111-1111-1111-111111111111"));
 
             result.Rows[0].Cells[1].Should().Match<HealthActionCell>(static x => x.Text == "4,200" && x.Number);

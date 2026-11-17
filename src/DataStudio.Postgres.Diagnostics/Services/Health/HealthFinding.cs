@@ -418,11 +418,11 @@ internal sealed record HealthFinding
 }
 
 /// <summary>
-/// A link from a finding to the studio screen that helps with it: a route below the studio root and its query,
+/// A link from a finding to the studio screen that helps with it: a route below the mount (the whole address, <c>postgres/maintenance</c>) and its query,
 /// to which the page adds the visitor's scope (D9).
 /// </summary>
 /// <param name="Label">What the link says - "Open the index advisor".</param>
-/// <param name="Route">The page, relative to the studio root, as the screens' own link helpers name it.</param>
+/// <param name="Route">The page's address below the mount, as the screens' own link helpers name it (<c>postgres/maintenance</c>, <c>marten/projections</c>).</param>
 /// <param name="Query">The page's own parameters; an entry whose value is blank is left out.</param>
 internal sealed record HealthLink(string Label, string Route, IReadOnlyList<KeyValuePair<string, string?>> Query)
 {

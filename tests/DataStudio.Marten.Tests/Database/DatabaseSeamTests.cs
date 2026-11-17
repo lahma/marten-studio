@@ -33,13 +33,13 @@ public class DatabaseSeamTests
 
         string[] links =
         [
-            DatabaseLinks.ToBrowser(Settings, descriptor, Scope),
-            DatabaseLinks.ToObject(Settings, descriptor, Scope, "public", "orders"),
-            DatabaseLinks.ToRows(Settings, descriptor, Scope, "public", "orders", "id = 1"),
-            DatabaseLinks.ToRow(Settings, descriptor, Scope, "public", "orders", [new("id", "1")]),
-            DatabaseLinks.ToRelationships(Settings, descriptor, Scope, RelationshipViewMode.Tables, "public"),
-            DatabaseLinks.ToQueryConsole(Settings, descriptor, Scope, "select 1"),
-            SessionLinks.ToSessions(Settings, descriptor, Scope),
+            DatabaseLinks.ToBrowser(descriptor, Scope),
+            DatabaseLinks.ToObject(descriptor, Scope, "public", "orders"),
+            DatabaseLinks.ToRows(descriptor, Scope, "public", "orders", "id = 1"),
+            DatabaseLinks.ToRow(descriptor, Scope, "public", "orders", [new("id", "1")]),
+            DatabaseLinks.ToRelationships(descriptor, Scope, RelationshipViewMode.Tables, "public"),
+            DatabaseLinks.ToQueryConsole(descriptor, Scope, "select 1"),
+            SessionLinks.ToSessions(descriptor, Scope),
         ];
 
         foreach (string link in links)
@@ -51,8 +51,8 @@ public class DatabaseSeamTests
     [Fact]
     public void MartenStudios_descriptor_still_writes_store_exactly_as_before()
     {
-        DatabaseLinks.ToObject(Settings, MartenStudioDescriptor.Instance, Scope, "public", "orders")
-            .Should().Be("database/object?schema=public&name=orders&store=orders&db=db1.orders");
+        DatabaseLinks.ToObject(MartenStudioDescriptor.Instance, Scope, "public", "orders")
+            .Should().Be("postgres/database/object?schema=public&name=orders&store=orders&db=db1.orders");
     }
 
     [Theory]
@@ -115,9 +115,9 @@ public class DatabaseSeamTests
             .Add(x => x.References, DocumentReferences()));
 
         panel.Find("section[aria-label=References] a.ms-row-ref-key.ms-doc-id").GetAttribute("href")
-            .Should().StartWith("documents/customer/doc?");
+            .Should().StartWith("marten/documents/customer/doc?");
         panel.Find("section[aria-label='Referenced by'] a.ms-row-ref-link").GetAttribute("href")
-            .Should().StartWith("documents/invoice");
+            .Should().StartWith("marten/documents/invoice");
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class DatabaseSeamTests
             PageAssemblies = marten.PageAssemblies,
             HealthCheckAssemblies = marten.HealthCheckAssemblies,
             Navigation = marten.Navigation,
-            OverviewComponent = marten.OverviewComponent,
+            Summary = marten.Summary,
             QueryComponent = marten.QueryComponent,
             SourceQueryParameter = parameter,
             SourceNoun = "data source",

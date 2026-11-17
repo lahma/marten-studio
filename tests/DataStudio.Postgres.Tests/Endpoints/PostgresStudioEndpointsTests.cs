@@ -71,7 +71,7 @@ public class PostgresStudioEndpointsTests
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage page = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/studio/postgres", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.OK);
 
             string body = await page.Content.ReadAsStringAsync(Token);
@@ -681,10 +681,12 @@ public class PostgresStudioEndpointsTests
                 .Order(StringComparer.Ordinal),
         ];
 
-        pages.Should().Contain(["/studio", "/studio/query", "/studio/database", "/studio/database/object",
-            "/studio/database/row", "/studio/database/sessions", "/studio/relationships", "/studio/health",
+        pages.Should().Contain(["/studio", "/studio/postgres", "/studio/postgres/query", "/studio/postgres/database", "/studio/postgres/database/object",
+            "/studio/postgres/database/row", "/studio/postgres/database/sessions", "/studio/postgres/relationships", "/studio/postgres/health",
             "/studio/activity"]);
         pages.Should().OnlyContain(static x => x == "/studio" || x.StartsWith("/studio/", StringComparison.Ordinal));
+        pages.Should().OnlyContain(static x => x == "/studio" || x == "/studio/activity" || x == "/studio/postgres" || x.StartsWith("/studio/postgres/", StringComparison.Ordinal),
+            "a page is the shell's own or below the Postgres module's segment, never at a bare 1.x address");
         pages.Should().NotContain(static x => x.Contains("documents", StringComparison.Ordinal)
             || x.Contains("events", StringComparison.Ordinal)
             || x.Contains("projections", StringComparison.Ordinal)
@@ -702,7 +704,7 @@ public class PostgresStudioEndpointsTests
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage page = await client.GetAsync(new Uri("/ops/db", UriKind.Relative), Token);
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/ops/db/postgres", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.OK);
             (await page.Content.ReadAsStringAsync(Token)).Should().Contain("<base href=\"/ops/db/\"");
 

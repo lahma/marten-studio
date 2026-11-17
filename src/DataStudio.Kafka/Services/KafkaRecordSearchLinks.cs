@@ -19,8 +19,7 @@ namespace DataStudio.Kafka.Services;
 /// options are invalid) answers <see langword="null" />, said once at Debug (event 9678): a Marten page never fails because of the module.
 /// </remarks>
 /// <param name="services">The container, so that the registry is resolved inside the failure handling.</param>
-/// <param name="settings">The studio's settings, for the base-relative address.</param>
-internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IShellSettings settings) : IStudioRecordSearchLinks
+internal sealed class KafkaRecordSearchLinks(IServiceProvider services) : IStudioRecordSearchLinks
 {
     /// <inheritdoc />
     public string Label => KafkaStudioText.FindInKafka;
@@ -87,7 +86,6 @@ internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IShellSe
 
         // The type in the link is the matching field's own spelling, so that the page's comparison of correlation kinds holds whatever names the screen offered.
         string href = KafkaAddress.Href(
-            settings,
             KafkaAddress.RelatedRoute,
             clusterKey,
             (KafkaAddress.FromParameter, request.From is { } from && request.To is not null ? KafkaAddress.FormatWindow(from) : null),

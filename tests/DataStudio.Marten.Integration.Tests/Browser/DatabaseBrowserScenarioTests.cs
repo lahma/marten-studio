@@ -42,7 +42,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
     private const string WaitingValue = "WAITING";
 
     /// <summary>The object page of <see cref="QuartzTriggers" />.</summary>
-    private const string TriggersObject = "database/object?schema=quartz&name=qrtz_triggers";
+    private const string TriggersObject = "postgres/database/object?schema=quartz&name=qrtz_triggers";
 
     // ------------------------------------------------------------------------------------------------
     // 1. A Quartz.NET table, read and followed
@@ -64,7 +64,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // The browser, over every schema this visitor may see.
-            await studio.GoAsync(host.StudioUrl("database"));
+            await studio.GoAsync(host.StudioUrl("postgres/database"));
 
             ILocator triggersRow = RelationRow(page, QuartzTriggers);
             await triggersRow.WaitForAsync();
@@ -82,7 +82,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
             ILocator documentBadge = page.Locator("table.ms-db-relations tbody tr.ms-db-row-marten a.ms-db-owner-document").First;
             await documentBadge.WaitForAsync();
             (await documentBadge.GetAttributeAsync("href")).Should().Contain(
-                "documents/", "a document table's badge links to its collection in Documents");
+                "marten/documents/", "a document table's badge links to its collection in Documents");
 
             await studio.AssertNoSidewaysScrollAsync("the database browser");
 
@@ -214,7 +214,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
 
             // The browser: the notice names the policy, and quartz is a count rather than a name.
-            await studio.GoAsync(host.StudioUrl("database"));
+            await studio.GoAsync(host.StudioUrl("postgres/database"));
 
             ILocator notice = page.Locator(".ms-db-access[data-refusal='WritePolicy']");
             await notice.WaitForAsync();
@@ -243,7 +243,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
 
             // An ordinary table in the store's own schema: its structure is there, its rows are refused, and
             // the refusal names the policy.
-            await studio.GoAsync(host.StudioUrl("database/object?schema=studio_sample&name=app_settings&tab=rows"));
+            await studio.GoAsync(host.StudioUrl("postgres/database/object?schema=studio_sample&name=app_settings&tab=rows"));
 
             ILocator card = page.Locator(".ms-db-rows-card[data-refusal='WritePolicy']");
             await card.WaitForAsync();
@@ -297,45 +297,45 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(host.StudioUrl("database?schema=quartz"));
+            await studio.GoAsync(host.StudioUrl("postgres/database?schema=quartz"));
 
             ILocator triggers = page.Locator("table.ms-db-relations tbody a.ms-db-name[title='" + QuartzTriggers + "']");
             await triggers.WaitForAsync();
 
             (await StudioPage.ResolvedHrefAsync(triggers)).Should().StartWith(
-                root + "database/object?", "an object link resolves under the mount path");
+                root + "postgres/database/object?", "an object link resolves under the mount path");
 
             IReadOnlyList<ILocator> kindTabs = await page.Locator(".ms-db-kind-tabs a").AllAsync();
             kindTabs.Should().NotBeEmpty("the browser offers its kinds as tabs");
 
             foreach (ILocator tab in kindTabs)
             {
-                (await StudioPage.ResolvedHrefAsync(tab)).Should().StartWith(root + "database?", "a kind tab stays on the mounted browser");
+                (await StudioPage.ResolvedHrefAsync(tab)).Should().StartWith(root + "postgres/database?", "a kind tab stays on the mounted browser");
             }
 
             // The object page.
             await triggers.ClickAsync();
-            await page.WaitForURLAsync(url => url.StartsWith(root + "database/object?", StringComparison.Ordinal));
+            await page.WaitForURLAsync(url => url.StartsWith(root + "postgres/database/object?", StringComparison.Ordinal));
 
             ILocator keyLink = page.Locator(".ms-row-grid tbody a.ms-row-open-link").First;
             await keyLink.WaitForAsync();
             (await StudioPage.ResolvedHrefAsync(keyLink)).Should().StartWith(
-                root + "database/row?", "a row-detail link resolves under the mount path");
+                root + "postgres/database/row?", "a row-detail link resolves under the mount path");
 
             // The row detail it leads to.
             await keyLink.ClickAsync();
-            await page.WaitForURLAsync(url => url.StartsWith(root + "database/row?", StringComparison.Ordinal));
+            await page.WaitForURLAsync(url => url.StartsWith(root + "postgres/database/row?", StringComparison.Ordinal));
             await page.Locator(".ms-row-detail-references section.ms-row-refs[aria-label='References']").WaitForAsync();
 
             ILocator parent = page.Locator(".ms-row-detail-references a.ms-row-ref-table").First;
-            (await StudioPage.ResolvedHrefAsync(parent)).Should().StartWith(root + "database/object?");
+            (await StudioPage.ResolvedHrefAsync(parent)).Should().StartWith(root + "postgres/database/object?");
 
             // The object page's Relationships tab: the tab link, and the diagram's node links.
             await page.Locator(".ms-row-detail-actions a", new PageLocatorOptions { HasTextString = "Back to the rows" }).ClickAsync();
-            await page.WaitForURLAsync(url => url.StartsWith(root + "database/object?", StringComparison.Ordinal));
+            await page.WaitForURLAsync(url => url.StartsWith(root + "postgres/database/object?", StringComparison.Ordinal));
 
             ILocator relationshipsTab = page.Locator(".ms-db-object-tabs a", new PageLocatorOptions { HasTextString = "Relationships" });
-            (await StudioPage.ResolvedHrefAsync(relationshipsTab)).Should().StartWith(root + "database/object?");
+            (await StudioPage.ResolvedHrefAsync(relationshipsTab)).Should().StartWith(root + "postgres/database/object?");
 
             await relationshipsTab.ClickAsync();
             await page.WaitForURLAsync(url => url.StartsWith(root, StringComparison.Ordinal)
@@ -350,16 +350,16 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
 
             // The Relationships screen, from the navigation.
             ILocator navigation = page.Locator("a.ms-nav-link", new PageLocatorOptions { HasTextString = "Relationships" });
-            (await StudioPage.ResolvedHrefAsync(navigation)).Should().StartWith(root + "relationships");
+            (await StudioPage.ResolvedHrefAsync(navigation)).Should().StartWith(root + "postgres/relationships");
 
             await navigation.ClickAsync();
-            await page.WaitForURLAsync(url => url.StartsWith(root + "relationships", StringComparison.Ordinal));
+            await page.WaitForURLAsync(url => url.StartsWith(root + "postgres/relationships", StringComparison.Ordinal));
             await page.Locator("svg.ms-graph-svg").WaitForAsync();
 
             ILocator tableNode = page.Locator("svg.ms-graph-svg a.ms-graph-node-table").First;
             await tableNode.WaitForAsync();
             (await StudioPage.ResolvedHrefAsync(tableNode)).Should().StartWith(
-                root + "database/object?", "a table node on the Relationships screen opens its object page under the mount path");
+                root + "postgres/database/object?", "a table node on the Relationships screen opens its object page under the mount path");
 
             studio.WebSockets.Should().Contain(
                 x => x.Contains(BrowserSuiteFixture.SubPath + "/_blazor", StringComparison.Ordinal),
@@ -387,7 +387,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            await studio.GoAsync(host.StudioUrl("database/object?schema=studio_sample&name=mt_doc_customer"));
+            await studio.GoAsync(host.StudioUrl("postgres/database/object?schema=studio_sample&name=mt_doc_customer"));
 
             ILocator active = page.Locator(".ms-db-object-tabs a[aria-current='page']");
             await active.WaitForAsync();
@@ -403,7 +403,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
 
             ILocator open = card.Locator("a.ms-btn-primary");
             (await open.GetAttributeAsync("href")).Should().Contain(
-                "documents/customer", "the card links to the collection, where tenancy, soft delete and the serializer apply");
+                "marten/documents/customer", "the card links to the collection, where tenancy, soft delete and the serializer apply");
 
             (await page.Locator(".ms-row-grid").CountAsync()).Should().Be(0, "a Marten document table is never read raw");
             (await page.Locator(".ms-db-rows-slot").CountAsync()).Should().Be(0, "the row grid's slot is not even rendered");

@@ -185,10 +185,10 @@ public class StoresPageTests
         sections[0].QuerySelector(".ms-stores-current")!.TextContent.Trim().Should().Be("Current");
         sections[1].QuerySelector(".ms-stores-current").Should().BeNull();
 
-        sections[1].QuerySelector(".ms-stores-open-overview")!.GetAttribute("href").Should().Be("?store=other");
+        sections[1].QuerySelector(".ms-stores-open-overview")!.GetAttribute("href").Should().Be("marten?store=other");
 
         string[] rowLinks = [.. sections[1].QuerySelectorAll("tbody td:last-child a").Select(static x => x.GetAttribute("href")!)];
-        rowLinks.Should().Equal("?store=other&db=db-x", "health?store=other&db=db-x", "tenants?store=other&db=db-x");
+        rowLinks.Should().Equal("marten?store=other&db=db-x", "postgres/health?store=other&db=db-x", "marten/tenants?store=other&db=db-x");
     }
 
     /// <summary>F7: Tenants is linked only where it has per-tenant data; on a database-per-tenant store with none, each tenant is a database.</summary>

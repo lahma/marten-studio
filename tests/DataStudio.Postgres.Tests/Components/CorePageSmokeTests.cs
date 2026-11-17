@@ -47,10 +47,11 @@ public class CorePageSmokeTests
 
         var credit = rail.Find(".ms-rail-credit");
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
-        lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
+        lines.Should().HaveCount(4, "the shell and its version, each module composed into it, the licence and the author, a line each");
         lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
-        lines[1].Should().Be("MIT licensed");
-        lines[2].Should().Be("by Marko Lahma");
+        lines[1].Should().Be("Postgres Studio");
+        lines[2].Should().Be("MIT licensed");
+        lines[3].Should().Be("by Marko Lahma");
         rail.Find(".ms-sidebar-inner").LastElementChild!.ClassList.Should().Contain("ms-rail-credit", "the credit is the last thing in the rail's column, after the list");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
             "https://github.com/lahma/marten-studio/blob/main/LICENSE");
@@ -97,7 +98,7 @@ public class CorePageSmokeTests
     public async Task Query_is_the_sql_console_alone_with_its_title_and_deep_link()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
-        context.Navigate("studio/query?sql=" + Uri.EscapeDataString("select 1"));
+        context.Navigate("studio/postgres/query?sql=" + Uri.EscapeDataString("select 1"));
 
         var page = context.Render<QueryPage>();
 
@@ -140,7 +141,7 @@ public class CorePageSmokeTests
     public async Task The_database_browser_renders()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("studio/database");
+        context.Navigate("studio/postgres/database");
 
         var page = context.Render<DatabaseObjects>();
 
@@ -152,7 +153,7 @@ public class CorePageSmokeTests
     public async Task An_objects_page_renders()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("studio/database/object?schema=legacy&name=orders");
+        context.Navigate("studio/postgres/database/object?schema=legacy&name=orders");
 
         var page = context.Render<ObjectDetail>();
 
@@ -171,8 +172,8 @@ public class CorePageSmokeTests
     }
 
     /// <summary>
-    /// The one option the two studios spell differently: a value cut at the cap names PostgresStudio's own option. (The
-    /// same sentence names <c>MartenOptions.MaxInlineValueBytes</c> in MartenStudio, pinned by its
+    /// A value cut at the cap names the option that cuts it: the Postgres module's own <c>PostgresOptions.MaxInlineValueBytes</c>. (The
+    /// same sentence names <c>MartenOptions.MaxInlineValueBytes</c> in a Marten host, pinned by its
     /// <c>RowDetailPageTests</c>.)
     /// </summary>
     [Fact]
@@ -277,7 +278,7 @@ public class CorePageSmokeTests
 
         var menu = context.Render<NavMenu>();
 
-        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().NotContain("query").And.Contain("plan");
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().NotContain("postgres/query").And.Contain("postgres/plan");
         menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain("Query").And.StartWith(["Overview", "Plan", "Tables"]);
     }
 
@@ -290,7 +291,7 @@ public class CorePageSmokeTests
         var menu = context.Render<NavMenu>();
 
         menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().StartWith(["Overview", "Query", "Plan", "Tables"]);
-        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain(["query", "plan"]);
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain(["postgres/query", "postgres/plan"]);
     }
 
     /// <summary>The master switch turns every capability off, so it takes Query with it whatever <c>RunSql</c> says; Plan stays.</summary>
@@ -328,7 +329,7 @@ public class CorePageSmokeTests
     public async Task On_Sessions_only_the_Sessions_entry_is_lit()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("studio/database/sessions");
+        context.Navigate("studio/postgres/database/sessions");
 
         var menu = context.Render<NavMenu>();
 

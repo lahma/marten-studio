@@ -24,7 +24,7 @@ public class ScopeFollowsClickedLinkTests
 
     private sealed record Rig(StudioComponentContext Context, ClickableNavigationManager Navigation, IRenderedComponent<StudioRoutes> Routes, List<StudioScope?> Scopes);
 
-    private static async Task<Rig> StartAsync(string relativeStart = "")
+    private static async Task<Rig> StartAsync(string relativeStart = "marten")
     {
         ClickableNavigationManager navigation = new("http://localhost/studio/" + relativeStart);
 
@@ -78,7 +78,7 @@ public class ScopeFollowsClickedLinkTests
     [Fact]
     public async Task The_stores_pages_open_overview_link_shows_that_stores_overview()
     {
-        Rig rig = await StartAsync("stores");
+        Rig rig = await StartAsync("marten/stores");
         await using StudioComponentContext context = rig.Context;
 
         rig.Routes.WaitForAssertion(() => rig.Routes.FindAll(".ms-stores-open-overview").Should().HaveCount(2));
@@ -96,7 +96,7 @@ public class ScopeFollowsClickedLinkTests
     [Fact]
     public async Task A_database_rows_health_link_opens_the_health_page_on_that_stores_database()
     {
-        Rig rig = await StartAsync("stores");
+        Rig rig = await StartAsync("marten/stores");
         await using StudioComponentContext context = rig.Context;
 
         rig.Routes.WaitForAssertion(() => rig.Routes.FindAll(".ms-stores-store").Should().HaveCount(2));
@@ -121,8 +121,8 @@ public class ScopeFollowsClickedLinkTests
         int changes = rig.Scopes.Count;
 
         // A page's own push, the shell's replace and any other NavigateTo report that the browser did not intercept anything.
-        await rig.Routes.InvokeAsync(() => rig.Navigation.NavigateTo("?store=other&db=db-x"));
-        await rig.Routes.InvokeAsync(() => rig.Navigation.NavigateTo("?store=other", replace: true));
+        await rig.Routes.InvokeAsync(() => rig.Navigation.NavigateTo("marten?store=other&db=db-x"));
+        await rig.Routes.InvokeAsync(() => rig.Navigation.NavigateTo("marten?store=other", replace: true));
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope!.StoreKey.Should().Be("default");
@@ -170,7 +170,7 @@ public class ScopeFollowsClickedLinkTests
         await using StudioComponentContext context = rig.Context;
         int changes = rig.Scopes.Count;
 
-        rig.Navigation.HistoryMove("?store=nowhere&db=db-q");
+        rig.Navigation.HistoryMove("marten?store=nowhere&db=db-q");
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db-a", null), "ignored exactly as at first load");
@@ -181,12 +181,12 @@ public class ScopeFollowsClickedLinkTests
     }
 
     /// <summary>
-    /// 1.2-UX-FIX-FU4: an intercepted address no studio page matches, naming a valid second store and only part of a scope, moves the scope
-    /// (the link names one the listings carry) - and no writer of the shell's rewrite, the scope change's included, appends the rest of the
-    /// scope to it while the browser's force-load is in flight: only the force-load is recorded.
+    /// 1.2-UX-FIX-FU4, in v2 (step 5): an intercepted address no studio page matches is a page of no module, so the database's scope waits in memory
+    /// and does not move, whatever store the address names - and no writer of the shell's rewrite appends a scope to it while the browser's
+    /// force-load is in flight: only the force-load is recorded.
     /// </summary>
     [Fact]
-    public async Task An_intercepted_non_page_address_naming_a_valid_second_store_records_only_the_force_load()
+    public async Task An_intercepted_non_page_address_naming_a_valid_second_store_records_only_the_force_load_and_moves_nothing()
     {
         Rig rig = await StartAsync();
         await using StudioComponentContext context = rig.Context;
@@ -195,9 +195,9 @@ public class ScopeFollowsClickedLinkTests
 
         rig.Navigation.Click("no-such-page?store=other");
 
-        rig.Routes.WaitForAssertion(() => context.State.ActiveScope!.StoreKey.Should().Be("other"));
         await rig.Routes.InvokeAsync(() => { });
 
+        context.State.ActiveScope!.StoreKey.Should().Be("default", "an address that is no module's page names no scope of the database's");
         rig.Navigation.Requests.Skip(before).Should().ContainSingle("only the force-load: no rewrite appended the database to it")
             .Which.Options.ForceLoad.Should().BeTrue();
     }
@@ -213,7 +213,7 @@ public class ScopeFollowsClickedLinkTests
         await using StudioComponentContext context = rig.Context;
         int changes = rig.Scopes.Count;
 
-        rig.Navigation.HistoryMove("?store=other&db=db-x", intercepted: false);
+        rig.Navigation.HistoryMove("marten?store=other&db=db-x", intercepted: false);
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope!.StoreKey.Should().Be("default");
@@ -245,7 +245,7 @@ public class ScopeFollowsClickedLinkTests
         int changes = rig.Scopes.Count;
         int requests = rig.Navigation.Requests.Count;
 
-        rig.Navigation.HistoryMove(named, intercepted);
+        rig.Navigation.HistoryMove("marten" + named, intercepted);
 
         rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=other").And.Contain("db=db-x"));
         context.State.ActiveScope.Should().Be(new StudioScope("other", "db-x", null), "an address that names no other scope moves nothing");
@@ -260,8 +260,8 @@ public class ScopeFollowsClickedLinkTests
         await using StudioComponentContext context = rig.Context;
         int changes = rig.Scopes.Count;
 
-        rig.Navigation.Click("health?store=default&db=db-a");
-        rig.Navigation.Click("documents");
+        rig.Navigation.Click("postgres/health?store=default&db=db-a");
+        rig.Navigation.Click("marten/documents");
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db-a", null));
@@ -274,7 +274,7 @@ public class ScopeFollowsClickedLinkTests
         Rig rig = await StartAsync();
         await using StudioComponentContext context = rig.Context;
 
-        rig.Navigation.Click("?store=nowhere");
+        rig.Navigation.Click("marten?store=nowhere");
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope!.StoreKey.Should().Be("default", "ignored exactly as at first load");

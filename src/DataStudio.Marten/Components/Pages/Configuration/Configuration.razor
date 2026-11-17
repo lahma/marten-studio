@@ -386,7 +386,7 @@
             : "no informational version on the assembly";
 
     /// <summary>The Connection page's section on how Marten uses the connection, with the scope carried.</summary>
-    private string ConnectionHref => ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, MartenConnectionSection.SectionId);
+    private string ConnectionHref => ConnectionLinks.To(Descriptor, State.ActiveScope, MartenConnectionSection.SectionId);
 
     private StudioConfiguration? configuration;
     private string filter = string.Empty;

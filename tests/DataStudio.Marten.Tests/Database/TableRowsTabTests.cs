@@ -42,7 +42,7 @@ public class TableRowsTabTests
         IElement job = Header(tab, "job_name");
         IElement parent = job.QuerySelector("a.ms-row-fk-marker")!;
         parent.TextContent.Should().Be("→ qrtz_job_details");
-        parent.GetAttribute("href").Should().StartWith("database/object?schema=quartz&name=qrtz_job_details").And.Contain("store=default");
+        parent.GetAttribute("href").Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_job_details").And.Contain("store=default");
         job.QuerySelector(".ms-row-pk").Should().BeNull();
 
         Header(tab, "trigger_meta").QuerySelector(".ms-row-col-type")!.TextContent.Should().Be("jsonb");
@@ -298,10 +298,10 @@ public class TableRowsTabTests
         IElement link = Cell(tab, 0, "sched_name").QuerySelector("a.ms-row-open-link")!;
         string href = link.GetAttribute("href")!;
 
-        href.Should().StartWith("database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT");
+        href.Should().StartWith("postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT");
         Query(href, "store").Should().Be("default");
         Query(href, "db").Should().Be("localhost.marten");
-        Query(href, "from").Should().StartWith("studio/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        Query(href, "from").Should().StartWith("studio/postgres/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
 
         Cell(tab, 0, "sched_name").ClassList.Should().Contain("ms-row-sticky", "the row's name stays put while the rest scrolls");
         Cell(tab, 0, "trigger_name").QuerySelector("a").Should().BeNull("one link per row, not one per key column");
@@ -334,7 +334,7 @@ public class TableRowsTabTests
 
         IElement link = Cell(tab, 2, "job_name").QuerySelector("a.ms-row-fk-link")!;
         link.TextContent.Should().Be("job-1");
-        link.GetAttribute("href").Should().StartWith("database/row?schema=quartz&name=qrtz_job_details&key.sched_name=QuartzScheduler&key.job_name=job-1");
+        link.GetAttribute("href").Should().StartWith("postgres/database/row?schema=quartz&name=qrtz_job_details&key.sched_name=QuartzScheduler&key.job_name=job-1");
         context.DatabaseObjects.ObjectsAsked.Should().Equal(["quartz.qrtz_job_details"], "one read of the parent, for its key");
     }
 
@@ -349,7 +349,7 @@ public class TableRowsTabTests
 
         string href = Cell(tab, 2, "job_name").QuerySelector("a.ms-row-fk-link")!.GetAttribute("href")!;
 
-        href.Should().StartWith("database/object?schema=quartz&name=qrtz_job_details&tab=rows");
+        href.Should().StartWith("postgres/database/object?schema=quartz&name=qrtz_job_details&tab=rows");
         Query(href, "q").Should().Be("sched_name = QuartzScheduler job_name = job-1");
     }
 
@@ -644,7 +644,7 @@ public class TableRowsTabTests
 
         tab.FindAll("tr.ms-row-item")[0].KeyDown(new KeyboardEventArgs { Key = "Enter" });
 
-        context.CurrentUri.Should().Contain("database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler");
+        context.CurrentUri.Should().Contain("postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler");
     }
 
     [Fact]

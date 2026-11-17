@@ -136,7 +136,7 @@
                     </p>
                     <p class="ms-muted ms-health-banner-meta">
                         From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
-                        <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(StudioSettings, State.ActiveScope, finding)">Why, and what to change</a>
+                        <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(State.ActiveScope, finding)">Why, and what to change</a>
                     </p>
 
                     @if (string.Equals(finding.Code, "D01", StringComparison.Ordinal))
@@ -1709,7 +1709,7 @@
 
     /// <summary>The Event flow drawn for one projection (1.2).</summary>
     private string FlowHref(string projectionName) =>
-        DataStudio.Marten.Services.Events.EventLinks.ToFlow(StudioSettings, State.ActiveScope, projectionName);
+        DataStudio.Marten.Services.Events.EventLinks.ToFlow(State.ActiveScope, projectionName);
 
     /// <summary>
     /// What the projection reads, from the Event flow's cached model: StoreOptions and the projection graph, no read of the database.

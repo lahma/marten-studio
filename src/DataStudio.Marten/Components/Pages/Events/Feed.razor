@@ -822,7 +822,6 @@
 
     private string PageHref(long? after) =>
         EventLinks.To(
-            StudioSettings,
             EventLinks.FeedRoute,
             State.ActiveScope,
             [
@@ -841,7 +840,6 @@
     /// </summary>
     private string LinqHref() =>
         EventLinks.ToLinqQuery(
-            StudioSettings,
             State.ActiveScope,
             EventLinks.FeedPredicate(
                 shape?.StreamIdentity ?? JasperFx.Events.StreamIdentity.AsGuid,
@@ -851,13 +849,13 @@
             ArchivedFlag ? DataStudio.Marten.Services.Query.ArchivedFilter.Include : DataStudio.Marten.Services.Query.ArchivedFilter.Exclude);
 
     private string StreamHref(string streamId) =>
-        EventLinks.ToStream(StudioSettings, State.ActiveScope, streamId);
+        EventLinks.ToStream(State.ActiveScope, streamId);
 
     private string TypeHref(string eventType) =>
-        EventLinks.ToFeedForType(StudioSettings, State.ActiveScope, eventType);
+        EventLinks.ToFeedForType(State.ActiveScope, eventType);
 
     private string? TagHref(string tagType, string value) =>
-        EventLinks.ToFeedForTag(StudioSettings, State.ActiveScope, tagType, value);
+        EventLinks.ToFeedForTag(State.ActiveScope, tagType, value);
 
     /// <summary>A tag filter's verdict, as the filter bar draws it.</summary>
     /// <param name="Level">The colour: <c>green</c>, <c>amber</c> or <c>red</c>.</param>

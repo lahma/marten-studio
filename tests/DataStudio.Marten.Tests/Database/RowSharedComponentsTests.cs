@@ -92,7 +92,7 @@ public class RowSharedComponentsTests
 
         List<string> tableLinks = [.. tab.FindAll("a")
             .Select(static x => x.GetAttribute("href") ?? string.Empty)
-            .Where(static x => x.StartsWith("database/object?", StringComparison.Ordinal))];
+            .Where(static x => x.StartsWith("postgres/database/object?", StringComparison.Ordinal))];
 
         tableLinks.Should().NotBeEmpty();
         tableLinks.Should().OnlyContain(static x => x.Contains("&tab=relationships", StringComparison.Ordinal),
@@ -117,14 +117,14 @@ public class RowSharedComponentsTests
             .Add(x => x.DocumentId, "6f9619ff-8b86-d011-b42d-00cf4fc964ff"));
 
         string href = panel.Find(".ms-referenced-table .ms-referenced-link").GetAttribute("href")!;
-        href.Should().StartWith("database/object?schema=legacy&name=customer_credit&tab=rows&q=customer_id%20%3D%206f9619ff");
+        href.Should().StartWith("postgres/database/object?schema=legacy&name=customer_credit&tab=rows&q=customer_id%20%3D%206f9619ff");
 
         // Not counted - the gate said no - is its object page, where the Rows tab would only say no again.
         panel = context.Render<ReferencedByPanel>(parameters => parameters
             .Add(x => x.Model, (object?) new ReferencedByModel([counted with { NotCounted = "The gate is shut." }]))
             .Add(x => x.DocumentId, "6f9619ff-8b86-d011-b42d-00cf4fc964ff"));
 
-        panel.Find(".ms-referenced-table .ms-referenced-link").GetAttribute("href").Should().Be("database/object?schema=legacy&name=customer_credit");
+        panel.Find(".ms-referenced-table .ms-referenced-link").GetAttribute("href").Should().Be("postgres/database/object?schema=legacy&name=customer_credit");
     }
 
     [Fact]

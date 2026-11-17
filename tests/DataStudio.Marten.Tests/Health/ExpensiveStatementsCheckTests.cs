@@ -203,7 +203,7 @@ public class ExpensiveStatementsCheckTests
         finding.Remedy.Explanation.Should().Contain("records this statement's constants as placeholders")
             .And.Contain("add the line only if it finds no index on that member");
         finding.Remedy.Code.Should().Contain("if no index on that member exists already");
-        finding.Link!.Route.Should().Be("query");
+        finding.Link!.Route.Should().Be("postgres/query");
         finding.Link.Query.Should().Contain(new KeyValuePair<string, string?>("type", Doc.Alias));
     }
 

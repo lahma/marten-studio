@@ -61,7 +61,7 @@
             @if (view is { Refusal: DatabaseRefusal.None })
             {
                 @* 1.2-INDEX-A: opens the panel (?advise=all, D9) and runs nothing; the panel's Run does. *@
-                <a class="ms-button ms-advisor-open" href="@StatementLinks.ToAdvisor(Settings, Descriptor, State.ActiveScope)" aria-current="@(Advising ? "true" : null)">Index advisor</a>
+                <a class="ms-button ms-advisor-open" href="@StatementLinks.ToAdvisor(Descriptor, State.ActiveScope)" aria-current="@(Advising ? "true" : null)">Index advisor</a>
             }
             <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(markEnded is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
@@ -315,7 +315,7 @@
                                         queryid @row.Key
                                         @if (row.Text is { Length: > 0 })
                                         {
-                                            <a class="ms-plan-open" href="@StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, row.QueryId)">Plan</a>
+                                            <a class="ms-plan-open" href="@StatementLinks.ToStatement(Descriptor, State.ActiveScope, row.QueryId)">Plan</a>
                                         }
                                     </p>
                                 </td>
@@ -567,7 +567,7 @@
                 <h2 class="ms-plan-drill-title" id="ms-plan-drill-title">Statement <span class="ms-mono">@id</span></h2>
                 <div class="ms-plan-drill-actions">
                     <button type="button" class="ms-button ms-plan-drill-again" @onclick="PlanAgainAsync" disabled="@planning">Plan again</button>
-                    <a class="ms-button ms-plan-drill-close" href="@StatementLinks.ToStatements(Settings, Descriptor, State.ActiveScope)">All statements</a>
+                    <a class="ms-button ms-plan-drill-close" href="@StatementLinks.ToStatements(Descriptor, State.ActiveScope)">All statements</a>
                 </div>
             </div>
 

@@ -364,7 +364,7 @@
     /// </summary>
     private string? NameFilterLink(FindResult found) =>
         found.Refusal is null && FindQuery.Parse(found.Value).Identifier is { } identifier
-            ? DatabaseLinks.ToBrowser(Settings, Descriptor, found.Scope, nameFilter: identifier.Name)
+            ? DatabaseLinks.ToBrowser(Descriptor, found.Scope, nameFilter: identifier.Name)
             : null;
 
     private string Where(StudioScope scope, bool narrowed)

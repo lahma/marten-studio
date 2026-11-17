@@ -75,7 +75,7 @@
                     @if (ShowTable)
                     {
                         <td class="ms-db-cell-name">
-                            <a class="ms-db-name ms-db-name-cut" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, trigger.Schema, trigger.Table)" title="@DatabaseLinks.QualifiedName(trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
+                            <a class="ms-db-name ms-db-name-cut" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, trigger.Schema, trigger.Table)" title="@DatabaseLinks.QualifiedName(trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
                         </td>
                     }
                     <td>@trigger.Timing</td>
@@ -85,7 +85,7 @@
                         @if (trigger.FunctionSchema is { } functionSchema && trigger.FunctionName is { } functionName)
                         {
                             <a class="ms-db-name"
-                               href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, functionSchema, DatabaseObjectCategory.Functions, nameFilter: functionName)"
+                               href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, functionSchema, DatabaseObjectCategory.Functions, nameFilter: functionName)"
                                title="Show this function on the Functions tab">@(DatabaseLinks.QualifiedName(functionSchema, functionName) + "()")</a>
                         }
                         else

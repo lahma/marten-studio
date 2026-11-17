@@ -44,7 +44,7 @@ public class NavMenuScopeTests
         labels.Take(3).Should().Equal("Overview", "Stores", "Documents");
 
         nav.FindAll("a.ms-nav-link").Single(static x => x.QuerySelector(".ms-nav-link-text")!.TextContent.Trim() == "Stores")
-            .GetAttribute("href").Should().StartWith("stores?").And.Contain("store=default");
+            .GetAttribute("href").Should().StartWith("marten/stores?").And.Contain("store=default");
     }
 
     [Fact]

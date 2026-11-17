@@ -123,7 +123,8 @@
     private bool preferencesLoaded;
 
     /// <summary>
-    /// The module whose page the address names (D34), or the root for an address no page matches. Found from the matched page's assembly
+    /// The module whose page the address names (D34), or <see langword="null" /> for a page of no module (Activity, the front page) and for an address no page
+    /// matches (Not found): such a page has no scope selector, no header search and no scope gate. Found from the matched page's assembly
     /// (<see cref="StudioShellDescriptor.ModuleOf" />) and never from the address's text, so that no address can name a page that is not a
     /// module's and be treated as one - a module's own frame is skipped only for another module's pages.
     /// </summary>
@@ -169,15 +170,15 @@
     }
 
     /// <summary>
-    /// The module whose page <paramref name="uri" /> names, or the root: the route table matches the address, and the matched
-    /// page's assembly decides (D34). An address no page matches is the root's, as it was the host studio's.
+    /// The module whose page <paramref name="uri" /> names, or <see langword="null" />: the route table matches the address, and the matched
+    /// page's assembly decides (D34). An address no page matches is no module's.
     /// </summary>
     private IStudioModule? ModuleOfAddress(string uri)
     {
         if (StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { } relative
             || Descriptor.Routes.Match(relative, Settings) is not { } match)
         {
-            return Descriptor.Root;
+            return null;
         }
 
         return Descriptor.ModuleOf(match.PageType);

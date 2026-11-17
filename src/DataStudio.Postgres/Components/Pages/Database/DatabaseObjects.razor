@@ -83,7 +83,7 @@
                         int count = CountOf(category);
 
                         <a class="@TabClass(category, count)"
-                           href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, category, Owner, Filter)"
+                           href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, Schema, category, Owner, Filter)"
                            aria-current="@(category == Category ? "page" : null)"
                            title="@(count == 0 ? EmptyTabTitle : null)"
                            @key="category">
@@ -133,7 +133,7 @@
                             <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
                         }
                         <p class="ms-empty-description">
-                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, null, Category)">Show every schema you can see</a>
+                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, null, Category)">Show every schema you can see</a>
                         </p>
                     </div>
                 }
@@ -497,13 +497,13 @@
 
     private Task OwnerChangedAsync(DatabaseOwnerFilter owner)
     {
-        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, Category, owner, Filter));
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, Schema, Category, owner, Filter));
         return Task.CompletedTask;
     }
 
     private Task FilterChangedAsync(string value)
     {
-        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, Category, Owner, value));
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Descriptor, State.ActiveScope, Schema, Category, Owner, value));
         return Task.CompletedTask;
     }
 

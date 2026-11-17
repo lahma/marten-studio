@@ -1,4 +1,5 @@
 using DataStudio.Marten.Internal.Sql;
+using DataStudio.Marten.Services.Events;
 
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Schema;
@@ -354,7 +355,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             // The projections screen is where Correct progression, a rebuild and a rewind are; a repair that needs none of
             // them does not send anybody to the button it says not to press.
             Link = remedy.Kind != HealthRemedyKind.Repair || remedy.Code.Contains("Capabilities.RebuildProjections", StringComparison.Ordinal)
-                ? new HealthLink("Open the projections screen", "projections")
+                ? new HealthLink("Open the projections screen", EventLinks.ProjectionsRoute)
                 : null,
             Remedy = remedy,
         };
@@ -386,7 +387,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
                 + "and nothing reports it as lost. The high-water mark is not ahead, so this one shard's row is." + Causes,
             Evidence = evidence,
             Caveat = SnapshotCaveat,
-            Link = new HealthLink("Open the projections screen", "projections"),
+            Link = new HealthLink("Open the projections screen", EventLinks.ProjectionsRoute),
             Remedy = new HealthRemedy(
                 "// Rebuild this projection on the projections screen (Capabilities.RebuildProjections),\n"
                 + "// or rewind the subscription to " + DaemonCheckConfiguration.Number(floor) + ".",

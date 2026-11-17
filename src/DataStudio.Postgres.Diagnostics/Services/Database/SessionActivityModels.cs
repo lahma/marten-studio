@@ -7,8 +7,8 @@ namespace DataStudio.Postgres.Services.Database;
 /// <summary>Database › Sessions' address.</summary>
 internal static class SessionLinks
 {
-    /// <summary>The page's route under the studio's path.</summary>
-    public const string Route = "database/sessions";
+    /// <summary>The page's address below the mount.</summary>
+    public const string Route = PostgresRoutes.Root + "/database/sessions";
 
     /// <summary>The query parameter that names the page's tab (D9: a link someone pastes reopens the same tab).</summary>
     public const string ViewParameter = "view";

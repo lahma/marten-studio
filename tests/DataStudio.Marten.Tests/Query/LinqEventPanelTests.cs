@@ -429,7 +429,7 @@ public class LinqEventPanelTests
 
         using StudioComponentContext context = CreateContext(linq);
 
-        context.Navigate("studio/query?mode=linq&target=events&archived=only&predicate=" + Uri.EscapeDataString("EventTypeName == \"a\""));
+        context.Navigate("studio/postgres/query?mode=linq&target=events&archived=only&predicate=" + Uri.EscapeDataString("EventTypeName == \"a\""));
 
         var page = context.Render<QueryPage>();
 
@@ -451,7 +451,7 @@ public class LinqEventPanelTests
         linq.Result = Result(new LinqEventScope(null, CrossTenant: true, ArchivedFilter.Exclude, WholeDatabase: false, PerTenantSequences: false), Row(1));
 
         using StudioComponentContext context = CreateContext(linq);
-        context.Navigate("studio/query?mode=linq&target=events");
+        context.Navigate("studio/postgres/query?mode=linq&target=events");
 
         var page = context.Render<QueryPage>();
 
@@ -498,11 +498,11 @@ public class LinqEventPanelTests
         var options = new MartenOptions();
         var scope = new StudioScope("default", "main", "acme");
 
-        string href = EventLinks.ToLinqQuery(MartenStudioSettings.Of(options), scope, "Version > 3", ArchivedFilter.Include);
+        string href = EventLinks.ToLinqQuery(scope, "Version > 3", ArchivedFilter.Include);
 
-        href.Should().Contain("query?mode=linq").And.Contain("target=events").And.Contain("predicate=Version%20%3E%203")
+        href.Should().Contain("postgres/query?mode=linq").And.Contain("target=events").And.Contain("predicate=Version%20%3E%203")
             .And.Contain("archived=include").And.Contain("store=default").And.Contain("db=main").And.Contain("tenant=acme");
-        EventLinks.ToLinqQuery(MartenStudioSettings.Of(options), null, null).Should().NotContain("predicate=").And.NotContain("archived=");
+        EventLinks.ToLinqQuery(null, null).Should().NotContain("predicate=").And.NotContain("archived=");
     }
 
     [Theory]

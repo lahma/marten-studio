@@ -115,7 +115,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-chain").Should().HaveCount(2));
 
@@ -150,7 +150,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-handover").Should().ContainSingle());
 
@@ -183,7 +183,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-handover").Should().ContainSingle());
 
@@ -204,7 +204,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-stats").Should().ContainSingle());
 
@@ -230,7 +230,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-statistics").Should().ContainSingle());
 
@@ -250,7 +250,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            older.Navigate("studio/database/sessions?view=blocking");
+            older.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = older.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-stats").Should().ContainSingle());
 
@@ -288,7 +288,7 @@ public class SessionsBlockingPageTests
 
         try
         {
-            context.Navigate("studio/database/sessions?view=blocking");
+            context.Navigate("studio/postgres/database/sessions?view=blocking");
             var page = context.Render<Sessions>();
             page.WaitForAssertion(() => page.FindAll(".ms-blocking-none").Should().ContainSingle());
 
@@ -325,7 +325,7 @@ public class SessionsBlockingPageTests
             page.FindAll(".ms-blocking").Should().BeEmpty();
 
             var blocking = page.FindAll(".ms-sessions-tabs a").Single(static x => x.TextContent.Contains("Blocking", StringComparison.Ordinal));
-            blocking.GetAttribute("href").Should().StartWith("database/sessions?view=blocking");
+            blocking.GetAttribute("href").Should().StartWith("postgres/database/sessions?view=blocking");
             blocking.QuerySelector(".ms-tab-count")!.TextContent.Should().Be("1");
         }
         finally

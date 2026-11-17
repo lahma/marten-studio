@@ -277,7 +277,7 @@ public class PlanPageTests
     public async Task A_link_reopens_the_page_with_the_editor_the_mode_and_the_options_filled_and_does_not_run()
     {
         await using PostgresStudioComponentContext context = await ReadyAsync();
-        context.Navigate("studio/plan?sql=" + Uri.EscapeDataString("select 1 from t where a = $1") + "&mode=analyze&options=verbose,wal");
+        context.Navigate("studio/postgres/plan?sql=" + Uri.EscapeDataString("select 1 from t where a = $1") + "&mode=analyze&options=verbose,wal");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
@@ -401,7 +401,7 @@ public class PlanPageTests
         IRenderedComponent<PlanPage> page = await RanAsync(context, result: Ran("p09-fires"));
 
         page.FindAll(".ms-plan-insight-code").Select(static x => x.TextContent).Should().Contain("P09");
-        page.Find(".ms-plan-insight-page").GetAttribute("href").Should().StartWith("maintenance?").And.Contain("store=default");
+        page.Find(".ms-plan-insight-page").GetAttribute("href").Should().StartWith("postgres/maintenance?").And.Contain("store=default");
         page.Find(".ms-plan-insight-page").TextContent.Should().Contain("Maintenance");
     }
 
@@ -887,6 +887,6 @@ public class PlanPageTests
 
         IElement link = panel.Find(".ms-query-open-plan-link");
         link.TextContent.Should().Be("Open in Plan");
-        link.GetAttribute("href").Should().Be("plan?sql=select%20*%20from%20t%20where%20a%20%3D%20$1&store=default&db=default");
+        link.GetAttribute("href").Should().Be("postgres/plan?sql=select%20*%20from%20t%20where%20a%20%3D%20$1&store=default&db=default");
     }
 }

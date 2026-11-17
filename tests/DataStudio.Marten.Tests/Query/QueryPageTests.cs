@@ -105,7 +105,7 @@ public class QueryPageTests
 
         page.Find(".ms-query-sql").TextContent.Should().Contain("mt_doc_person").And.Contain("limit @limit");
         page.Find(".ms-query-sql-note").TextContent.Should().Contain("@limit = 50", "the bindings are listed");
-        page.Find(".ms-query-row-id a").GetAttribute("href").Should().Be("documents/person/doc?id=42");
+        page.Find(".ms-query-row-id a").GetAttribute("href").Should().Be("marten/documents/person/doc?id=42");
         page.FindAll(".ms-json-tree").Should().NotBeEmpty("each row renders the document in the JSON viewer");
     }
 
@@ -515,7 +515,7 @@ public class QueryPageTests
         service.SqlResult = FakeQueryService.OneRow();
 
         using StudioComponentContext context = CreateContext(service, runSql: true);
-        context.Navigate("studio/query?mode=sql&sql=select+1");
+        context.Navigate("studio/postgres/query?mode=sql&sql=select+1");
 
         var page = context.Render<QueryPage>();
 
@@ -569,7 +569,7 @@ public class QueryPageTests
         service.UseRealClauseGuard = true;
 
         using StudioComponentContext context = CreateContext(service);
-        context.Navigate("studio/query?type=person&where=" + Uri.EscapeDataString(clause));
+        context.Navigate("studio/postgres/query?type=person&where=" + Uri.EscapeDataString(clause));
 
         context.CurrentUri.Should().Contain("%0D", "the carriage return travels percent-encoded");
 
@@ -600,7 +600,7 @@ public class QueryPageTests
         service.UseRealClauseGuard = true;
 
         using StudioComponentContext context = CreateContext(service);
-        context.Navigate("studio/query?type=person&where=" + Uri.EscapeDataString(clause));
+        context.Navigate("studio/postgres/query?type=person&where=" + Uri.EscapeDataString(clause));
 
         var page = context.Render<QueryPage>();
 

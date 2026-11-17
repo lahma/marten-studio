@@ -42,7 +42,7 @@ public class SequentialScansCheckTests
         finding.Caveat.Should().Contain("Counters since").And.Contain("never given over less than 7 days").And.Contain("parallel scan");
 
         finding.Link.Should().NotBeNull("the index advisor is the screen that helps");
-        finding.Link!.Route.Should().Be("query");
+        finding.Link!.Route.Should().Be("postgres/query");
         finding.Link.Query.Should().Equal(
             new KeyValuePair<string, string?>("mode", "marten"),
             new KeyValuePair<string, string?>("type", orders.Alias));

@@ -383,14 +383,14 @@
     {
         view = mode;
         Recompute();
-        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Descriptor, State.ActiveScope, view, schema));
     }
 
     private void SelectSchema(string? chip)
     {
         schema = chip;
         Recompute();
-        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, Shown, schema));
+        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Descriptor, State.ActiveScope, Shown, schema));
     }
 
     private RenderFragment ViewButton(RelationshipViewMode mode, string label, int count) => __builder =>
@@ -442,7 +442,7 @@
 
     /// <summary>The link to a table's object detail, scope and all.</summary>
     private string TableHref(string tableSchema, string name) =>
-        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, tableSchema, name);
+        DatabaseLinks.ToObject(Descriptor, State.ActiveScope, tableSchema, name);
 
     private async Task OnScopeChangedAsync() => await LoadAsync();
 

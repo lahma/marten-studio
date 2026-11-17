@@ -32,7 +32,7 @@ if (EphemeralPostgres.IsThrowaway(connectionString))
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 
 // The engine alone: no ASP.NET Core, no UI, no mounted path. Validated on start, so a bad option stops the host here
-// rather than at the first read. Refused beside AddPostgresStudio() or AddMartenStudio(), which register it themselves.
+// rather than at the first read. Refused beside the shell's AddPostgres() or AddMarten(), which register it themselves.
 builder.Services.AddPostgresDiagnostics(options =>
 {
     // The schemas the checks that read objects look at; `public` is the default, named here so the line says what it does.

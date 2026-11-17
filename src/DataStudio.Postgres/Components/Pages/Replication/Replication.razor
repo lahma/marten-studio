@@ -124,7 +124,7 @@
                     <p class="ms-repl-finding-title"><code>@finding.Code</code> @finding.Finding.Title</p>
                     <p class="ms-muted">
                         From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
-                        <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, and what to change</a>
+                        <a href="@HealthLinks.ToFinding(Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, and what to change</a>
                     </p>
                 </div>
             </section>
@@ -528,7 +528,7 @@
 
         <p class="ms-repl-measured">
             Read @Preferences.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />). Rates and windows are the
-            health advisor's samples, taken while <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">Health</a>
+            health advisor's samples, taken while <a href="@HealthLinks.ToPage(Descriptor.SourceQueryParameter, State.ActiveScope)">Health</a>
             or the Overview is open.
         </p>
     }

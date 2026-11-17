@@ -6,7 +6,6 @@
 @using Microsoft.Extensions.Logging
 @inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
-@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject ILogger<KafkaTailRows> Logger
 
@@ -227,7 +226,6 @@ else if (Running)
 
     private string RecordHref(KafkaMatch match) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RecordRoute,
             Cluster.Key,
             (KafkaAddress.TopicParameter, match.Topic),
@@ -236,7 +234,6 @@ else if (Running)
 
     private string RelatedHref(KafkaMatch match) =>
         KafkaAddress.Href(
-            Settings,
             KafkaAddress.RelatedRoute,
             Cluster.Key,
             (KafkaAddress.TopicParameter, match.Topic),

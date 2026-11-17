@@ -226,13 +226,13 @@ public class RecordSearchLinkTests
 
     private static IRenderedComponent<DocumentPage> RenderDocument(DocumentsComponentContext context)
     {
-        context.Navigate($"studio/documents/customer/doc?id={DocumentId}");
+        context.Navigate($"studio/marten/documents/customer/doc?id={DocumentId}");
         return context.Render<DocumentPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 
     private static IRenderedComponent<StreamPage> RenderStream(StudioComponentContext context)
     {
-        context.Navigate("studio/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/marten/events/streams/s?id=" + StreamId);
         return context.Render<StreamPage>();
     }
 

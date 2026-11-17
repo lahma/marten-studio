@@ -57,7 +57,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("overview", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl());
+            await studio.GoAsync(fixture.Root.StudioUrl("marten"));
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
 
@@ -116,7 +116,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("documents", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("documents"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/documents"));
 
             await studio.Page.Locator(".ms-rail-list a[href*='documents/customer']").First.ClickAsync();
 
@@ -172,7 +172,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("query", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("query?type=customer"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?type=customer"));
 
             await studio.Page.Locator(".ms-query-editor-input").WaitForAsync();
             await studio.Page.FillAsync("#ms-query-where", $"where data ->> 'Email' = '{KnownCustomerEmail}'");
@@ -214,7 +214,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("viewer", fixture.Root, "viewer", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("documents/customer"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/documents/customer"));
 
             ILocator ids = studio.Page.Locator(".ms-doc-table tbody tr.ms-doc-row a.ms-doc-id");
             await ids.First.WaitForAsync();
@@ -267,7 +267,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
         await RunAsync("sub-path", host, "admin", async studio =>
         {
-            await studio.GoAsync(host.StudioUrl());
+            await studio.GoAsync(host.StudioUrl("marten"));
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
 
@@ -323,7 +323,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("relationships", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("relationships"));
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/relationships"));
 
             await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
 
@@ -380,7 +380,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     {
         await RunAsync("event-flow", fixture.Root, "admin", async studio =>
         {
-            await studio.GoAsync(fixture.Root.StudioUrl("events/flow"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/flow"));
 
             await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
 
@@ -435,7 +435,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
         await RunAsync("event-flow-anchor", fixture.Root, "admin", async studio =>
         {
             await studio.Page.SetViewportSizeAsync(StudioPage.ViewportWidth, 300);
-            await studio.GoAsync(fixture.Root.StudioUrl("events/flow"));
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/events/flow"));
             await studio.Page.Locator("tr[data-source='ShipmentTracker'] a.ms-flow-source-link").WaitForAsync();
 
             await studio.Page.Locator("tr[data-source='ShipmentTracker'] a.ms-flow-source-link").ClickAsync();
@@ -445,7 +445,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             (await studio.Page.EvaluateAsync<double>("window.scrollY")).Should().BeGreaterThan(0, "the row is below the fold, so seeing it is a scroll");
 
             // The same address, pasted into a fresh load.
-            await studio.GoAsync(fixture.Root.StudioUrl("projections") + "#projection-ShipmentTracker");
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/projections") + "#projection-ShipmentTracker");
             await Assertions.Expect(studio.Page.Locator("tr#projection-ShipmentTracker")).ToBeInViewportAsync();
             (await studio.Page.EvaluateAsync<double>("window.scrollY")).Should().BeGreaterThan(0, "a fresh load scrolls too, once the rows are drawn");
 

@@ -21,7 +21,7 @@ public class FeedTests
         using StudioComponentContext context = await NewContextAsync();
         context.EventData.Shape = context.EventData.Shape with { HasIsSkipped = true };
         context.Navigate(
-            "studio/events/feed?types=OrderPlaced,OrderShipped&stream=abc&range=1h&archived=1&skipped=0&after=500");
+            "studio/marten/events/feed?types=OrderPlaced,OrderShipped&stream=abc&range=1h&archived=1&skipped=0&after=500");
 
         context.Render<Feed>();
 
@@ -54,8 +54,8 @@ public class FeedTests
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
         page.FindAll("a").Select(x => x.GetAttribute("href")).Should()
-            .Contain(x => x!.StartsWith("events/streams/s?id=order-17", StringComparison.Ordinal))
-            .And.Contain(x => x!.StartsWith("events/feed?types=OrderPlaced", StringComparison.Ordinal));
+            .Contain(x => x!.StartsWith("marten/events/streams/s?id=order-17", StringComparison.Ordinal))
+            .And.Contain(x => x!.StartsWith("marten/events/feed?types=OrderPlaced", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -103,7 +103,7 @@ public class FeedTests
 
         page.FindAll(".ms-event-card .ms-event-card-header").Should().ContainSingle();
         page.Find(".ms-event-card-header .ms-event-card-stream a").GetAttribute("href").Should()
-            .StartWith("events/streams/s?id=order-17");
+            .StartWith("marten/events/streams/s?id=order-17");
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public class FeedTests
     public async Task Follow_is_unavailable_once_the_reader_has_paged_back()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("studio/events/feed?after=500&follow=1");
+        context.Navigate("studio/marten/events/feed?after=500&follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -204,7 +204,7 @@ public class FeedTests
         context.EventData.FeedDeltas.Enqueue(new EventPage(
             [FakeEventDataService.Event(12), FakeEventDataService.Event(11)], 11, false));
 
-        context.Navigate("studio/events/feed?follow=1");
+        context.Navigate("studio/marten/events/feed?follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -289,7 +289,7 @@ public class FeedTests
         burst.Should().HaveCount(501);
         context.EventData.FeedDeltas.Enqueue(new EventPage(burst, 11, false));
 
-        context.Navigate("studio/events/feed?follow=1");
+        context.Navigate("studio/marten/events/feed?follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 

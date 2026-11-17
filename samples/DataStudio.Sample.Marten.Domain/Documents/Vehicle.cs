@@ -10,7 +10,7 @@ namespace DataStudio.Sample.Marten.Domain.Documents;
 /// </summary>
 /// <remarks>
 /// Abstract on purpose. A hierarchy is the one shape where a collection's alias and its table are not the
-/// same thing - browsing <c>/marten/documents/car</c> reads the vehicle table with
+/// same thing - browsing <c>/studio/marten/documents/car</c> reads the vehicle table with
 /// <c>mt_doc_type = 'car'</c> added - and it is the shape most likely to be got wrong by a UI that assumes
 /// one alias means one table.
 /// </remarks>

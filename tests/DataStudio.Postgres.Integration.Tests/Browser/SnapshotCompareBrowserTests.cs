@@ -14,7 +14,7 @@ namespace DataStudio.Postgres.Integration.Tests.Browser;
 [Collection(BrowserSuite.Name)]
 public class SnapshotCompareBrowserTests(BrowserSuiteFixture fixture)
 {
-    private const string HealthPath = "health?store=tenants&db=tenant_c";
+    private const string HealthPath = "postgres/health?store=tenants&db=tenant_c";
 
     [BrowserFact]
     public Task A_downloaded_snapshot_compares_with_now_through_the_mounted_input_file() =>
