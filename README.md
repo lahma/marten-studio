@@ -84,7 +84,8 @@ engine the Postgres module is built on, which has no ASP.NET Core in it
 
 **One shell per application.** `AddDataStudio()` and each module's call are idempotent, and the modules appear (in the
 rail, the banner, the capability chip, the credit line and the front page) in the order the calls were written.
-`AddMarten()` registers the Postgres module itself, and `AddMarten()` beside `AddPostgres()` is refused. The Marten
+`AddMarten()` brings the Postgres module's pages over the stores' databases, as part of the Marten module (one tile, one
+rail), so a Marten host does not call `.AddPostgres()`, and the two together are refused. The Marten
 module's database browser shows what else lives in the store's own databases - a job store, a legacy schema - but a
 separate plain database of a Marten application is not listed.
 
@@ -99,6 +100,7 @@ Studio is not affiliated with or endorsed by the Apache Software Foundation.
 #### The Kafka module in five lines
 
 ```csharp
+using Confluent.Kafka;
 using DataStudio;
 using DataStudio.Kafka;
 
@@ -203,8 +205,8 @@ app.MapDataStudio().RequireAuthorization();
 
 The studio is then at `/studio`, read-only, behind whatever `RequireAuthorization()` means in your application. A host
 adds one call for each module it has, on the same builder, in the order it wants them listed: `.AddMarten(...)`,
-`.AddPostgres(...)` and `.AddKafka(...)` (the Marten module registers the Postgres module itself, so a Marten host does
-not add `.AddPostgres()`, and the two together are refused). A host with only Kafka writes `AddDataStudio().AddKafka(...)`,
+`.AddPostgres(...)` and `.AddKafka(...)` (`AddMarten()` brings the Postgres module's pages over the stores' databases, as
+part of the Marten module, so a Marten host does not add `.AddPostgres()`, and the two together are refused). A host with only Kafka writes `AddDataStudio().AddKafka(...)`,
 and a worker with no UI writes `services.AddPostgresDiagnostics()` and no shell at all. The sample host does the same thing
 with every option spelled out - this block is compiled from
 [`samples/DataStudio.Sample.Marten/Program.cs`](samples/DataStudio.Sample.Marten/Program.cs), so it cannot drift:
@@ -303,8 +305,9 @@ builder.Services.AddHealthChecks().AddMartenDiagnostics(tags: ["marten"]);
 <!-- endSnippet -->
 
 Map it the usual way, with `app.MapHealthChecks("/healthz")`. `AddMartenDiagnostics(name, failureStatus, tags,
-timeout)` takes ASP.NET Core's usual arguments (`AddPostgresDiagnostics(...)` on the health-check builder takes the same and
-reads the registered data sources). Each run sweeps the
+timeout)` takes ASP.NET Core's usual arguments (`name` is `data-studio-marten` unless given; `AddPostgresDiagnostics(...)`
+on the health-check builder takes the same, names its check `data-studio-postgres` unless given and reads the registered
+data sources). Each run sweeps the
 configuration and catalog checks over every registered store and the databases each one holds, at most 25 a
 run, and reports `failureStatus` (`Unhealthy` unless given) on a Critical finding and `Degraded` on a Warning,
 on a check that failed or ran out of time, and on a store that would not build or list its databases. Its data
@@ -490,7 +493,9 @@ studio.ReadOnly = true;                           // and this turns every module
 
 There are two read-only switches. **`DataStudioOptions.ReadOnly`** turns every module's capabilities off. A module's own
 (`MartenOptions.ReadOnly`, `PostgresOptions.ReadOnly`) turns off that module's alone, so it never turns the Kafka module's
-capabilities off; Kafka has no switch of its own and obeys the shell's.
+capabilities off; Kafka has no switch of its own and obeys the shell's. A host that relied on a module's `ReadOnly` to keep
+Kafka read-only sets `DataStudioOptions.ReadOnly` too: otherwise Kafka's capabilities, if turned on, are on, and with
+neither Kafka policy set the application refuses to start.
 
 Every disabled control says the exact property you would set, spelled the way you would write it:
 

@@ -36,7 +36,7 @@ routes at map time, from *that* assembly's own root, so a module's `@page "/mart
 module `/kafka`, and a page's address below the mount is its `@page` template without the leading slash, always. There is no
 root module: the shell's own pages are the front page at the mount and Activity at `{mount}/activity`, and the segments the shell
 keeps for itself (`activity`, `_blazor`, `_framework`, `_content`, `opaque-redirect`) are no module's. `/_blazor`,
-`blazor.web.js`, `opaque-redirect`, `_content/DataStudio` - the shell's assets, whichever modules are mounted - and, since 1.2, every other
+`blazor.web.js`, `opaque-redirect`, `_content/DataStudio` - the shell's assets, whichever modules are mounted - and every other
 file of the host's `_framework` tree (`{Path}/_framework/{**file}`, forwarded to
 whatever the host serves at `/_framework/{file}`, else its web root's `_framework/`, and a 404 for a path that could
 climb out of it) are mirrored under the mount path. The last is what lets the .NET 11 SDK's
@@ -54,13 +54,13 @@ somewhere; rewriting it would be the single most likely way to ship something th
 
 **D12 — The data seam is internal, across every assembly.** Per-area service interfaces (`IDocumentDataService`,
 `IEventDataService`, …) with `InternalsVisibleTo` for the test projects and, along the references, for the module above:
-the shell grants its internals to `DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka`, the engine and the Postgres module grant
-theirs to `DataStudio.Postgres` and `DataStudio.Marten`, and `DataStudio.Kafka.Core` grants its to `DataStudio.Kafka` and
-`DataStudio.Kafka.Wolverine` (`IKafkaClusterSource`, D43). Each package's *registration* surface is snapshot-tested: the shell's is two
+the shell grants its internals to `DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka`, the engine grants its to
+`DataStudio.Postgres` and `DataStudio.Marten`, the Postgres module its to `DataStudio.Marten`, and `DataStudio.Kafka.Core` its to
+`DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` (`IKafkaClusterSource`, D43). Each package's *registration* surface is snapshot-tested: the shell's is two
 static classes and two classes, the Postgres module's one static class, two classes and one record, the Marten module's two static
 classes, two classes and two records, the Kafka module's one static class, two classes and one record; the engine's also carries its inbound
-types and the D31 read model, which are results and hooks, never seams (hard rule 7). A module reaches no other module's
-internals. Everything a consumer can bind to is everything we have to keep working.
+types and the D31 read model, which are results and hooks, never seams (hard rule 7). No module reaches another's internals but the Marten
+module, which is built on the Postgres module's; the Kafka module reaches neither database module's. Everything a consumer can bind to is everything we have to keep working.
 
 ## D17
 
@@ -297,6 +297,7 @@ every secret before the text is read, and keeps, logs, audits and connects to no
   modules in the order the host wrote its `Add…()` calls on the builder; nothing about a module decides where it goes, and what is refused
   never depends on the order (D30, D34).
 - **No compatibility with 1.x.** No old package id, registration call, option name, address, log category or application name is kept, shimmed
-  or forwarded: `AddMartenStudio()` does not exist, `{mount}/documents` is a 404, and `docs/upgrading.md` is the one place a 1.x name sits beside a
-  2.0 one. A breaking change is allowed whenever it is the better design, and it is said in the CHANGELOG and, for the surface, in
-  `docs/maintainers/v2-public-api.md`.
+  or forwarded: `AddMartenStudio()` does not exist, `{mount}/documents` is a 404, and a 1.x name sits beside its 2.0 one only in
+  `docs/upgrading.md`, `docs/maintainers/v2-public-api.md` (the record of the renames), the CHANGELOG's old sections and dated
+  history. A breaking change is allowed whenever it is the better design, and it is said in the CHANGELOG and, for the
+  surface, in `docs/maintainers/v2-public-api.md`.

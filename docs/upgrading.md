@@ -6,8 +6,10 @@
 and Kafka. Packages, registration, options, types, addresses, log categories and the studio's wording all changed, on
 purpose and without a bridge: no 1.x name, call or address is kept as an alias, and no redirect leads from an old address
 to a new one. [docs/stability.md](stability.md) says what is still promised (capabilities off by default, authorization
-never widened, finding codes and log event ids that keep their meaning), and the tables below name every break. There is
-no step-by-step path through 1.3.x: go to 2.0.0 in one move.
+never widened, finding codes and log event ids that keep their meaning), and the tables below name every break. What a
+host relies on for safety did not change, with one exception it must act on: a module's own `ReadOnly` no longer turns the
+Kafka module's capabilities off (set `DataStudioOptions.ReadOnly`; see "The read-only switches"). There is no
+step-by-step path through 1.3.x: go to 2.0.0 in one move.
 
 ### What to do, in order
 
@@ -30,8 +32,9 @@ no step-by-step path through 1.3.x: go to 2.0.0 in one move.
 
    `AddPostgresStudio(...)` becomes `.AddPostgres(...)` (with `using DataStudio.Postgres;`) and `AddKafkaStudio(...)` becomes
    `.AddKafka(...)` (with `using DataStudio.Kafka;`), in any order: the modules appear in the order you wrote the calls.
-   `AddMarten()` registers the Postgres module itself, so a Marten host does not call `.AddPostgres()`, and `.AddMarten()`
-   beside `.AddPostgres()` is refused at startup. A worker with no UI keeps `services.AddPostgresDiagnostics()`.
+   `AddMarten()` brings the Postgres module's pages over the stores' databases, as part of the Marten module (one tile, one
+   rail), so a Marten host does not call `.AddPostgres()`, and the two together are refused at startup. A worker with no UI
+   keeps `services.AddPostgresDiagnostics()`.
 3. **Replace the mapping.** `app.MapMartenStudio(...)` and `app.MapPostgresStudio(...)` become `app.MapDataStudio(...)`, which
    serves every module; there is no map call per module, and `RequireAuthorization()` and `AllowAnonymous()` on what it
    returns work as before. The default mount is `/studio`. A pattern you gave `MapMartenStudio("/ops/marten")` is the
@@ -44,13 +47,17 @@ no step-by-step path through 1.3.x: go to 2.0.0 in one move.
 5. **Rename the types you name** (the table under "Types"). The changes are mechanical: `MartenStudioCapabilities` is
    `MartenCapabilities`, `PostgresStudioResource` is `PostgresResource`, and so on.
 6. **Decide the read-only switch** (below). A host that relied on a module's `ReadOnly` to keep Kafka read-only sets
-   `DataStudioOptions.ReadOnly`.
+   `DataStudioOptions.ReadOnly`; without it, Kafka's capabilities are on as the host configured them, and a Kafka module
+   with a capability on and neither Kafka policy set refuses to start.
 7. **Update everything that holds an address:** bookmarks, runbooks, links in alerts and tickets, proxy and
    Content-Security-Policy rules, health-check probes and the `ApplicationPath` or return links your own pages build (the
    table under "Addresses").
 8. **Update what matches the studio's names:** a log filter on a category, a rule that reads the studio's application name in
-   `pg_stat_activity`, and the health-check registration (the tables under "Logs" and "Application name").
-9. **Run it**, open `{mount}` and check that every module you added has its tile.
+   `pg_stat_activity` (the tables under "Logs" and "Application name"), the health-check registration (the table under
+   "Registration and mapping") and a probe or `HealthCheckOptions.Predicate` that selects the health check by its default
+   name.
+9. **Run it** and open `{mount}`. With one module it opens that module's home; with two or more it shows one tile per
+   module. A Marten host's Postgres pages are part of the Marten module and have no tile of their own.
 
 ### Packages
 
@@ -64,7 +71,8 @@ no step-by-step path through 1.3.x: go to 2.0.0 in one move.
 | `KStudio.Core` | `DataStudio.Kafka.Core` | The Kafka engine (preview) |
 | `KStudio.Wolverine` | `DataStudio.Kafka.Wolverine` | Wolverine cluster discovery for the Kafka module (preview) |
 
-The 1.x ids receive no release after 1.3.1; each is deprecated on nuget.org in favour of its 2.0 id. References:
+The 1.x ids get no release after 1.3.1. Once 2.0.0 is published, each is marked deprecated on nuget.org, with its 2.0 id as
+the alternative. References:
 `DataStudio.Marten` → `DataStudio.Postgres` → `DataStudio` and `DataStudio.Postgres.Diagnostics`;
 `DataStudio.Kafka` → `DataStudio` and `DataStudio.Kafka.Core`; `DataStudio.Kafka.Wolverine` → `DataStudio.Kafka.Core`. The
 Kafka module references no Postgres module, no engine and no Npgsql: a host with only Kafka gets none of them. The static
@@ -79,8 +87,8 @@ assets moved with the shell, from `_content/PostgresStudio/` to `_content/DataSt
 | `services.AddKafkaStudio(o => ...)` | `...AddKafka(kafka => ...)` on the same builder |
 | `app.MapMartenStudio(pattern?)`, `app.MapPostgresStudio(pattern?)` | `app.MapDataStudio(pattern?)` |
 | `services.AddPostgresDiagnostics(...)` | unchanged: the engine alone, refused beside `AddPostgres()` or `AddMarten()` |
-| `services.AddHealthChecks().AddMartenStudio(...)` | `services.AddHealthChecks().AddMartenDiagnostics(...)` |
-| `services.AddHealthChecks().AddPostgresStudio(...)` | `services.AddHealthChecks().AddPostgresDiagnostics(...)` |
+| `services.AddHealthChecks().AddMartenStudio(...)` | `services.AddHealthChecks().AddMartenDiagnostics(...)`; the default check name is `data-studio-marten` (1.x: `marten-studio`) |
+| `services.AddHealthChecks().AddPostgresStudio(...)` | `services.AddHealthChecks().AddPostgresDiagnostics(...)`; the default check name is `data-studio-postgres` (1.x: `postgres-studio`) |
 | `k.UseWolverineKafka(...)` in `AddKafkaStudio` | unchanged: `kafka.UseWolverineKafka(...)` in `AddKafka` (namespace `DataStudio.Kafka`) |
 
 One shell serves an application, and `AddDataStudio()` and each `Add…()` are idempotent. There is no `MapKafkaStudio()`, and
@@ -105,7 +113,8 @@ there never was.
 and the diagnostics read model keep their names, and only their namespaces change. The calls on the builder (`AddDataStudio`,
 `AddMarten`, `AddPostgres`, `AddKafka`) are all in namespace `DataStudio`, whichever package declares them.
 
-What moved to `DataStudioOptions` (the shell), which a module's options no longer have:
+What the shell's `DataStudioOptions` holds. A module's options no longer have these, except `ReadOnly`, which a module keeps
+for itself (below):
 
 | Option | Default | Was on |
 |---|---|---|
@@ -118,7 +127,8 @@ What moved to `DataStudioOptions` (the shell), which a module's options no longe
 
 Everything else (`StoreAuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy`, `Capabilities`, the page
 sizes, `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`, `AcceptedChecks`, the Kafka clusters and topics, and so on)
-stays where it was, under the new type's name. A module's options no longer have `Path`, `Title` or `AuthorizationPolicy`.
+stays where it was, under the new type's name. A module's options no longer have `Path`, `Title`, `ApplicationPath`,
+`AuthorizationPolicy` or `RefreshInterval`.
 
 ### The read-only switches
 
@@ -130,9 +140,11 @@ shared its studio's switch. 2.0 has two:
 - **A module's own `ReadOnly`** (`MartenOptions.ReadOnly`, `PostgresOptions.ReadOnly`) turns off that module's capabilities
   only. **It no longer turns Kafka off.** Kafka has no switch of its own and obeys the shell's.
 
-A host that set `MartenStudioOptions.ReadOnly = true` and runs Kafka beside it must set `DataStudioOptions.ReadOnly = true`
-as well, or Kafka's own capabilities (`SearchRecords`, `ReadPayloads`, `ExportRecords`, `LiveTail`), if the host turned them
-on, stay on. The capability chip and each disabled control name the switch that is on.
+A host that set `MartenStudioOptions.ReadOnly` or `PostgresStudioOptions.ReadOnly` to `true` and runs Kafka beside it sets
+`DataStudioOptions.ReadOnly = true` as well. Otherwise Kafka's capabilities (`SearchRecords`, `ReadPayloads`,
+`ExportRecords`, `LiveTail`), if the host turned them on, are on: under the Kafka policies when the host set them, and with
+neither Kafka policy set the application now refuses to start (the Kafka startup guard reads only the shell's switch). The
+capability chip and each disabled control name the switch that is on.
 
 ### Addresses
 
@@ -166,8 +178,11 @@ and the category:
 | Wording | one template per studio for most events, naming the product ("Marten Studio", "Postgres Studio", "KStudio") and a database a "database" or a "store" | one template per event, naming "Data Studio" and calling a source a "source" |
 | Categories | `PostgresStudio.*`, `MartenStudio.*`, `KStudio.Core.*`, and so on | `DataStudio.*` (`DataStudio.Postgres.Services...`, `DataStudio.Kafka.Core.Scans`) |
 
-**Match on the event id, never on the text or the category's old root.** A `Logging:LogLevel` entry for `PostgresStudio` or
-`KStudio.Core` has to name the new category (`DataStudio.Postgres`, `DataStudio.Kafka.Core`), or it silently stops applying.
+**Match on the event id, never on the text or the category's old root.** A `Logging:LogLevel` entry for a 1.x category has to
+name the new one, or it silently stops applying: `PostgresStudio` becomes `DataStudio.Postgres`, `MartenStudio` becomes
+`DataStudio.Marten`, `KStudio` becomes `DataStudio.Kafka` (and `KStudio.Core` `DataStudio.Kafka.Core`). The shell logs under
+`DataStudio.Services.*`, so a `PostgresStudio` filter that also covered the shell's lines needs `DataStudio` to keep doing
+so.
 Debug lines that logged an address's scope (a store, database or tenant a link named) did so without a cap: they are capped
 now, like every other value a visitor can shape.
 
@@ -176,7 +191,9 @@ now, like every other value a visitor can shape.
 The studio's own database sessions carry the application-name suffix **"Data Studio"** ("Data Studio Diagnostics" for the
 engine alone, with no studio): `orders-api (Data Studio)` where 1.x said `orders-api (Marten Studio)` or
 `orders-api (Postgres Studio)`. A monitor, an alert or a `pg_stat_activity` filter keyed on the old suffix no longer matches,
-and `StudioApplicationName` still sets the name yourself. A health snapshot's producer is
+and `StudioApplicationName` still sets the name yourself. A worker with the engine alone shows `(Data Studio Diagnostics)`
+where 1.x showed `(Postgres Studio Diagnostics)`, and the connection history's own session shows `(Data Studio history)`
+(1.x: `(Marten Studio history)`, `(Postgres Studio history)`). A health snapshot's producer is
 `Data Studio {release}`; a snapshot a 1.x studio wrote still compares, with a notice that its producer was 1.x.
 
 ### Wording, assets and what the studio does not rename
@@ -186,7 +203,8 @@ by its 2.0 name (`MartenOptions.Capabilities.EditDocuments`), so a screenshot or
 The Health page and codes still say what they said. The static assets are at `_content/DataStudio/`, and at a sub-path mount
 `{Path}/_content/DataStudio/`: a Content-Security-Policy, WAF rule or proxy allow-list that names `_content/PostgresStudio/` must
 name the new path. Not renamed: the `ms-` CSS prefix, the `martenStudio` script global, the `ms_theme` and `ms_tz` cookies and
-the storage key of the Health page's mutes (so a visitor's theme and mutes survive).
+the storage key of the Health page's mutes (so a visitor's theme and mutes survive), and the `schema` value of a health
+snapshot's JSON (`postgresstudio-diagnostics`, so a 1.x snapshot still compares).
 
 ### What needs no change
 

@@ -6,8 +6,9 @@ packages: `DataStudio`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Postgres`
 `DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` at 2.0.0-preview.1. This release breaks 1.x on
 purpose: names, calls, options and addresses changed so that they read right from the start, and nothing keeps a 1.x
 spelling alive. [docs/upgrading.md](docs/upgrading.md) lists every break with what to write instead. What a host relies
-on for safety did not change: capabilities are off until the host turns them on, authorization is never widened,
-finding codes and log event ids keep their meaning.
+on for safety did not change, with one exception it must act on: capabilities are still off until the host turns them on
+and authorization is never widened, but a module's own `ReadOnly` no longer turns the Kafka module's capabilities off (set
+`DataStudioOptions.ReadOnly`). Finding codes and log event ids keep their meaning.
 
 - The packages and their ids: `PostgresStudio.Diagnostics` is `DataStudio.Postgres.Diagnostics`, `PostgresStudio` is
   `DataStudio.Postgres`, `MartenStudio` is `DataStudio.Marten`, `KStudio` is `DataStudio.Kafka`, `KStudio.Core` is
@@ -21,19 +22,23 @@ finding codes and log event ids keep their meaning.
 - Registration is `AddDataStudio(...)` followed by `.AddMarten(...)`, `.AddPostgres(...)` and `.AddKafka(...)`, and
   mapping is `MapDataStudio()`. `AddMartenStudio`, `AddPostgresStudio`, `AddKafkaStudio`, `MapMartenStudio` and
   `MapPostgresStudio` no longer exist. One shell serves an application; every call is idempotent, `AddMarten()`
-  registers the Postgres module itself, and `AddMarten()` beside `AddPostgres()` is refused. The modules appear in the
-  rail, the banner, the capability chip, the credit line and the front page in the order the calls were written.
+  brings the Postgres module's pages over the stores' databases as part of the Marten module (one tile), and `AddMarten()`
+  beside `AddPostgres()` is refused. The modules appear in the rail, the banner, the capability chip, the credit line and
+  the front page in the order the calls were written.
 - Options are split. `DataStudioOptions` holds what the shell decides: `Path` (default `/studio`), `Title`,
-  `ApplicationPath`, `AuthorizationPolicy`, `ReadOnly` and `RefreshInterval`. A module's options lose those and keep the
-  rest. `MartenStudioOptions` is `MartenOptions`, `PostgresStudioOptions` is `PostgresOptions` and `KafkaStudioOptions`
+  `ApplicationPath`, `AuthorizationPolicy`, `ReadOnly` and `RefreshInterval`. A module's options lose `Path`, `Title`,
+  `ApplicationPath`, `AuthorizationPolicy` and `RefreshInterval`, and keep the rest, their own `ReadOnly` included.
+  `MartenStudioOptions` is `MartenOptions`, `PostgresStudioOptions` is `PostgresOptions` and `KafkaStudioOptions`
   is `KafkaOptions`; `MartenStudioCapabilities`, `PostgresStudioCapabilities` and `KafkaStudioCapabilities` are
   `MartenCapabilities`, `PostgresCapabilities` and `KafkaCapabilities`; `PostgresStudioResource` is `PostgresResource`;
   `PostgresStudioLink` is `PostgresPageLink` and `PostgresStudioPage` is `PostgresPage`; `MaxInlineDocumentBytes` is
   `MaxInlineValueBytes`.
-- There are two read-only switches. `DataStudioOptions.ReadOnly` turns every module's capabilities off. A module's own
-  (`MartenOptions.ReadOnly`, `PostgresOptions.ReadOnly`) turns off that module's alone: unlike 1.x it no longer turns
-  the Kafka capabilities off, so a host that set a module's `ReadOnly` to keep Kafka read-only sets
-  `DataStudioOptions.ReadOnly`. Kafka has no switch of its own and obeys the shell's.
+- There are two read-only switches. `DataStudioOptions.ReadOnly` turns every module's capabilities off. A module keeps its
+  own (`MartenOptions.ReadOnly`, `PostgresOptions.ReadOnly`), which turns off that module's alone: unlike 1.x it no longer
+  turns the Kafka capabilities off, so a host that set a module's `ReadOnly` to keep Kafka read-only sets
+  `DataStudioOptions.ReadOnly` as well. Kafka has no switch of its own and obeys the shell's, and the Kafka module
+  refuses to start where a capability is on and neither Kafka policy is set, so a host that relied on a module's switch
+  and set no Kafka policy meets that refusal on its first start.
 - Every module's pages sit under one segment below the mount: `{mount}/postgres/…`, `{mount}/marten/…` and
   `{mount}/kafka/…`, with the mount `/studio` unless the host chose one. A 1.x address (`/marten/documents`,
   `/postgres/health`, `/marten/kafka/topic`) is a 404: there is no redirect, so bookmarks and pasted links must be
@@ -57,8 +62,9 @@ finding codes and log event ids keep their meaning.
   line by its text must match its event id. Log categories are under `DataStudio.*` (`DataStudio.Kafka.Core.Scans`,
   for example), not `PostgresStudio.*`, `MartenStudio.*` or `KStudio.*`.
 - The studio's own database sessions carry the application-name suffix "Data Studio" ("Data Studio Diagnostics" for the
-  engine alone), so `orders-api (Data Studio)` replaces `orders-api (Marten Studio)` and `orders-api (Postgres Studio)`:
-  a monitor or an alert keyed on the old suffix no longer matches. A health snapshot's producer is "Data Studio
+  engine alone), so `orders-api (Data Studio)` replaces `orders-api (Marten Studio)` and `orders-api (Postgres Studio)`,
+  `(Data Studio Diagnostics)` replaces `(Postgres Studio Diagnostics)` and the connection history's session is
+  `(Data Studio history)`: a monitor or an alert keyed on the old suffix no longer matches. A health snapshot's producer is "Data Studio
   {release}"; a snapshot a 1.x studio wrote still compares, with a notice.
 - A host with only Kafka runs: `AddDataStudio().AddKafka(...)` needs no database module, and its output folder holds no
   Postgres, Marten, JasperFx, Weasel or Npgsql assembly.
@@ -72,6 +78,16 @@ finding codes and log event ids keep their meaning.
 - K07 (an anonymous studio with a capability on) counted only the database module's own capabilities, so a studio served
   to anyone with only a Kafka capability on raised nothing. It counts every module's capabilities now, and names the
   module.
+- E06 (long streams without a snapshot) marks an aggregate that no registration declares as "(not registered with the
+  store)": Marten lists every aggregate whose source-generated evolver it finds at startup, used or not, so "aggregated
+  in code" and "aggregates this process has never fetched are not known" were wrong for the hosts that scan. Its caveat
+  explains the mark only when such an aggregate is listed.
+- The capability chip's popover says, under a module's last group, that its `All()` turns every capability of this module
+  on, and it says so only while that module's capabilities are not switched off by a read-only switch (the module's own
+  or the shell's): while either is on, the line was false and is no longer drawn.
+- C04, C05 and C06 say what their evidence holds when the engine is used alone: C04 and C05 name each session's process
+  id, role, application, client, the time it connected and what it is doing, and C06 the process id, role, application
+  and client, what it is doing or waiting for (the lock and its mode) and the process ids that block a waiter.
 
 # 1.3.1
 

@@ -190,7 +190,8 @@ does a visitor read through it. `ReadOnly` mutes it. The remedy is K05's: a `Sql
 
 **Critical in Production, Warning anywhere else.** Both modules. The studio's pages are served to anybody - they carry
 `AllowAnonymous`, from the mapping's own `AllowAnonymous()` or a group above it, observed on the finished endpoints the
-start-up guard reads, the same fact the layout's banner draws - and at least one capability is on (and `ReadOnly` off).
+start-up guard reads, the same fact the layout's banner draws - and at least one capability of any module is on (and
+`DataStudioOptions.ReadOnly` off; a module's own `ReadOnly` turns off that module's capabilities only).
 
 A studio served anonymously with every capability off is a read-only browser, which the banner says already; with one on,
 anyone who can reach its address can use it. A store or write policy, if the host set one, still decides what an anonymous
@@ -205,6 +206,9 @@ app.MapDataStudio().RequireAuthorization();
 
 // ...or keep it anonymous, with every capability off:
 options.Capabilities = new MartenCapabilities();
+
+// ...or turn every module off:
+studio.ReadOnly = true;
 ```
 
 ## K08 Server timeouts end the daemon's leadership

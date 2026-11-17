@@ -24,7 +24,7 @@ forget authorization.
 
 *Routes.* A module's page assembly keeps its root, one unique segment the shell does not use: `@page "/kafka/search"` is served
 at `{mount}/kafka/search`, so a module never lands over another's routes, and the route table still refuses a route two
-pages claim. There is no root module (`IsRoot` and `StudioPageAssembly.KeepsRoot` are gone): the shell's own pages, the front page at the
+pages claim. There is no root module: the shell's own pages, the front page at the
 mount (one tile per module with its name, a sentence and a link, or a redirect to the module's home when there is one module) and Activity at
 `{mount}/activity`, are pages of no module. Every id travels in the query string, as D9 says of every id: `?cluster=`, `?topic=`, `?partition=`,
 `?offset=`. A topic name is case-sensitive and may look like a file name (`orders.json`), so it is never a path segment.

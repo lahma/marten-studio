@@ -406,7 +406,7 @@ Plain plans are listed as not judged (the filter's discards are printed only by 
 
 ## Query › Plan: the plan analyzer
 
-The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in a Marten host) is the console's Explain buttons as a page of
+The **Plan** page (`/studio/postgres/plan`, below Query in the rail, in a Postgres host and a Marten host alike) is the console's Explain buttons as a page of
 its own. Running a plan is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the
 console is; with `RunSql` off (or `ReadOnly` on) the page shows the console's own disabled state, naming the property, in place of
 the editor. **Pasting a plan is every visitor's** (1.0): it reads nothing and runs nothing, so it needs only what opening the

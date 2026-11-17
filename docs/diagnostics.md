@@ -285,7 +285,7 @@ already notifies - e-mail, a chat webhook - and keeps the loop.
 - **No mutes.** Muting a finding is a visitor's choice on the Health page, and there is no visitor. What the host decides
   for everyone is `AcceptedChecks`, which `PostgresDiagnosticsOptions` has and the snapshot reports as `accepted`.
 - **Links are mount-relative strings, meaningless without a UI.** `StudioPath`, `StudioLinks` and `GetStudioPath` are the
-  the same strings the studio uses (`postgres/health?store=default&db=app`) and are only useful joined to the path a studio is mounted at -
+  same strings the studio uses (`postgres/health?store=default&db=app`) and are only useful joined to the path a studio is mounted at -
   yours, if a separate application hosts one. With nothing mounted anywhere, ignore them.
 - **Options are validated on start** (`ValidateOnStart`): a host that registers `AddPostgresDiagnostics()` with a
   `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`, schema name or source name the engine refuses stops at startup, naming
@@ -302,8 +302,8 @@ already notifies - e-mail, a chat webhook - and keeps the loop.
   belong to the shell's `DataStudioOptions` and to `PostgresOptions`, which inherits all of the above: configure a member the
 same way in either.
 
-**The health check** is the same call as with a studio, and needs `AddPostgresDiagnostics()` (or a studio) registered
-first; without either it reports `Degraded` and says so:
+**The health check** is the same call as with a studio (named `data-studio-postgres` unless you give it a name), and needs
+`AddPostgresDiagnostics()` (or a studio) registered first; without either it reports `Degraded` and says so:
 
 ```csharp
 builder.Services.AddHealthChecks().AddPostgresDiagnostics(tags: ["postgres"]);

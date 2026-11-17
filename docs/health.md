@@ -281,8 +281,8 @@ builder.Services.AddHealthChecks().AddPostgresDiagnostics(name: "postgres", fail
 app.MapHealthChecks("/healthz");
 ```
 
-`AddHealthChecks().AddMartenDiagnostics(...)` and `.AddPostgresDiagnostics(...)` take ASP.NET Core's usual `name`,
-`failureStatus`, `tags` and `timeout`, and register one check.
+`AddHealthChecks().AddMartenDiagnostics(...)` and `.AddPostgresDiagnostics(...)` take ASP.NET Core's usual `name`
+(`data-studio-marten` or `data-studio-postgres` unless given), `failureStatus`, `tags` and `timeout`, and register one check.
 Each run sweeps tiers 0 and 1 - the configuration and catalog checks, never the deeper reads or the statements - over
 every registered store or source and the databases each one holds (*Many databases*, below), straight through the
 sweeper the Health page uses.

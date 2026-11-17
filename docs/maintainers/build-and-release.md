@@ -134,8 +134,8 @@ only for a project that sets `DataStudioPostgresPinsNpgsql`. `build/Build.Npgsql
 Test always get `-p:DataStudioNpgsqlVersion=<floor>`: handed to the solution, a higher Npgsql reaches the Marten module
 and its tests through the `ProjectReference` with no diagnostic (PS-0), and the Marten module on Npgsql 10 is not a tested
 combination. Anything but the floor adds `NpgsqlPass`, which `Test` triggers: a separate restore, build and test over
-`data-studio-postgres.slnf`, which holds exactly the projects that set the property and reaches nothing outside itself
-(`PostgresSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
+`data-studio-postgres.slnf`, which holds exactly the projects that set the property and the shell they reference (which has
+no Npgsql to pin), and reaches nothing outside itself (`PostgresSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
 pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
 latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3` - never the
 `.slnx`. A project that sets `DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request.
@@ -324,11 +324,13 @@ Three things about the exchange are worth not rediscovering:
 
 None of these can be done from this repository, and the first tag will fail without the first two:
 
-1. **nuget.org → Trusted Publishing → a policy for each of the seven package ids** (`DataStudio`, `DataStudio.Postgres`,
-   `DataStudio.Postgres.Diagnostics`, `DataStudio.Marten`, `DataStudio.Kafka`, `DataStudio.Kafka.Core`,
-   `DataStudio.Kafka.Wolverine`), before the tag: a push of an id with no policy fails half-way through the family. Policy owner `lahma`;
-   Repository Owner `lahma`; Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and
-   not the `.github/workflows/` path); Environment `nuget`. The key a policy mints pushes the ids it covers.
+1. **nuget.org → Trusted Publishing → one policy, which exists already.** Policy owner `lahma`; Repository Owner `lahma`;
+   Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and not the
+   `.github/workflows/` path); Environment `nuget`. The policy is not limited to one package id: the key it mints pushes
+   every id of the repository, including one that does not exist yet (confirmed by the policy owner, 2026-10-26), so the
+   seven 2.0 ids (`DataStudio`, `DataStudio.Postgres`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Marten`,
+   `DataStudio.Kafka`, `DataStudio.Kafka.Core`, `DataStudio.Kafka.Wolverine`) need no policy of their own. The owner
+   confirms that, and that the seven ids are unowned on nuget.org, before the first 2.0 tag.
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.

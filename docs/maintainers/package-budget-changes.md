@@ -741,8 +741,9 @@ v2 step 3 extracted from the Postgres module, which is where `blazor.web.js` is 
 properties took the names of Data Studio 2.0: `PostgresStudio.Diagnostics` is `DataStudio.Postgres.Diagnostics`, `PostgresStudio` is `DataStudio.Postgres`,
 `MartenStudio` is `DataStudio.Marten`, `KStudio.Core`, `KStudio` and `KStudio.Wolverine` are `DataStudio.Kafka.Core`, `DataStudio.Kafka` and
 `DataStudio.Kafka.Wolverine`, and the shell is the new `DataStudio`; `MartenStudioMartenFloor`, `PostgresStudioNpgsqlFloor`, `KStudioConfluentFloor` and
-`KStudioPrereleaseLabel` (and their `Latest` and `Version` partners, and `PostgresStudioPinsNpgsql`) are `DataStudioMartenFloor`, `DataStudioNpgsqlFloor`,
-`DataStudioConfluentFloor`, `KafkaPrereleaseLabel` and `DataStudioPostgresPinsNpgsql`. Why: the Kafka module references the shell and not the Postgres module, so a host with only
+`KStudioPrereleaseLabel` (and their `Latest` and `Version` partners), `PostgresStudioPinsNpgsql`, `PostgresStudioDiagnosticsPinsExtensions` and
+`KStudioCorePinsExtensions` are `DataStudioMartenFloor`, `DataStudioNpgsqlFloor`, `DataStudioConfluentFloor`, `KafkaPrereleaseLabel`,
+`DataStudioPostgresPinsNpgsql`, `DataStudioDiagnosticsPinsExtensions` and `DataStudioKafkaCorePinsExtensions`. Why: the Kafka module references the shell and not the Postgres module, so a host with only
 Kafka needs the script and must not need Npgsql to get it; the shell is the one project whose pages use it. Measured: the nuspecs of `DataStudio`,
 `DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka` each list the pack at its central row (`Pack` asserts every line), and the nuspecs of the shell and of
 the three Kafka packages name no database package (`Pack` asserts that too). Nothing in the budget table changed but the *Where* column. Exit: none; the

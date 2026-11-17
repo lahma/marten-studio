@@ -510,7 +510,8 @@ tenant databases this process holds. Neither `.AddMarten()` nor `.AddPostgres()`
 - K07 says when the studio is served anonymously with any capability on (Critical in Production).
 
 The remedy for K05 and K06 is one option line, `SqlConsoleRole`, naming a role a DBA creates with `SELECT` on what the
-console and browser should read. `ReadOnly` mutes all three.
+console and browser should read. `DataStudioOptions.ReadOnly` mutes all three. A module's own `ReadOnly` mutes K05 and K06,
+and K07 only while no other module has a capability on: K07 counts every module's capabilities.
 
 ### Muting a finding
 

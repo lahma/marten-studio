@@ -288,7 +288,8 @@ codes table says which). The `D` and `E` checks and the Marten-only `C`, `K` and
   role other than the reading one, a client address, an application or a statement needs `ViewDatabaseActivity` and the
   write policy. A finding about a table in a schema the visitor may not see is counted, never named.
 
-`services.AddHealthChecks().AddPostgresDiagnostics()` turns the same checks into one ASP.NET Core health check. Each run
+`services.AddHealthChecks().AddPostgresDiagnostics()` turns the same checks into one ASP.NET Core health check (name
+`data-studio-postgres` unless given). Each run
 checks up to 25 databases - every single-database source first, then each database source from where the last run stopped
 - and reports codes and counts only. Details, and the meaning of `databasesSkipped`, are in [health.md](health.md#export).
 

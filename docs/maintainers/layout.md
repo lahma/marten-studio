@@ -106,13 +106,13 @@ tests/DataStudio.Tests/Endpoints/             MapDataStudio and the startup guar
 tests/DataStudio.Tests/Registration/          AddDataStudio: the shell's options and validation, its registrations, its live-update log
 tests/DataStudio.Tests/Modules/               The route table's module rules (D34), on pages of the test assembly
 tests/DataStudio.Tests/Verify/                The shell's approved API baseline; never hand-edited (hard rule 7)
-tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresComponentContext and the core pages' smoke tests, the plan view
+tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresComponentContext and the Postgres pages' smoke tests, the plan view
                                          and the console's Explain buttons
 tests/DataStudio.Postgres.Tests/Components/Json/  The JSON viewer's parameters a host that is not a database module sets (the Kafka module): no download, no
                                          Postgres copy items, and a host's "Copy as search"
 tests/DataStudio.Postgres.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/DataStudio.Postgres.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
-tests/DataStudio.Postgres.Tests/Shell/        Golden files of the prerendered rail, header and anonymous banner of the core pages (the shell's
+tests/DataStudio.Postgres.Tests/Shell/        Golden files of the prerendered rail, header and anonymous banner of the Postgres pages (the shell's
                                          markup stays byte for byte as it is restructured)
 tests/DataStudio.Postgres.Tests/Sources/      The source provider over DI descriptors and host database sources
 tests/DataStudio.Postgres.Tests/Support/      The Postgres module's own test doubles (the shared ones are linked from DataStudio.Marten.Tests)
@@ -134,7 +134,7 @@ src/DataStudio.Postgres.Diagnostics/Internal/Sql/  The engine's builders, SqlIde
                                          identifier becomes SQL text (hard rule 4) - the health sweep's and the facts readers'
                                          statements, the catalog's, the read-only guard and session; the blocking chain's
                                          hand-over text (X3); partition bounds and column skew (X4)
-src/DataStudio.Postgres/Internal/Sql/         The shared studio's own builders - the second place (hard rule 4): the SQL console's
+src/DataStudio.Postgres/Internal/Sql/         The Postgres module's own builders - the second place (hard rule 4): the SQL console's
                                          plans and their settings (X1), the facts beside a plan, hypopg's calls (X2),
                                          the browser's rows, Relationships and the console's examples; the same namespace
                                          as the engine's, each assembly exempt in its own folder only
@@ -458,7 +458,7 @@ tests/DataStudio.Kafka.Integration.Tests/Partitioning/ Each partitioner against 
 tests/DataStudio.Kafka.Integration.Tests/Redaction/ Payload redaction on real brokers: a scan, a record read, the logs and the exact match, with no masked value in any sink
 tests/DataStudio.Kafka.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
 tests/DataStudio.Kafka.Integration.Tests/Correlation/ Related records on real brokers (the M4 exit): an in and an out topic found by their own fields in one scan, and a topic the principal may not describe
-tests/DataStudio.Kafka.Integration.Tests/Composition/ The Kafka module beside a database module, over a real container and no broker: registration order, the banner, the rail, the
+tests/DataStudio.Kafka.Integration.Tests/Composition/ The Kafka module beside a database module, over the dependency-injection container and no broker: registration order, the banner, the rail, the
                                                        audit gates and the log-value parity with the diagnostics engine, which the Kafka-only fast suite cannot hold
 tests/DataStudio.Kafka.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/DataStudio.Kafka.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering

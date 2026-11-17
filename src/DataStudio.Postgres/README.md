@@ -142,7 +142,8 @@ builder.Services.AddHealthChecks().AddPostgresDiagnostics(tags: ["postgres"]);
 ```
 <!-- endSnippet -->
 
-Each run checks up to 25 databases, every single-database source first and then each database source in rotation. It
+The check is named `data-studio-postgres` unless you give it a name. Each run checks up to 25 databases, every
+single-database source first and then each database source in rotation. It
 reports `Unhealthy` (or the `failureStatus` you give) on a Critical finding and `Degraded` on a Warning, a check that
 failed or ran out of time, or a source it could not reach, and its data is codes and counts only, because there is no
 visitor to authorize.

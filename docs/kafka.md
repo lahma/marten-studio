@@ -374,7 +374,7 @@ A policy that checks only `Cluster` admits every tenant entry of that cluster: c
 
 ## Links
 
-In the Marten module, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
+In a host with the Marten module, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
 or stream, in the tenant of the record's `tenant-id` header. The document and stream pages offer **Find in Kafka**, which
 opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
 `tenant-id` is redacted has no Marten links.

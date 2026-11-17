@@ -215,7 +215,7 @@ This is the full text of hard rules 1 to 17. AGENTS.md states each rule in brief
       or Weasel, no `Confluent.*`, no Wolverine and no module. `ShellFenceTests` (`DataStudio.Tests`) holds it at the project
       file, the restore graph (`obj/project.assets.json`), the built assembly's references and the test project's
       output folder, which holds the Kafka module and its engine and client (the one module the shell's suite builds a host
-      with) and nothing else of that list. The shell's own source names no module's product either (`ModuleNeutralityTests`).
+      with) and nothing else of that list. The shell's source, like the Postgres module's, the engine's and the Marten module's, names no Kafka, KStudio or Confluent (`ModuleNeutralityTests`).
     - **The Postgres module, `src/DataStudio.Postgres`, and the engine, `src/DataStudio.Postgres.Diagnostics`,
       reference no Marten, JasperFx or Weasel assembly or package**, directly, through a project or transitively:
       `PostgresFenceTests` (`DataStudio.Postgres.Tests`) holds that line at the project files, the restore graphs, the built
