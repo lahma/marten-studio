@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Marten.Integration.Tests.Projections;
 
 /// <summary>
-/// M7 under Solo, live: the card says this process runs every shard itself, and while Marten Studio's pause holds, a Stop
+/// M7 under Solo, live: the card says this process runs every shard itself, and while Data Studio's pause holds, a Stop
 /// with no agent here and a Start of an agent already running are refused as the no-ops they are - while the Start that
 /// starts something is made.
 /// </summary>
@@ -74,7 +74,7 @@ public class DaemonTopologyLiveTests(PostgresFixture postgres)
 
     /// <summary>
     /// Two HotCold nodes over one database: the leader holds every shard's lock and says so, the follower holds none and
-    /// says that - and with Marten Studio's pause in effect on the follower, a Start there is refused as an agent beside the
+    /// says that - and with Data Studio's pause in effect on the follower, a Start there is refused as an agent beside the
     /// leader's, a Stop as one that stops nothing, and a rewind as one that would restart the agents beside the leader's.
     /// </summary>
     [PostgresFact]
@@ -114,7 +114,7 @@ public class DaemonTopologyLiveTests(PostgresFixture postgres)
 
         long before = await leader.ShardPositionAsync(Shard, postgres);
 
-        // The per-agent controls are offered, under a loop, only while Marten Studio's pause holds - so the follower is paused.
+        // The per-agent controls are offered, under a loop, only while Data Studio's pause holds - so the follower is paused.
         await follower.ProjectionsAsync(async x =>
         {
             await x.PauseDaemonAsync(follower.Scope, Token);

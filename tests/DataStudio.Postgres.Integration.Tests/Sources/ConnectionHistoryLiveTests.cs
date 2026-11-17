@@ -168,7 +168,7 @@ public class ConnectionHistoryLiveTests(PostgresFixture postgres)
         await probe.OpenAsync(Token);
         await using NpgsqlCommand command = new(
             "select count(*) from pg_stat_activity where datname = current_database() and application_name = @name", probe);
-        command.Parameters.AddWithValue("name", ConnectionHistorySampler.HistoryName(null, connectionString, "Postgres Studio")!);
+        command.Parameters.AddWithValue("name", ConnectionHistorySampler.HistoryName(null, connectionString, "Data Studio")!);
         return (long) (await command.ExecuteScalarAsync(Token))!;
     }
 

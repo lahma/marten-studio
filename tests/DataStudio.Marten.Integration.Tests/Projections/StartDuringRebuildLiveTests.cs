@@ -8,7 +8,7 @@ namespace DataStudio.Marten.Integration.Tests.Projections;
 
 /// <summary>
 /// H2 criterion 4: a start the daemon refuses during a rebuild is audited and shown as refused - for a rebuild somebody
-/// else started, where JasperFx says so (2.86, Marten 9.50), and for a rebuild Marten Studio started, from its own
+/// else started, where JasperFx says so (2.86, Marten 9.50), and for a rebuild Data Studio started, from its own
 /// operation tracker.
 /// </summary>
 /// <remarks>
@@ -67,7 +67,7 @@ public class StartDuringRebuildLiveTests(PostgresFixture postgres)
         }
     }
 
-    /// <summary>A rebuild Marten Studio is running is known from its own operation tracker.</summary>
+    /// <summary>A rebuild Data Studio is running is known from its own operation tracker.</summary>
     [PostgresFact]
     public async Task A_start_during_a_rebuild_the_studio_started_is_refused()
     {
@@ -95,7 +95,7 @@ public class StartDuringRebuildLiveTests(PostgresFixture postgres)
             DaemonControlResult result = await host.ProjectionsAsync(x => x.StartAgentAsync(host.Scope, Shard, Token));
 
             result.Applied.Should().BeFalse();
-            result.Reason.Should().Contain("Marten Studio is rebuilding " + GatedProjection.ProjectionName).And.Contain(start.Id);
+            result.Reason.Should().Contain("Data Studio is rebuilding " + GatedProjection.ProjectionName).And.Contain(start.Id);
 
             // The screen draws it as a state: the projection is rebuilding, by the studio.
             ProjectionsView view = await host.ProjectionsAsync(x => x.GetProjectionsAsync(host.Scope, Token));

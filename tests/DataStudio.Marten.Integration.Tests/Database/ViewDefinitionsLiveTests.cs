@@ -241,7 +241,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         overview.Access.DefinitionsOpen.Should().BeFalse();
         overview.Access.DefinitionDenial.Should().Contain("refused ViewDefinitions");
         overview.Schemas.Select(static x => x.Name).Should().NotContain(fixture.LegacySchema,
-            "in Marten Studio the exactly named schemas' structure is ViewDefinitions' or BrowseDatabase's, and neither passes");
+            "in Data Studio the exactly named schemas' structure is ViewDefinitions' or BrowseDatabase's, and neither passes");
     }
 
     [PostgresFact]

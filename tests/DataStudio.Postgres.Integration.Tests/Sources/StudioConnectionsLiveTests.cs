@@ -54,8 +54,8 @@ public class StudioConnectionsLiveTests(PostgresFixture postgres)
             Token);
 
         result.Succeeded.Should().BeTrue(result.Error?.MessageText);
-        result.Rows.Single()[0].Text.Should().Be("orders-api (Postgres Studio)");
-        result.Rows.Single()[1].Text.Should().Be("orders-api (Postgres Studio)", "pg_stat_activity, and so Sessions and any monitor, see it");
+        result.Rows.Single()[0].Text.Should().Be("orders-api (Data Studio)");
+        result.Rows.Single()[1].Text.Should().Be("orders-api (Data Studio)", "pg_stat_activity, and so Sessions and any monitor, see it");
 
         await using NpgsqlConnection application = await dataSource.OpenConnectionAsync(Token);
         (await ScalarAsync(application, "select current_setting('application_name')")).Should().Be("orders-api",

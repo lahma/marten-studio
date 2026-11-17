@@ -111,7 +111,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
         tables.Items.Single(static x => x.Name == "mt_doc_order").Ownership.Owner.Should().Be(DatabaseObjectOwner.MartenInfrastructure);
         tables.Items.Single(static x => x.Name == "qrtz_triggers").Ownership.RecognisedAs.Should().Be("Quartz.NET");
         tables.Items.Single(static x => x.Name == "orders").Ownership.Owner.Should().Be(DatabaseObjectOwner.Other);
-        tables.Counts.Marten.Should().BePositive("which is what puts the Marten Studio notice on the page");
+        tables.Counts.Marten.Should().BePositive("which is what puts the Data Studio notice on the page");
 
         ITableRowService rows = circuit.ServiceProvider.GetRequiredService<ITableRowService>();
 

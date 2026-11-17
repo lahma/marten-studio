@@ -6,7 +6,7 @@ using DataStudio.Marten.Services.Projections;
 namespace DataStudio.Marten.Integration.Tests.Projections;
 
 /// <summary>
-/// 1.2-FINAL-FIX-2: after Marten Studio rebuilds a projection on a daemon this process hosts (Solo), the projection's shard runs again.
+/// 1.2-FINAL-FIX-2: after Data Studio rebuilds a projection on a daemon this process hosts (Solo), the projection's shard runs again.
 /// On the sample, <c>DailySales:All</c> read Stopped for about twelve minutes ("not judged: its agent here is Stopped (D05)") and the
 /// page said "It runs 1 agent now" while Agents read 2.
 /// </summary>

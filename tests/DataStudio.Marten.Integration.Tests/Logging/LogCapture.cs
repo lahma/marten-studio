@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DataStudio.Marten.Integration.Tests.Logging;
 
-/// <summary>One line Marten Studio wrote to the host's log.</summary>
+/// <summary>One line Data Studio wrote to the host's log.</summary>
 /// <param name="Category">The logger category, which is the studio type's full name.</param>
 /// <param name="Level">The level it was written at.</param>
 /// <param name="EventId">The event id, which is what an operator's query matches on.</param>

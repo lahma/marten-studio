@@ -45,7 +45,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
         Schema = schema;
     }
 
-    /// <summary>The host's log, Marten Studio's categories only.</summary>
+    /// <summary>The host's log, Data Studio's categories only.</summary>
     public LogCapture Logs { get; }
 
     /// <summary>The document schema this host owns.</summary>

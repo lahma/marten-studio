@@ -5,7 +5,7 @@ using DataStudio.Sample.Marten.Domain;
 namespace DataStudio.Marten.Integration.Tests.Browser;
 
 /// <summary>
-/// 1.2-NAV: navigation inside Marten Studio in a real browser. The studio intercepts its own navigation - a link, Back and
+/// 1.2-NAV: navigation inside Data Studio in a real browser. The studio intercepts its own navigation - a link, Back and
 /// Forward and every address a page writes are rendered by the circuit - so a move fetches no page and cancels nothing.
 /// </summary>
 /// <remarks>

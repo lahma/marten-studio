@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Integration.Tests;
 
 /// <summary>
-/// A real Marten store over the assembly's Postgres, wired into a real Marten Studio container.
+/// A real Marten store over the assembly's Postgres, wired into a real Data Studio container.
 /// </summary>
 /// <remarks>
 /// <para>

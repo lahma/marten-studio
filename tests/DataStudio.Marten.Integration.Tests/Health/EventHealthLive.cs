@@ -59,7 +59,7 @@ internal sealed class EventHealthHost : IAsyncDisposable
         Schema = schema;
     }
 
-    /// <summary>The host's log, Marten Studio's categories only.</summary>
+    /// <summary>The host's log, Data Studio's categories only.</summary>
     public LogCapture Logs { get; }
 
     /// <summary>The document schema; the event store's is <see cref="EventSchema" />.</summary>

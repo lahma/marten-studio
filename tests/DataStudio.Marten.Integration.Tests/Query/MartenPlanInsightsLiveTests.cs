@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Integration.Tests.Query;
 
 /// <summary>
-/// 1.0-P3C: Marten Studio's plan insights on a real store. A real document query is explained through the Plan page's own service
+/// 1.0-P3C: Data Studio's plan insights on a real store. A real document query is explained through the Plan page's own service
 /// (<c>ISqlConsoleService.PlanAsync</c>, the console's gate), and the registered contributor - the one a circuit's Plan view asks -
 /// judges the plan: P26 fires while the store declares nothing for the member, and goes quiet once the store declares
 /// <c>Duplicate(...)</c> for it. Run at the Marten floor and at the latest-tested Marten.

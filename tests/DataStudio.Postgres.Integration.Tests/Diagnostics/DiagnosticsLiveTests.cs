@@ -247,7 +247,7 @@ public class DiagnosticsLiveTests(PostgresVersionMatrix matrix, PostgresFixture 
 
             snapshot.Outcome.Should().Be(PostgresReadOutcome.Read, snapshot.Reason);
             snapshot.Database.Should().Be(new PostgresDatabaseRef("default", "default"));
-            snapshot.Producer.Should().StartWith("PostgresStudio ");
+            snapshot.Producer.Should().StartWith("Data Studio ");
             snapshot.Checks.Should().NotBeEmpty();
         }
         finally
