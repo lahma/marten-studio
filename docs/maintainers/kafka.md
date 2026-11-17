@@ -1,82 +1,86 @@
-# KStudio
+# Kafka
 
-KStudio for Apache Kafka® (working name) is the family's Kafka module. Apache Kafka is a trademark of the Apache Software
-Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation. AGENTS.md states each rule; this document holds its
-full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's, D45 to D48 M5's.
+Data Studio's Kafka module (`DataStudio.Kafka`, with its engine `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`, all three a preview) is for
+Apache Kafka®. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software
+Foundation. AGENTS.md states each rule; this document holds its full text and wins where they differ. D34 and D35 are the module's half, D36 to
+D41 the engine's, D45 to D48 M5's.
 
 ## D34
 
-**D34 — A module joins the registered studio's shell: KStudio is one.** KStudio is not a third studio. One studio per
-process still holds (D30): `AddKafkaStudio()` adds a *module* to the studio the host registered, and the module shares
-that studio's mount, circuit, rail, header, audit ring and capability chip.
+**D34 — A module joins the shell: the Kafka module is one.** The shell is the studio (D30), and a module is what it shows: `AddKafka()` adds
+a *module* to the builder `AddDataStudio()` returned, and the module shares the shell's mount, circuit, rail, header, audit ring and capability chip.
+The Postgres and Marten modules join the same way, so what follows is the module seam, which the Kafka module is the one to use alone.
 
-*Registration.* `AddKafkaStudio()` runs `KStudioVersionGuard` before it names a PostgresStudio or KStudio.Core type
-(its public body names none, and `KStudioVersionGuardTests` scans its IL), then registers `KafkaStudioModule` as an
+*Registration.* `AddKafka()` runs `KafkaCoreVersionGuard` before it names a `DataStudio` or `DataStudio.Kafka.Core` type
+(its public body names none, and `KafkaCoreVersionGuardTests` scans its IL), then registers `KafkaModule` as an
 `IStudioModule` with `TryAddEnumerable`, and its options, services and startup guard with `TryAdd`. It reads nothing
-the host studio registered, so it may come before or after `AddMartenStudio()` or `AddPostgresStudio()`, and calling it
-twice adds one module. The shell's `StudioDescriptor` singleton is the host's static descriptor composed with the
-registered modules when it is first resolved (`StudioModuleComposition`); with no module it is that very instance,
-which is the proof that a host without KStudio is unchanged. `KafkaStudioStartupGuard` refuses to start a host that
-registered no studio, and one that enables a Kafka capability no policy answers (D35). There is no `MapKafkaStudio()`:
-a second map call would be a second circuit, and a second place to forget authorization.
+another module registered, so it may come before or after `AddMarten()` or `AddPostgres()`, and calling it twice
+adds one module. It needs no database module and no database: a host with `AddDataStudio().AddKafka()` and nothing else is a Kafka-only host, whose output
+holds no Npgsql and no `DataStudio.Postgres*` (hard rule 16, `KafkaOnlyHostTests`). The shell's `StudioShellDescriptor` singleton composes the registered modules when it
+is first resolved (`StudioModuleComposition`), in the order the host wrote its `Add…()` calls, and the shell refuses a map call with no
+module. `KafkaStartupGuard` refuses to start a host that enables a Kafka capability no policy answers (D35); a module cannot be added without
+a shell, because it extends the shell's builder. There is no `MapKafka()`: a second map call would be a second circuit, and a second place to
+forget authorization.
 
-*Routes.* A module's page assembly keeps its root (`StudioPageAssembly.KeepsRoot`): `@page "/kafka/topics"` is served
-at `{mount}/kafka/topics`, so a module never lands over the host's routes, and the route table still refuses a route two
-pages claim. Every id travels in the query string, as D9 says of every id: `?cluster=`, `?topic=`, `?partition=`,
+*Routes.* A module's page assembly keeps its root, one unique segment the shell does not use: `@page "/kafka/search"` is served
+at `{mount}/kafka/search`, so a module never lands over another's routes, and the route table still refuses a route two
+pages claim. There is no root module (`IsRoot` and `StudioPageAssembly.KeepsRoot` are gone): the shell's own pages, the front page at the
+mount (one tile per module with its name, a sentence and a link, or a redirect to the module's home when there is one module) and Activity at
+`{mount}/activity`, are pages of no module. Every id travels in the query string, as D9 says of every id: `?cluster=`, `?topic=`, `?partition=`,
 `?offset=`. A topic name is case-sensitive and may look like a file name (`orders.json`), so it is never a path segment.
 A search's predicate travels in the fragment (`#q=`): no HTTP request line, access log or Referer carries it, and the circuit receives it once, over its own connection, to fill the box.
 
-*Rail.* A module's sections go before the host's last section (System), in module key order. Every section title and
-item label on the composed rail is unique, ignoring case, because the rail keys its entries on them. A module's links
-carry no host scope, and its entries' `IsShown` read its own options. The rail's credit names each module.
+*Rail.* A module's sections are listed in registration order, then the shell's own section (`Studio`, holding Activity) last. Every section title and
+item label on the composed rail is unique, ignoring case, because the rail keys its entries on them, and a module may use neither the shell's title nor
+its label. A module's links carry no database scope, and its entries' `IsShown` read its own options. The rail's credit names each module.
 
 *Scope.* The layout knows a module's page by the matched page's assembly, never by the address. On it, the header draws
-the module's scope selector (KStudio's `ClusterSelector`) and no Find box, and the layout neither gates the body on the
-host's scope nor reads or writes `?store=&db=&tenant=`. The host's scope stays in `StudioState`, untouched, and the
-rail's host links carry it back. KStudio's own scope is `KafkaState`'s cluster, read from `?cluster=` and written back
+the module's scope selector (the Kafka module's `ClusterSelector`) and no Find box, and the layout neither gates the body on a
+database module's scope nor reads or writes `?store=&db=&tenant=`. A database module's scope stays in memory, untouched, and the
+rail's database links carry it back. The module's own scope is `KafkaState`'s cluster, read from `?cluster=` and written back
 only once interactive and after it was read. A broker-per-tenant cluster is one entry per tenant, carrying its tenant id;
 no Kafka address names a tenant.
 
-*Audit.* A module's ring entry carries `ScopeKind`, `ScopeLabel` and its own `ModuleScope`, and
-`StudioActionLog.GetVisibleAsync` judges it only through that kind's `IStudioAuditScopeGate`, never through the host's
-store policy; an entry of a kind no gate answers is hidden. KStudio logs its own events (9600-9649) with its own
+*Audit.* A module's ring entry carries a `StudioAuditScope` (its kind, label, title and its own value), and
+`StudioActivity.GetVisibleAsync` judges it only through that kind's `IStudioAuditScopeGate`, never through another module's
+policy; an entry of a kind no gate answers is hidden. The module logs its own events (9600-9649) with its own
 properties, never 9200 or 9201, whose templates name a store. A predicate reaches the audit only through the engine's
 audit printer, with every literal on a redacted field written `<redacted>`; the visitor's typed text never does.
 
-*Words and assets.* The host's `StudioText` does not change. The anonymous banner adds the module's own sentence. Every
-Kafka page ends with the trademark line, and no Kafka logo is drawn. KStudio ships no static web asset: its CSS is in
-`studio.css`, in sections headed `KS-…` with classes prefixed `ms-k-`, and a JS helper, if one is ever needed, is a
+*Words and assets.* The module's words are its own (`KafkaText`, pinned by `WordsTests_DataStudioKafka`, D49). The anonymous banner adds the module's own sentence. Every
+Kafka page ends with the trademark line, and no Kafka logo is drawn. The module ships no static web asset: its CSS is in
+the shell's `studio.css`, in sections headed `KS-…` with classes prefixed `ms-k-`, and a JS helper, if one is ever needed, is a
 module-neutral function in `studio.js`.
 
-*Links (M4).* `IStudioRouteLinks` (implemented by MartenStudio) and `IStudioRecordSearchLinks` (implemented by KStudio)
-are owned by PostgresStudio, so neither module references the other. A link is pure, escapes every id, and grants
+*Links (M4).* `IStudioRouteLinks` (implemented by the Marten module) and `IStudioRecordSearchLinks` (implemented by the Kafka module)
+are owned by the shell, so neither module references the other. A link is pure, escapes every id, and grants
 nothing: the destination authorizes again.
 
 ## D35
 
-**D35 — KStudio is authorized on a resource of its own, by policies of its own.** D5's three layers hold, on
-`KafkaTopicResource(Cluster, TenantId, Topic, Capability)`. *Who gets in* is the host studio's `AuthorizationPolicy`
+**D35 — The Kafka module is authorized on a resource of its own, by policies of its own.** D5's three layers hold, on
+`KafkaTopicResource(Cluster, TenantId, Topic, Capability)`. *Who gets in* is the shell's `AuthorizationPolicy`
 (or the map builder's `RequireAuthorization()`), because Kafka pages are endpoints of that mapping, at page load and at
-circuit connect alike. *Which cluster and topic* is `KafkaStudioOptions.ClusterAuthorizationPolicy`, asked by every
+circuit connect alike. *Which cluster and topic* is `KafkaOptions.ClusterAuthorizationPolicy`, asked by every
 service call at cluster level (`Topic = null`) and once per topic it touches. *Each capability use* is
 `CapabilityAuthorizationPolicy`, asked once per topic with the capability named, falling back to the cluster policy when
-it is blank. Neither falls back to the host studio's policies: `StoreAuthorizationPolicy`, `SourceAuthorizationPolicy`
-and `WriteAuthorizationPolicy` have handlers written for `MartenStoreResource` and `PostgresStudioResource`, and a
-handler written for one resource must never be handed another (D30). That is why KStudio has its own
+it is blank. Neither falls back to the database modules' policies: `StoreAuthorizationPolicy`, `SourceAuthorizationPolicy`
+and `WriteAuthorizationPolicy` have handlers written for `MartenStoreResource` and `PostgresResource`, and a
+handler written for one resource must never be handed another (D30). That is why the module has its own
 `KafkaAuthorization` rather than a second resource factory on `StudioAuthorization`.
 
 A topic the cluster policy refuses is absent from every list. A request that names one is refused whole, with a refusal
 that names nothing, because a search silently narrowed to the allowed topics would report a false negative. The audit
 names the topic, and shows it only to a visitor who may read it.
 
-`KafkaStudioCapabilities` default to `false` (D4); metadata needs none (K5). The host's `ReadOnly` is the one master
-switch: it turns every Kafka capability off, and KStudio has no switch of its own. Since 1.3.1 (#74), KStudio's pages
+`KafkaCapabilities` default to `false` (D4); metadata needs none (K5). The shell's `ReadOnly` (`DataStudioOptions.ReadOnly`) is the one master
+switch for the Kafka module: it turns every Kafka capability off, and the module has no switch of its own (a database module's
+`ReadOnly` turns off that module's capabilities only and never reaches Kafka's). The module's pages
 leave out the controls of a capability that is off (or that the cluster's profile forbids), and a page reached by its
 address says in one neutral sentence that the feature is not available here. No option or builder method is named in a
-page's own text except on Cluster settings, which lists each capability with `KafkaStudioOptions.Capabilities.<name>`
-(or the host's `ReadOnly` option); the header's capabilities list (PostgresStudio's, D4) and the audit entries on
-Activity name the options too. D4's "every disabled control names the exact property" still holds for the other
-studios' own screens. A startup guard refuses to start a host that
+page's own text except on Cluster settings, which lists each capability with `KafkaOptions.Capabilities.<name>`
+(or the shell's `ReadOnly` option); the header's capabilities list (the chip, D4) and the audit entries on
+Activity name the options too. D4's "every disabled control names the exact property" still holds for the database modules' own screens. A startup guard refuses to start a host that
 enables a Kafka capability, with `ReadOnly` off, while both Kafka policies are blank: every admitted visitor could then
 read every topic the application's credentials can read. There is no escape hatch; a development host states a
 one-line policy.
@@ -84,28 +88,28 @@ one-line policy.
 ### The pages (M2)
 
 The Kafka section is Topics (`kafka`), the topic overview (`kafka/topic`), Search (`kafka/search`), the record page
-(`kafka/record`) and Cluster settings (`kafka/settings`). Each renders inside `KafkaPageFrame` and reads nothing before
+(`kafka/record`), the related records (`kafka/related`), the live tail (`kafka/tail`) and Cluster settings (`kafka/settings`). Each renders inside `KafkaPageFrame` and reads nothing before
 its `Ready`, so prerendering makes no broker call; each service method asks `KafkaAuthorization` itself. Catalog reads
 are not audited; scans (9600, 9601) and record views (9604, once per circuit per record) are, through `KafkaActionLog`,
 on failure as well as success. A search link's predicate is `KafkaScanPlan.AuditText` in the fragment, never the typed
 text, so a literal on a redacted field reaches no address; a pasted link fills the form and never runs by itself. A
 record view is a scan of at most 21 offsets (`IKafkaScanner.ReadRecordAsync`) and takes one of the owner's slots. The
-settings page reads `KafkaSettingsReader`, and `KStudioReadsNoRawSettingsTests` holds that KStudio never touches the
+settings page reads `KafkaSettingsReader`, and `KafkaReadsNoRawSettingsTests` holds that the module never touches the
 definition's raw dictionaries. "No match" is always drawn beside its count and every caveat the result carries (D38).
 
 ## D36
 
-**KStudio.Core is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake.**
+**DataStudio.Kafka.Core is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake.**
 
-KStudio.Core holds everything KStudio knows about Kafka: the catalog of clusters and topics, the topic overview, window
+`DataStudio.Kafka.Core` holds everything the Kafka module knows about Kafka: the catalog of clusters and topics, the topic overview, window
 resolution, the scan engine, the search predicates, the decoders, the governor and redaction. It has no ASP.NET Core
-(no `FrameworkReference`), references no studio, no Npgsql, no Marten family and no Wolverine (`KStudioCoreFenceTests`,
-which also holds the reverse: PostgresStudio, PostgresStudio.Diagnostics and MartenStudio reference no Confluent,
-librdkafka, Wolverine or KStudio package or project), and is packed as a preview, `<version>-<label>` (K8). Its public types are in namespace `KStudio`: `KafkaEngineOptions` (the base of
-KStudio's options), `KafkaClusterBuilder`, `KafkaTopicBuilder`, `KafkaKeyFormat`, `KafkaScanLimits`, and the decoder
+(no `FrameworkReference`), references no shell, no module, no Npgsql, no Marten family and no Wolverine (`KafkaCoreFenceTests`,
+which also holds the reverse: the shell, `DataStudio.Postgres`, `DataStudio.Postgres.Diagnostics` and `DataStudio.Marten` reference no Confluent,
+librdkafka, Wolverine or `DataStudio.Kafka*` package or project), and is packed as a preview, `<version>-<label>` (K8). Its public types are in namespace `DataStudio.Kafka`, shared with the module above it: `KafkaEngineOptions` (the base of
+the module's `KafkaOptions`), `KafkaClusterBuilder`, `KafkaTopicBuilder`, `KafkaKeyFormat`, `KafkaScanLimits`, and the decoder
 extension point (`IKafkaRecordDecoder`, `KafkaDecodeContext`, `KafkaDecodeResult`, `KafkaHeader`, `KafkaDecoders`). Later
 milestones add `KafkaRedactionBuilder` (M2, M3), `KafkaPartitioner` (M3) and the correlation and index seams (M4, M5),
-each a reviewed baseline change. Everything else is internal, with `InternalsVisibleTo` for KStudio and the two test
+each a reviewed baseline change. Everything else is internal, with `InternalsVisibleTo` for `DataStudio.Kafka`, `DataStudio.Kafka.Wolverine` and the test
 projects.
 
 **One client.** Confluent.Kafka is the only Kafka client (plan K2): floor 2.14.0, the version WolverineFx.Kafka 6.61 pins,
@@ -117,7 +121,7 @@ client, because an admin handle has no consumer group and librdkafka 2.16.0 and 
 `__consumer_offsets` or whenever a group's coordinator moves). Remove it once the Confluent.Kafka floor contains librdkafka's fix
 (PR #5611, merged 2026-10-14; no release has it as of 2.16.0). Every other admin call stays on the plain admin client.
 
-**The wire seam.** Every broker call goes through `IKafkaWire` (`KStudio.Core.Wire`): metadata for all topics, describe
+**The wire seam.** Every broker call goes through `IKafkaWire` (`DataStudio.Kafka.Core.Wire`): metadata for all topics, describe
 topics with their authorized operations, describe cluster, list offsets (earliest, latest, max timestamp, for a timestamp;
 one kind per call, each partition once), describe a topic's configs, a declared group's offsets and description, and a
 scan reader (assign with explicit offsets, pause, resume, seek, read, close). It exists so that the fast suite can run the
@@ -126,7 +130,7 @@ Kafka**: `WireContract` and `WindowContract` run on the fake in the fast suite a
 live suite, and a fast test may rely on a Kafka behaviour only if the contract proves it on both.
 
 No Confluent type crosses the seam. A record is a `WireRecord` that owns copies of its key, value and headers (a null key
-and a tombstone stay null) and never leaves KStudio.Core. Errors are values - `NotAuthorized(operation, resource type,
+and a tombstone stay null) and never leaves DataStudio.Kafka.Core. Errors are values - `NotAuthorized(operation, resource type,
 name)`, `AuthenticationFailed`, `Unsupported(api)`, `OffsetOutOfRange(partition)`, `NotFound`, `Unavailable`, `Failed` -
 mapped from Confluent's `ErrorCode`s by one table (`ConfluentErrors`). A refusal by an ACL is an expected state: it is
 shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logged once at Debug.
@@ -139,7 +143,7 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 | A declared group's offsets and state | `DESCRIBE` on the group | "needs `DESCRIBE` on group …" |
 | Cluster description | `DESCRIBE` on the cluster | "needs `DESCRIBE` on the cluster" |
 
-**Lifecycle.** Nothing connects when KStudio is registered or the application starts, and nothing is a hosted service.
+**Lifecycle.** Nothing connects when the module is registered or the application starts, and nothing is a hosted service.
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
 `AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
 lease is released. The group-offsets (lag) read is the one admin call that does not run on that client: it runs on a per-cluster
@@ -155,16 +159,16 @@ and error events from piling up. The reader commits nothing, joins no group and 
 Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
-the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
+the shell's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
 
-**Logging.** Engine events are 9650 to 9699, under the `KStudio.Core.*` categories; librdkafka's own log lines go to
+**Logging.** Engine events are 9650 to 9699, under the `DataStudio.Kafka.Core.*` categories; librdkafka's own log lines go to
 9656 at Debug, never to stderr. An event carries cluster keys, topic names, partitions, offsets, counts, codes and
 exception kinds only - never a predicate, a literal, a key, a header or a value - and every string through `KafkaLogValue`,
 a port of `StudioLogValue` held equal to it by `KafkaLogValueParityTests`.
 
 ## D37
 
-**In KStudio, a read never writes.**
+**In the Kafka module, a read never writes.**
 
 The engine clones the host's configuration when a cluster is registered and never writes the host's instance. Each
 client it builds is that clone with these overrides, applied last; each overridden host key is logged at Debug by name,
@@ -237,7 +241,7 @@ reason a group the engine cannot see is never shown as "no groups".
 
 ## D38
 
-**KStudio's windows and negatives are truthful.**
+**The Kafka module's windows and negatives are truthful.**
 
 A window is half-open, `[from, to)`. The engine resolves it per partition before reading anything, with one list-offsets
 call per kind across every partition of every topic:
@@ -283,14 +287,14 @@ two scans read exactly what one would have.
 
 ## D39
 
-**KStudio's search predicates are one hand-written grammar, three-valued, and compared as bytes where they can be.**
+**The Kafka module's search predicates are one hand-written grammar, three-valued, and compared as bytes where they can be.**
 
 The grammar is the engine's own parser - no package, and no expression language behind it (spec open decision 6):
 conditions on `key`, `header.<name>` (or `header['…']`), `ce.<attribute>` and `any`, with `=`, `^=` (prefix), `~`
 (contains, ignoring case; slow), `in (…)` and `is [not] null`, joined by `and`, `or`, `not` and parentheses. M3 adds
 `value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`) with `<`, `<=`, `>` and `>=` on numbers, behind `ReadPayloads` (see *Values and JSON paths* below).
 Strings are quoted with `'` or `"`, a quote doubled inside; there are no backslash escapes. The text form is canonical
-and round-trips, and KStudio carries it in the URL's fragment.
+and round-trips, and the module carries it in the URL's fragment.
 
 **Keys are bytes.** A key literal is compiled through the topic's key format (`Utf8String`, the default, said "assumed"
 when undeclared; `JsonString`, which tries both common escapings; `Int64BigEndian`; `Int32BigEndian`; `GuidRfc4122`;
@@ -436,14 +440,14 @@ its key; on a topic whose key a redaction rule masks, it does not say which part
 
 ## D40
 
-**KStudio redacts inside the engine, before any sink.**
+**The Kafka module redacts inside the engine, before any sink.**
 
-A record leaves KStudio.Core only as a `KafkaMatch`, and `KafkaMatchFactory` is the only way to make one. The factory
+A record leaves DataStudio.Kafka.Core only as a `KafkaMatch`, and `KafkaMatchFactory` is the only way to make one. The factory
 runs the topic's rules and the built-in deny-list - the headers `authorization`, `proxy-authorization`, `cookie`,
 `set-cookie` and `x-api-key`, masked unless the host opts one out by name - before the match exists, and the match keeps
 no unredacted copy: a masked field is `••• (redacted by rule)`. Header, key and CloudEvents rules arrived in M2, JSON-path and
 pattern rules in M3, each with the first surface it protects. A rule that cannot be applied, to an undecodable value for example,
-withholds the whole value. The wire record never leaves the engine, and a test reads KStudio's compiled references to
+withholds the whole value. The wire record never leaves the engine, and a test reads the module's compiled references to
 prove it, so the view, facets, chips, "copy as", exports and every later sink are built from redacted matches.
 
 A redacted field takes only `=` and `in`: `^=`, `~`, `<`, `>` and `any` would let a visitor read it one character at a
@@ -501,7 +505,7 @@ into its text would otherwise put a masked value into a match.
 
 ## D41
 
-**KStudio bounds the cost of a scan in the engine.**
+**The Kafka module bounds the cost of a scan in the engine.**
 
 | Limit | Default | Scope |
 |---|---|---|
@@ -539,9 +543,9 @@ costs. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records 
 headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
 sent at most $Q + F$ more than the engine had read.
 
-A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (KStudio passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
+A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (the module passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
 
-**Profiles and the cluster's own buckets (D47).** A cluster's profile caps the limits above in the engine (`min(host, ceiling)`, the table in `docs/kstudio.md`), and a
+**Profiles and the cluster's own buckets (D47).** A cluster's profile caps the limits above in the engine (`min(host, ceiling)`, the table in `docs/kafka.md`), and a
 profiled cluster whose capped rate or hourly allowance is below the host's gets a token bucket and a rolling-hour budget of its own, beside the process-wide ones:
 the scan is paced by the slower and stops when either allowance is spent. The byte rate and the allowance guard the cluster's quota and egress; concurrency and the
 consumer's sizes guard the process's memory, so they stay the host's. Exports in flight (D45) add $2 \cdot 2 \cdot$ `MaxExportBytes` to the memory statement, 128 MiB at the defaults: the writer keeps each row as it makes it and copies
@@ -556,7 +560,7 @@ confirmation travels with the call. A profile (M5) or a visitor can lower any li
 
 ## D42
 
-**KStudio correlates by declared fields, in one audited scan.**
+**The Kafka module correlates by declared fields, in one audited scan.**
 
 **Fields and kinds.** A topic's correlation fields are headers, CloudEvents attributes, the key and JSON paths
 (`KafkaTopicBuilder.Correlation`). Each has a **kind**, which says what its values mean, and fields of one kind are compared
@@ -622,19 +626,19 @@ that says which fields mean the same thing on topics that spell them differently
 shows, so a link can reveal nothing the visitor could not already see (D40). Duplicates are same-topic, because a retry tier
 re-publishes to another topic and the timeline already shows that as related, not as a copy.
 
-**Tests.** `tests/KStudio.Tests/Correlation/` (validation, extractor, query builder, duplicate finder, with its 20 ms bound at
+**Tests.** `tests/DataStudio.Kafka.Tests/Correlation/` (validation, extractor, query builder, duplicate finder, with its 20 ms bound at
 the largest values), `Scanning/PerTopicScanTests` on the fake and `PerTopicScanLiveTests` on Kafka 3.9 and 4.x (one consumer, a
 group never joined), and `Redaction/MaskTextTests`.
 
 ## D43
 
-**D43 — KStudio.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
-the cluster registry is first built, through KStudio.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
+**D43 — DataStudio.Kafka.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
+the cluster registry is first built, through DataStudio.Kafka.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
 version guard). It starts, connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
 clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
 never replaces a host's descriptor, and discovery adds no redaction.
 
-**Three declarations of 1.3.1 (#71 to #73), none of them a guess.** *CloudEvents:* `KafkaWolverineOptions.CloudEventsSerializer<T>()` (and the
+**Three declarations (#71 to #73), none of them a guess.** *CloudEvents:* `KafkaWolverineOptions.CloudEventsSerializer<T>()` (and the
 `Type` overload) marks every endpoint whose `DefaultSerializer` is `CloudEventsMapper` or assignable to a declared type as a CloudEvents topic;
 a value is never sniffed, because the JSON paths of D39 read a CloudEvent's `data` and sniffing would change what `$.x` means on topics that are not
 CloudEvents. *Brokers:* `ExcludeBroker(name)` leaves a named broker out of discovery whole (ordinal match on `Transport.Protocol`, the name the
@@ -647,15 +651,15 @@ cluster-wide groups plus the topic's own, so a topic page asks the broker about 
 host's cluster-wide group with no committed offset on a topic is named on one muted line (`KafkaGroupOverview.HasNoCommittedOffset`).
 
 **The seam, and a reversal of D-ENGINE 1.4.** D-ENGINE 1.4 said the adapter would use the public registration API only. It cannot: the public
-registration is an options delegate, which `KafkaStudioStartupGuard` reads at host start with no service provider, possibly before Wolverine's
+registration is an options delegate, which `KafkaStartupGuard` reads at host start with no service provider, possibly before Wolverine's
 runtime has connected its transports, and a broker-per-tenant registration has no configuration until it has (`KafkaTenant.Compile`, called by
 `KafkaTransport.ConnectAsync`). So `KafkaEngineOptions` carries an internal list of source factories, and `KafkaClusterRegistry` - built lazily, on
 the first Kafka page, link or catalog read, which is after ASP.NET Core started its hosted services - gets the container and runs every source once,
 after the host's own clusters. The pattern is D30's: an internal interface, `InternalsVisibleTo` for the one assembly (and its tests), and
-`KStudioWolverineVersionGuard`, which refuses to wire the adapter to any KStudio.Core but its own build before anything of KStudio.Core's
+`KafkaWolverineVersionGuard`, which refuses to wire the adapter to any DataStudio.Kafka.Core but its own build before anything of DataStudio.Kafka.Core's
 internals is touched (`UseWolverineKafka` names only the public `KafkaEngineOptions`; the body that adds the source is a `NoInlining` method of its
-own, and `KStudioWolverineVersionGuardTests` scans the IL to keep it so). A public contributor interface would have frozen a seam with one
-consumer into KStudio.Core's baseline.
+own, and `KafkaWolverineVersionGuardTests` scans the IL to keep it so). A public contributor interface would have frozen a seam with one
+consumer into DataStudio.Kafka.Core's baseline.
 
 **What a source may contribute.** Clusters, each with its consumer and admin configuration (cloned by the registry as `AddCluster` clones the
 host's, so a source cannot write back), a builder, and the topics it found; and notes. A cluster that breaks a rule of the host's own (a key, a
@@ -708,19 +712,19 @@ indexer creates an endpoint - and never reads the internal topic groups (it take
 `ConfigureConsumerBuilders`, `ConfigureProducerBuilders` or `ConfigureAdminClientBuilders`, and never uses a Wolverine group id to consume (D37
 replaces it). Every configuration it touches is byte for byte unchanged afterwards. The tests: `WolverineNeverWritesTests` (a snapshot of every pair
 of every transport, topic and tenant before and after; the builder callbacks replaced by recorders; the configurations handed over are copies),
-`ForbiddenWolverineCallsTests` (the IL scan), and the live `WolverineDiscoveryLiveTests`, which also proves on both brokers that KStudio created no
+`ForbiddenWolverineCallsTests` (the IL scan), and the live `WolverineDiscoveryLiveTests`, which also proves on both brokers that the module created no
 topic, joined no group, committed no offset, and that Wolverine's own group offsets are as they were.
 
-**Fences.** `KStudio.Wolverine` references KStudio.Core and WolverineFx.Kafka only: no studio, no KStudio, no Marten, Weasel or Npgsql
-(`KStudioWolverineFenceTests`, by project file, restore graph, built references and its test project's output folder). JasperFx arrives through
-WolverineFx, and its source generator is dropped from the adapter's compilation. `KStudio.Tests` does not reference the adapter, so the module's own
-output folder stays free of Wolverine (`KStudioFenceTests`).
+**Fences.** `DataStudio.Kafka.Wolverine` references DataStudio.Kafka.Core and WolverineFx.Kafka only: no shell, no module, no Marten, Weasel or Npgsql
+(`KafkaWolverineFenceTests`, by project file, restore graph, built references and its test project's output folder). JasperFx arrives through
+WolverineFx, and its source generator is dropped from the adapter's compilation. `DataStudio.Kafka.Tests` does not reference the adapter, so the module's own
+output folder stays free of Wolverine (`KafkaFenceTests`).
 
 ## D44
 
-**D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio implements it: a document
+**D44 — Links between modules are pure, internal and grant nothing.** `IStudioRouteLinks` (the Marten module implements it: a document
 by type and id, a stream by id or key, in the record's tenant; for a store with a database per tenant, see *From a record to Marten*) and
-`IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio beside `IStudioLinks`, under its rules: no IO, no policy,
+`IStudioRecordSearchLinks` (the Kafka module implements it: "Find in Kafka") live in the shell, beside the module seam, under its rules (`IStudioLinks`, the database modules' own, is in the Postgres module): no IO, no policy,
 every id escaped, and the page a link opens resolves its own scope and asks its own policies again. Neither module names the other, a masked value
 never enters a URL, a value travels in the fragment, and the destination authorizes again. External links are host templates with no credential,
 opened with `noreferrer`.
@@ -729,7 +733,7 @@ opened with `noreferrer`.
 document (`Document(type, store)`) or a stream (`Stream(store)`), it takes the field's values from the record through `CorrelationExtractor` - so a
 masked, cut, absent or over-long value is never an id - and asks the seam: `ToDocument(new StudioLinkScope(store, tenant), type, id)` or `ToStream`.
 The address is the seam's, verbatim; a `null` answer draws the words and a reason ("not a document this studio shows") and no link. Without the
-seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for a hidden
+seam (a host with no Marten module) nothing is drawn. The Marten module answers `null` for a hidden
 document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
 with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
 A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` (the link never names a database, so it never
@@ -748,9 +752,9 @@ Where rows are single-tenanted the page then opens that database with no tenant 
 **A tenant that is not placed is one answer** (undeclared, declared twice, a refused database, an unreadable source): the scope stays on the usual
 database with no tenant, and `StudioState.IsTenantUnplaced(store, db, tenant)` is true for that address. `DocumentDetail` and `StreamDetail` - the
 pages `ToDocument` and `ToStream` open - show their ordinary not-found wording without reading, the same words whatever the cause, so nothing can be
-probed. **Only the address on screen is kept:** `StudioLayout.SyncScopeToUrl` skips its rewrite when the address it parses
+probed. **Only the address on screen is kept:** `DatabaseScopeHost.SyncScopeToUrl` (the Postgres module's scope gate) skips its rewrite when the address it parses
 (`StudioScopeQuery.Read`, which takes the first value of a repeated key, as Blazor's `[SupplyParameterFromQuery]` does) is itself unplaced - rewriting
-it to the scope on screen would drop the tenant - and rewrites every other address as in 1.2.0, so an unplaced address elsewhere in the circuit's
+it to the scope on screen would drop the tenant - and rewrites every other address as it always did, so an unplaced address elsewhere in the circuit's
 history changes nothing for them (Back to an address that names no database, a link to another or a refused store). **A placement still pending
 counts as unplaced:** from the start of `SetScopeAsync` for an address that names a tenant and no database until it is placed, a page that asks is told
 the address is unplaced and reads nothing, and the scope listeners are notified when it settles even if the scope did not move, so the page reads
@@ -801,11 +805,11 @@ same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAs
 **The tests.** `KafkaRecordLinkBuilderTests` (tenant rules, masked key, header and tenant, cut value, the store, the bound), `KafkaRecordLinksTests`
 (the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster
 choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
-`AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.
+`AddKafkaTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_DataStudioKafka`, whose baseline moves by `ExternalLink`.
 
 ## D45
 
-**D45 — KStudio exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs `SearchRecords`) writes the
+**D45 — The Kafka module exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs `SearchRecords`) writes the
 matches a search, a live tail or the record page already holds, as JSON Lines, CSV or one value, from `KafkaMatch` alone, so every mask is the engine's and
 nothing is read again. The export is the page's convenience over data the visitor was already given; its gate is the service's, asked again at the click.
 
@@ -815,7 +819,7 @@ not a second implementation; memory stays inside D41's statement, since the matc
 which is what a support hand-off needs. An export as a scan of its own (whole values, more than `MaxMatches` records, streamed) is a 1.x candidate; so is
 an export from Related records, whose rows come from several topics with per-topic predicates and grants (D42).
 
-**The writer** is `KafkaExportWriter` in `KStudio.Core/Export/` (pure; ENG-PROFILE): JSON Lines without a BOM, CSV with a UTF-8 BOM and `\r\n` (a
+**The writer** is `KafkaExportWriter` in `DataStudio.Kafka.Core/Export/` (pure; ENG-PROFILE): JSON Lines without a BOM, CSV with a UTF-8 BOM and `\r\n` (a
 spreadsheet opens a BOM-less UTF-8 file as the local code page and mangles every non-ASCII character), a cell that starts with `=`, `+`, `-`, `@`, a tab or
 a carriage return prefixed with `'` (OWASP's CSV injection rule; JSON Lines is never altered), whole rows only up to `MaxExportBytes`, and the file name
 `kstudio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}` holding no predicate, key or value.
@@ -834,14 +838,14 @@ The audit carries the source plan's `AuditText`, in which a literal on a redacte
 A record with no timestamp (`WireTimestampType.NotAvailable`) is written with `timestamp` `null` in JSON Lines and an empty cell in CSV, `timestampType`
 `NotAvailable` in both, because the epoch the engine keeps in its place would read as 1970.
 
-**Delivery** is a `DotNetStreamReference` to `martenStudio.download.stream` (PostgresStudio's `studio.js`, additive, beside `download.text`), sent in chunks
+**Delivery** is a `DotNetStreamReference` to `martenStudio.download.stream` (the shell's `studio.js`, additive, beside `download.text`), sent in chunks
 over the circuit's own connection, under the circuit's own authentication, with no new route, no token in a URL and no antiforgery question (D23). The
 alternatives: `download.text` with the content as an interop argument is one JSON-escaped string of up to 32 MiB, a full copy on both sides and the circuit
 blocked while it serializes, right for a snapshot of kilobytes and wrong here; a one-time endpoint would be a new HTTP surface outside the circuit, needing the
-studio's `AuthorizationPolicy` re-applied, a token in history, proxies and logs, a store of pending files with an expiry, and the first data endpoint either
-studio maps (D2, D31).
+the shell's `AuthorizationPolicy` re-applied, a token in history, proxies and logs, a store of pending files with an expiry, and the first data endpoint the
+shell would map (D2, D31).
 
-**`JsonView`'s Download stays off in KStudio** (`AllowDownload="false"` on every `JsonView`; PostgresStudio's `JsonView` is unchanged). Its link is a `data:`
+**`JsonView`'s Download stays off in the Kafka module** (`AllowDownload="false"` on every `JsonView`; the Postgres module's `JsonView` is unchanged). Its link is a `data:`
 URL built at render: the click never reaches the server, so it can be neither gated per use nor refused on a `Production` cluster after the page rendered nor
 audited, and an export must be all three. The bytes are no secret (the page shows the value); the point is the gate and the audit. The record page's
 **Export › Value** is the download. `KafkaExportMenuTests` holds that no `data:` link and no `a[download]` is in what the search and record pages draw.
@@ -869,11 +873,11 @@ says no number. The profile never-grants test (decision 4.7) is `KafkaProfileNev
 returning false or throwing; one ring entry per call; `<redacted>` and never the typed text; the size limit leaves whole rows out and counts them),
 `KafkaExportCapabilityTests` (the flags, the prerequisites, the audit gate, and the sixteen flag combinations against every profile and `ReadOnly`: nothing is
 delivered that the flags did not grant), `KafkaExportMenuTests` (bUnit: the menu, the notices, the record page, Settings, the selector chip, no `data:` link),
-`KafkaProfileAllowanceTests`, and the writer's own `KafkaExportWriterTests`. `PublicApiTest_KStudio` moves by `ExportRecords` and `LiveTail` and nothing else.
+`KafkaProfileAllowanceTests`, and the writer's own `KafkaExportWriterTests`. `PublicApiTest_DataStudioKafka` moves by `ExportRecords` and `LiveTail` and nothing else.
 
 ## D46
 
-**D46 — KStudio's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each partition's end, keeps the newest
+**D46 — The Kafka module's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each partition's end, keeps the newest
 `MaxTailMatches` in a ring, and holds a scan slot and pays the owner's budget while it reads. The first part of this section is the engine's half; *The page* at its
 end is UI-TAIL's: the page, the capability's gate, the audit (9607, 9608, 9609) and the hidden-tab pause.
 
@@ -939,7 +943,7 @@ the slot held and released, the governor within 10 % of the rate, the consumer's
 **The page** (`/kafka/tail`, `KafkaTailPage` and `KafkaTailBody`, under `/kafka` by hard rule 16; rail entry *Live tail*, drawn while `LiveTail` and `SearchRecords` are on and `ReadOnly` is off (the rail is not per cluster, so a `Production`
 profile does not hide it), and a link beside *Search this topic*, which is also left out under a `Production` profile). Its address is `?cluster=&topics=a,b&iso=` with the search text in the fragment (`#q=`), as Search's is (D9):
 it fills the form and **never starts a tail**, so a pasted link holds no slot and spends no allowance. A page that can only say it is off - the capability, `SearchRecords`
-or a `Production` profile - says one neutral sentence ("Live tail is not available here.", or `KafkaStudioText.ProfileForbids`: "This cluster's profile does not
+or a `Production` profile - says one neutral sentence ("Live tail is not available here.", or `KafkaText.ProfileForbids`: "This cluster's profile does not
 allow live tail.") and reads nothing from the cluster; `Cluster settings` names the option and `KafkaClusterBuilder.Profile`.
 
 **A tail is a session of segments.** `KafkaTailSession` is the visitor's one tail from Start to Stop; a segment (`KafkaTailSegment`) is one run of the engine, ended by a
@@ -949,7 +953,7 @@ oldest-first batches in one pass), the exact cursor of the last segment, the sum
 start minus the cursor's next offset), which the page states (`Skipped {n} offsets produced while paused.`) and the session's entry repeats. A pause is told apart by
 `KafkaTailText.PauseOf`: `Paused` (the visitor, or the hidden tab, whichever the page asked for), `Deadline`, `ByteBudget`, `RecordBudget`, `OwnerBudget` - and **`Unavailable`**,
 because a quiet, caught-up tail can end that way after the stall timeout and its cursor is exact, so Resume is offered after it too (`KafkaSearchText.CanContinue` is Search's
-and does not list `Paused`). Every other reason ends the tail. The allowance sentence names the one that ran out (`KafkaStudioText.Allowance(result.SpentBudget)`: the process's,
+and does not list `Paused`). Every other reason ends the tail. The allowance sentence names the one that ran out (`KafkaText.Allowance(result.SpentBudget)`: the process's,
 or the profile's on this cluster). The page shows no "behind by N" figure: the engine's progress carries no high watermark, so a partition that is still reading shows
 `{topic}/{p} behind`, and one that has reported its end counts in the `N live` chip.
 
@@ -974,7 +978,7 @@ the tab* goes on by itself from its cursor; a tail the visitor paused, or any ot
 handlers), and the page's reading loop (`DriveAsync`) goes on to the next segment in the same frame, so a tail that pauses every few minutes for a day does not nest a day of calls.
 
 **The connection.** A tail whose browser vanished would read on and hold its owner's scan slot until Blazor tears the circuit down (`DisconnectedCircuitRetentionPeriod`, three
-minutes by default), refusing that visitor's other tabs. `AddKafkaStudio` therefore adds `KafkaTailCircuitHandler`, a scoped `CircuitHandler` (`TryAddEnumerable`, the only
+minutes by default), refusing that visitor's other tabs. `AddKafka` therefore adds `KafkaTailCircuitHandler`, a scoped `CircuitHandler` (`TryAddEnumerable`, the only
 registration it changes), which hands `OnConnectionDownAsync` and `OnConnectionUpAsync` to `KafkaTailCircuitRegistry.ConnectionChangedAsync(up)` - the circuit's own scoped list of tail
 pages, with no `Circuit` in it, so a test drives it. **The cost to a host is one scoped handler and one scoped registry per circuit, and on a circuit with no tail page both do
 nothing: no log, no exception, no allocation beyond themselves.** A drop pauses the running segment (circuit handlers run on the renderer's dispatcher, so the page's `InvokeAsync`
@@ -1002,19 +1006,19 @@ cluster stopped answering are counted in the session's entry. A failed tick or t
 
 **Export** is the existing menu (`KafkaExportService`, D45) over the *session on screen*: its cluster, topics, audit text and ring, never the newest plan, which a refused or
 failed Start replaces. It is offered when the tail is paused or over, not while it runs. The sample's `SampleTicker` writes a heartbeat to `heartbeats.v1` every two seconds, with the
-deny-listed `x-api-key` header and a JSON value under the topic's `$.customer.email` rule, for the tail to follow; it is the sample's producer, never KStudio's.
+deny-listed `x-api-key` header and a JSON value under the topic's `$.customer.email` rule, for the tail to follow; it is the sample's producer, never the module's.
 
 **The tests** (fast): `KafkaTailServiceTests` (every gate refuses and audits, a refused topic names nothing, a session is one entry however many segments, a resume asks everything
 again, a refused resume is counted, the jump arithmetic, a disposed session writes its entry after its segment), `KafkaTailTextTests`, `KafkaTailPageTests` (the disabled states, a link
 that never starts, newest first, pause and resume without a gap, jump to now, the hidden and shown tab, the line that redraws alone, one entry per session, leaving the page, export
 bound to the session, a dropped connection pausing and a returned one resuming without a gap, a refused resume staying paused, a visitor's pause and a hidden tab left alone,
 a circuit with no tail ignoring both), `KafkaTailCircuitTests` (the handler relays to what registered, the empty registry finishes at once, the registration is added once and
-scoped), `KafkaTailStylesheetTests` and the two log events in `KafkaStudioRefusalLogValuesTests`; in `PostgresStudio.Tests`, `StudioLiveUpdatesVisibilityTests`.
+scoped), `KafkaTailStylesheetTests` and the two log events in `KafkaRefusalLogValuesTests`; in `DataStudio.Postgres.Tests`, `StudioLiveUpdatesVisibilityTests`.
 
 ## D47
 
 **D47 — A profile lowers a cluster's limits, only ever lowers, and is set explicitly.** `KafkaClusterBuilder.Profile(KafkaProfile)` says what kind of
-cluster this is: `Development` (the host's limits, unchanged), `Test` (every per-scan limit capped at KStudio's defaults) or `Production` (lower caps, a slower
+cluster this is: `Development` (the host's limits, unchanged), `Test` (every per-scan limit capped at the Kafka module's defaults) or `Production` (lower caps, a slower
 byte rate and a smaller hourly budget on this cluster, and no export and no live tail even when granted). A cluster with no call has **no profile** and the
 host's limits exactly as before; the profile is never taken from `IHostEnvironment` and never from `Environment(...)`'s free text. ASP.NET Core's
 environment defaults to `Production` when unset and describes the host process, not the cluster (a laptop host reads a production cluster; a production
@@ -1027,7 +1031,7 @@ capped budgets so the result passes `Validate`, and the last row of the table (c
 and the stall timeout) stays the host's: concurrency and the sizes guard the **process's** memory, whatever cluster is read, and the margin and the timeout are
 about correctness, not cost. `MaxExportBytes`, `MaxTailMatches` and `TailPauseAfter` are Test's values for a `Test` cluster; for `Production` the
 export and the tail are forbidden (`KafkaProfileCeilings.ForbidsExport` and `ForbidsTail`, which the services and the engine's `StartTail` ask) and the three
-are capped like Test's, because nothing reads them. The table is in `docs/kstudio.md`, *Profiles*. A test holds the table to the public properties of
+are capped like Test's, because nothing reads them. The table is in `docs/kafka.md`, *Profiles*. A test holds the table to the public properties of
 `KafkaScanLimits` by reflection, so a limit added later fails by name until it has a row, and holds for three host settings (the defaults, every limit at its lowest
 bound, every limit at its highest) that no value rises and the result validates.
 
@@ -1048,9 +1052,9 @@ of those configured, and none under `ReadOnly`) is held where the capabilities l
 
 ## D48
 
-**D48 — The record index is the host's answer to "where is this key?", and it only ever narrows.** `IKafkaRecordIndex` (public, in `KStudio.Core`, registered
+**D48 — The record index is the host's answer to "where is this key?", and it only ever narrows.** `IKafkaRecordIndex` (public, in `DataStudio.Kafka.Core`, registered
 with `KafkaEngineOptions.RecordIndex<TIndex>()`) lets an application that already knows where its records went (a document that stored the partition and offset
-its producer got back) point a key or correlation search at offset ranges. KStudio ships **no implementation, keeps no index, and the sample has none**: K6 refuses
+its producer got back) point a key or correlation search at offset ranges. The Kafka module ships **no implementation, keeps no index, and the sample has none**: K6 refuses
 a sightings index and any persistent index of ours, and a sample index is the one people copy, so it would be that index one copy away. The docs show twelve lines of
 a host implementing it, and the tests use a hand-written `FakeRecordIndex`, as the family uses no mocking library. One index per engine; a second call replaces the
 first. It is made once, on first use, from the root provider with `ActivatorUtilities.CreateInstance<TIndex>` behind a `Lazy` that is `PublicationOnly`, exactly as a
@@ -1090,5 +1094,5 @@ search, so it takes singletons (an `IDocumentStore`), never a session. At most 6
 index and propagates. Event **9679** (Debug, once per cluster per ten minutes) carries the index's type name, the cluster and the exception's **type** (`Timeout` for a
 timeout): never the query, the literal, the message or a hint. The audit gains the narrowing suffix and nothing else: the call reads no record, so it is no entry of its
 own. `IndexNarrowerTests`, `IndexClauseSelectorTests`, `IndexPlanTests` (with a sentinel literal and exception message that no log line may contain),
-`KafkaSearchIndexTextTests` and `KafkaSearchIndexPageTests` hold all of this; `PublicApiTest_KStudioCore` holds the surface (the interface, `RecordIndex<T>()`, and the four
+`KafkaSearchIndexTextTests` and `KafkaSearchIndexPageTests` hold all of this; `PublicApiTest_DataStudioKafkaCore` holds the surface (the interface, `RecordIndex<T>()`, and the four
 types the interface's one method takes and returns).

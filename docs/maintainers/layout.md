@@ -1,7 +1,7 @@
 # Layout
 
 Where each kind of code lives. `AGENTS.md` points here: read it before adding a file, and keep it in step with the
-tree in the same pull request. Moved from `AGENTS.md` on 2026-10-26.
+tree in the same pull request.
 
 `AgentsLayoutTests` parses the block below and fails if it names a directory that does not exist, or
 misses one that does. Keep it in step with the tree.
@@ -15,18 +15,18 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes
   Build.CI.GitHubActions.cs              The four [GitHubActions] attributes every workflow comes from
   Build.Browsers.cs                      The Playwright install target, and Test's dependency on it (D19)
-  Build.Publish.cs                       Pack (the six packages, three of them a preview) + the in-build nuget.org OIDC token exchange (D15)
+  Build.Publish.cs                       Pack (the seven packages, three of them a preview) + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
-  Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
-  Build.Confluent.cs                     --confluent-version: KStudio's floor, latest-tested Confluent.Kafka or an exact one (D36)
+  Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, the Postgres module's latest-Npgsql pass (D30)
+  Build.Confluent.cs                     --confluent-version: the Kafka module's floor, latest-tested Confluent.Kafka or an exact one (D36)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
-src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
-src/DataStudio.Postgres.Diagnostics/          The diagnostics engine, with no ASP.NET Core (0.11-C, issue #29): the health sweep and its
+src/                                     The shipped libraries, and nothing else: the shell, the three modules and the engines
+src/DataStudio.Postgres.Diagnostics/          The diagnostics engine, with no ASP.NET Core: the health sweep and its
                                          checks, the facts readers, the sources, the settings seam and IPostgresDiagnostics.
-                                         References no Marten, no MartenStudio and no web stack (PostgresStudioFenceTests,
-                                         CoreFenceTests); namespaces stay PostgresStudio.*, and the UI reaches its internals
-                                         through InternalsVisibleTo
-src/DataStudio/                          The shell (v2 step 3): the chrome of the studio as a Razor Class Library of its own, in the DataStudio.*
+                                         References no Marten, no Marten module and no web stack (PostgresFenceTests,
+                                         CoreFenceTests); its namespace is DataStudio.Postgres, shared with the Postgres module, which reaches its
+                                         internals through InternalsVisibleTo
+src/DataStudio/                          The shell: the chrome of the studio as a Razor Class Library of its own, in the DataStudio.*
                                          namespaces. It references ASP.NET Core and nothing else - no store, database, tenant, SQL, health, Npgsql,
                                          Marten or Kafka client (ShellFenceTests holds the reference graph) - and every module references it with an
                                          exact pin. Its _Imports.razor names only DataStudio, Microsoft and System
@@ -48,21 +48,21 @@ src/DataStudio/wwwroot/                  static web assets, packed under `_conte
 src/DataStudio/wwwroot/css/              the one stylesheet, studio.css
 src/DataStudio/wwwroot/js/               the studio's browser helpers, studio.js, loaded by the shell (never a
                                          Blazor JS initializer - see StudioDocument.razor)
-src/DataStudio.Postgres/                      The database module's Razor Class Library (0.5, PS-2): routes, scope,
+src/DataStudio.Postgres/                      The Postgres module's Razor Class Library: routes, scope,
                                          authorization, audit, the database browser, Sessions, the Health page, the SQL
                                          console and Relationships. Built on the shell and the diagnostics
-                                         engine; references no Marten and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
+                                         engine; references no Marten and no Marten module (PostgresFenceTests, CoreFenceTests)
 src/DataStudio.Postgres/Components/           the root component and the scope query (the shell's components are in src/DataStudio/Components/)
 src/DataStudio.Postgres/Components/Shared/    small building-block components that name a database type: the SQL views and disclosure, chips, the
                                          refusal and not-authorized notices (the neutral ones are in src/DataStudio/Components/Shared/)
 src/DataStudio.Postgres/Internal/             the diagnostics and shell version guard (the endpoint mapper and its guard are in src/DataStudio/Internal/)
 src/DataStudio.Postgres.Diagnostics/Internal/  Nothing but the engine's SQL builders, in Internal/Sql/ (hard rule 4)
-src/DataStudio.Postgres.Diagnostics/Services/  The scope types, the shared log events (StudioLog, PostgresStudioLog), the log throttle and the
+src/DataStudio.Postgres.Diagnostics/Services/  The scope types, the log events every database module shares (StudioLog, one template each), the log throttle and the
                                          capping of a visitor's value in a log line
 src/DataStudio.Postgres/Services/             state, authorization, the capability guard, the action log and toasts
 
 src/DataStudio.Marten/                        The Marten Razor Class Library: public API, the store-facing services,
-                                         pages and checks, and Internal/; references PostgresStudio
+                                         pages and checks, and Internal/; references the Postgres module
 src/DataStudio.Marten/Components/             The component bridges
 src/DataStudio.Marten/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
 src/DataStudio.Marten/Services/               store registry, scope resolver, tenant discovery, the source provider,
@@ -70,24 +70,24 @@ src/DataStudio.Marten/Services/               store registry, scope resolver, te
 samples/                                 Demo hosts and their demo data; never packed
 samples/DataStudio.Sample.Marten/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/DataStudio.Sample.Marten.Domain/       The demo domain, shared with the integration tests; deliberately
-                                         does NOT reference MartenStudio (D17)
+                                         does NOT reference DataStudio.Marten (D17)
 samples/DataStudio.Sample.Postgres.Data/       The demo data with no Marten in it, shared by both samples and the integration
                                          tests: Quartz.NET's job store (vendored, Apache-2.0), the "legacy" catalog
                                          edge-case schema, studio_sample.app_settings, and the tenant databases with
                                          their directory - all idempotent. References no studio (D17)
-samples/DataStudio.Sample.Kafka/                  The KStudio sample: Marten Studio and KStudio over throwaway Postgres and Kafka (D18)
+samples/DataStudio.Sample.Kafka/                  The Kafka sample: the Marten and Kafka modules over throwaway Postgres and Kafka (D18)
 samples/DataStudio.Sample.Kafka/Kafka/            Its Kafka container, seeder and judge
 samples/DataStudio.Sample.Kafka/Auth/             Its cookie sign-in, copied from the Marten sample
 samples/DataStudio.Sample.Kafka/Wolverine/        Its Wolverine application: the checkout handler, document and startup sender (D-CORR decision 11)
 samples/DataStudio.Sample.Kafka/Properties/       Its launch profile, port 5212
-samples/DataStudio.Sample.Postgres/           The Postgres Studio sample host (D18), no Marten: an admin database and three
+samples/DataStudio.Sample.Postgres/           The Postgres sample host (D18), no Marten: an admin database and three
                                          tenant databases through its own IPostgresDatabaseSource - README snippet regions
 samples/DataStudio.Sample.Postgres/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
 samples/DataStudio.Sample.Postgres/Properties/  launchSettings.json, fixed at http://localhost:5211
-samples/DataStudio.Sample.Postgres.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
+samples/DataStudio.Sample.Postgres.Worker/           The diagnostics worker: a generic host that references
                                          src/DataStudio.Postgres.Diagnostics alone - no ASP.NET Core, no studio - and logs a
                                          summary of every database's findings at start and every Summary:Interval (D18)
-tests/                                   All seven test projects match *.Tests, so one Test run covers them all
+tests/                                   All eight test projects match *.Tests, so one Test run covers them all
 tests/DataStudio.Marten.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/DataStudio.Marten.Tests/Conventions/    Rules too easy to break silently to leave to review
@@ -97,30 +97,30 @@ src/DataStudio.Postgres.Diagnostics/Services/Postgres/  The engine's plain-Postg
                                          NpgsqlDataSources and host database sources, the diagnostics settings and descriptor, and the
                                          seams' implementations (declarations, tables, remedies, locks, statements' words), and
                                          AddPostgresDiagnostics's seam registration
-src/DataStudio.Postgres/Services/Postgres/    PostgresStudio's own: the studio's settings and descriptor, the links out of the browser
+src/DataStudio.Postgres/Services/Postgres/    The Postgres module's own: its settings and descriptor, the links out of the browser
                                          and the Overview's server read
-tests/DataStudio.Postgres.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
-tests/DataStudio.Tests/                       The shell's fast suite (v2 steps 3 and 4): no Docker, no database. It references the DataStudio project and the one module that needs none, DataStudio.Kafka
+tests/DataStudio.Postgres.Tests/              The Postgres module's fast suite: no Docker, and no Marten anywhere in its graph
+tests/DataStudio.Tests/                       The shell's fast suite: no Docker, no database. It references the DataStudio project and the one module that needs none, DataStudio.Kafka
 tests/DataStudio.Tests/Conventions/           ShellFenceTests: the shell's project file, restore graph and built references hold no driver, Marten or Kafka; this output folder holds none of those but the Kafka module
 tests/DataStudio.Tests/Endpoints/             MapDataStudio and the startup guard, and a host with only the Kafka module (its output folder holds no Npgsql and no DataStudio.Postgres*)
 tests/DataStudio.Tests/Registration/          AddDataStudio: the shell's options and validation, its registrations, its live-update log
 tests/DataStudio.Tests/Modules/               The route table's module rules (D34), on pages of the test assembly
 tests/DataStudio.Tests/Verify/                The shell's approved API baseline; never hand-edited (hard rule 7)
-tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
+tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresComponentContext and the core pages' smoke tests, the plan view
                                          and the console's Explain buttons
-tests/DataStudio.Postgres.Tests/Components/Json/  The JSON viewer's parameters a host that is not a Postgres studio sets (KStudio): no download, no
+tests/DataStudio.Postgres.Tests/Components/Json/  The JSON viewer's parameters a host that is not a database module sets (the Kafka module): no download, no
                                          Postgres copy items, and a host's "Copy as search"
 tests/DataStudio.Postgres.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/DataStudio.Postgres.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
 tests/DataStudio.Postgres.Tests/Shell/        Golden files of the prerendered rail, header and anonymous banner of the core pages (the shell's
                                          markup stays byte for byte as it is restructured)
 tests/DataStudio.Postgres.Tests/Sources/      The source provider over DI descriptors and host database sources
-tests/DataStudio.Postgres.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from DataStudio.Marten.Tests)
-tests/DataStudio.Postgres.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
-tests/DataStudio.Postgres.Integration.Tests/  PostgresStudio's live suite: Testcontainers Postgres under a reuse label of its own
+tests/DataStudio.Postgres.Tests/Support/      The Postgres module's own test doubles (the shared ones are linked from DataStudio.Marten.Tests)
+tests/DataStudio.Postgres.Tests/Verify/       The Postgres module's and the engine's approved API baselines; never hand-edited (hard rule 7)
+tests/DataStudio.Postgres.Integration.Tests/  The Postgres module's live suite: Testcontainers Postgres under a reuse label of its own
                                          (never the Marten suite's container) + Playwright. Needs Docker; no Marten
 tests/DataStudio.Postgres.Integration.Tests/Browser/  Playwright over samples/DataStudio.Sample.Postgres on real Kestrel: the
-                                         scenarios, where menus open (1.0), the D19 gate, and the zero-config start
+                                         scenarios, where menus open, the D19 gate, and the zero-config start
 tests/DataStudio.Postgres.Integration.Tests/Database/  Live Postgres: first navigation writes nothing, the D27 gate and its
                                          audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
 tests/DataStudio.Postgres.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
@@ -135,7 +135,7 @@ src/DataStudio.Postgres.Diagnostics/Internal/Sql/  The engine's builders, SqlIde
                                          statements, the catalog's, the read-only guard and session; the blocking chain's
                                          hand-over text (X3); partition bounds and column skew (X4)
 src/DataStudio.Postgres/Internal/Sql/         The shared studio's own builders - the second place (hard rule 4): the SQL console's
-                                         plans and their settings (X1), the facts beside a plan (0.10), hypopg's calls (X2),
+                                         plans and their settings (X1), the facts beside a plan, hypopg's calls (X2),
                                          the browser's rows, Relationships and the console's examples; the same namespace
                                          as the engine's, each assembly exempt in its own folder only
 src/DataStudio.Marten/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
@@ -151,7 +151,7 @@ samples/DataStudio.Sample.Marten/Properties/  launchSettings.json, fixed at http
 tests/DataStudio.Marten.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
 tests/DataStudio.Marten.Tests/Shell/          Golden files of the prerendered chrome of the Marten pages; ShellGolden (Support/) cuts and scrubs
                                          the fragments for all three suites
-tests/DataStudio.Marten.Tests/Links/          MartenStudioRouteLinks, the record search button and the pages' scope from a link - no database
+tests/DataStudio.Marten.Tests/Links/          MartenRouteLinks, the record search button and the pages' scope from a link - no database
 tests/DataStudio.Marten.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
 tests/DataStudio.Marten.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/DataStudio.Marten.Tests/Support/        Test doubles shared by the tiers - never a mocking library
@@ -171,13 +171,13 @@ tests/DataStudio.Marten.Tests/Documents/       Document service unit tests - no 
 tests/DataStudio.Marten.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/DataStudio.Marten/Services/Tenants/        The Tenants overview's service (TenantOverviewService), its models and TenantBoundText:
                                          read-only, statistics only, activity-gated
-src/DataStudio.Marten/Services/Links/          The links a module's page makes into Documents and Streams (D-CORR 7): MartenStudioRouteLinks, by type
+src/DataStudio.Marten/Services/Links/          The links a module's page makes into Documents and Streams (D-CORR 7): MartenRouteLinks, by type
                                          name and id, with a store and a tenant and never a database; pure, reads StoreOptions only
-src/DataStudio.Marten/Services/Find/           Find by id's Marten kinds (1.2-SCOPE-3): the document, stream and natural-key, and event-sequence
+src/DataStudio.Marten/Services/Find/           Find by id's Marten kinds: the document, stream and natural-key, and event-sequence
                                          contributors, each asking the data service of the page its hit opens, and the helper (FindScopes)
                                          that reads the event store's shape once per Find and decides the tenant restriction (FindTenants:
                                          under a store policy, the tenants the header lists, whatever discovery found)
-src/DataStudio.Marten/Services/Shapes/         The shape check's core (1.2-SHAPE), `EventShapeCheckService` among it: sampler limits and cache, the round-trip classifier, the
+src/DataStudio.Marten/Services/Shapes/         The shape check's core, `EventShapeCheckService` among it: sampler limits and cache, the round-trip classifier, the
                                          failure describer, the aggregator and the sentences; the documents' check service
 src/DataStudio.Marten/Components/Shapes/       The shape check's panels and the findings table
 tests/DataStudio.Marten.Tests/Shapes/          The shape check's classifier, sentences, queries, cache and panels - no database
@@ -192,7 +192,7 @@ src/DataStudio.Postgres.Diagnostics/Services/Settings/  The engine's settings se
 src/DataStudio.Postgres/Services/Settings/     The studio's settings seam (it extends the engine's), descriptor, links, registration
                                          marker, option validation and core registration (PS-1a; moved whole in PS-2)
 src/DataStudio.Postgres.Diagnostics/Services/Sources/  The source seam - databases, the source provider, the declarations, the table and lock seams
-src/DataStudio.Postgres/Services/Sources/      The shared resolver and the seams MartenStudio implements for a UI (PS-1a-1d; moved
+src/DataStudio.Postgres/Services/Sources/      The shared resolver and the seams the Marten module implements for a UI (PS-1a-1d; moved
                                          whole in PS-2)
 src/DataStudio.Marten/Components/Pages/Projections/  The projections screen and its parts
 samples/DataStudio.Sample.Marten.Domain/Events/ The demo events and the three projections
@@ -216,12 +216,12 @@ src/DataStudio.Marten/Components/Pages/Configuration/  The configuration dump sc
 tests/DataStudio.Marten.Tests/Schema/          Index advice, the tokenizer, the schema page - no database
 tests/DataStudio.Marten.Tests/Configuration/   The describer and the configuration page - no database
 tests/DataStudio.Marten.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
-src/DataStudio.Marten/Services/Connection/     Database > Connection's Marten half (1.1, NP4): the contributor, the command-timeout
+src/DataStudio.Marten/Services/Connection/     Database > Connection's Marten half: the contributor, the command-timeout
                                          resolution, the data-source origin and the section's rows
 tests/DataStudio.Marten.Tests/Connection/      The Marten connection section, its hint notes, the redaction sentinel and the page - no database
 tests/DataStudio.Marten.Integration.Tests/Connection/  Live Postgres: UseNpgsqlDataSource() versus Connection(string), and the hosted
                                          daemon's connections
-src/DataStudio.Marten/Components/Shared/       MartenStudio's building blocks: RecordSearchLinkButton (D-CORR 8), the module's search from a record screen
+src/DataStudio.Marten/Components/Shared/       The Marten module's building blocks: RecordSearchLinkButton (D-CORR 8), the module's search from a record screen
 src/DataStudio.Marten/Components/Pages/Documents/  The documents browser: collections rail, list, detail
 src/DataStudio.Marten/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
 src/DataStudio.Postgres/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
@@ -241,9 +241,10 @@ docs/maintainers/                        Maintainer reference moved out of AGENT
                                          budget entries (package-budget-changes.md), the evidence and history
                                          behind the rules (decision-notes.md) and the full texts of the rules
                                          and decisions AGENTS.md summarises, by area: hard-rules.md,
-                                         architecture.md, sql-and-catalog.md, marten.md, authorization.md,
-                                         health-engine.md, ui.md, plan-analyzer.md, testing.md and
-                                         build-and-release.md; never packed
+                                         architecture.md, sql-and-catalog.md, marten.md, kafka.md,
+                                         authorization.md, health-engine.md, ui.md, plan-analyzer.md,
+                                         testing.md and build-and-release.md, and v2-public-api.md, the
+                                         record of the 2.0 renames; never packed
 src/DataStudio.Postgres/Services/Relationships/    The relationship graph service, its DTOs and the SVG layout
 src/DataStudio.Marten/Services/Relationships/      The Marten half of the graph: what StoreOptions says of the document types
 src/DataStudio.Postgres/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
@@ -268,7 +269,7 @@ src/DataStudio.Postgres.Diagnostics/Services/Health/Checks/  One file per shared
                                          check is added by adding its file here, nothing else
 src/DataStudio.Postgres/Services/Health/Checks/  The three checks that judge the studio's own exposure (K05-K07): they read the
                                          studio's settings and mapping, so they are run only where a studio is registered
-src/DataStudio.Marten/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext), and E06's
+src/DataStudio.Marten/Services/Health/         What the Marten module's checks read of the store (MartenHealthContext), and E06's
                                          on-demand action
 src/DataStudio.Marten/Services/Health/Checks/  One file per Marten-only health check - the store, the event store, the
                                          daemon - run against Marten stores only; added the same way
@@ -304,7 +305,7 @@ src/DataStudio.Postgres/Services/Storage/      The Storage page's per-visitor vi
 src/DataStudio.Postgres/Components/Pages/Storage/  The Storage page: the tiles and the largest tables
 tests/DataStudio.Postgres.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
                                          Storage builder's D27 fence - no database
-tests/DataStudio.Marten.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
+tests/DataStudio.Marten.Tests/Storage/         bUnit: the Storage page and its per-visitor view in the Marten module's words
 tests/DataStudio.Postgres.Integration.Tests/Storage/  Live Postgres on 15-19: the Storage facts, behind a held lock, no DDL,
                                          and the statistics window across a real crash
 src/DataStudio.Postgres.Diagnostics/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
@@ -326,7 +327,7 @@ tests/DataStudio.Postgres.Integration.Tests/Server/  Live S04-S10 and K05-K07: e
 src/DataStudio.Postgres.Diagnostics/Services/Aurora/  Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
                                          profile and its samples, the parameter reference and the host's capacity reader
 src/DataStudio.Postgres/Services/Aurora/       The Server page Aurora section's per-visitor view
-src/DataStudio.Postgres/Services/Connection/   Database > Connection's per-visitor half (1.1, NP3): the service and its two gates, the page
+src/DataStudio.Postgres/Services/Connection/   Database > Connection's per-visitor half: the service and its two gates, the page
                                          builder, the facts source (the sweep's shared read, or one per HealthInterval), the links and
                                          the internal IConnectionInsightContributor seam
 tests/DataStudio.Postgres.Tests/Aurora/        By-name mapping of Aurora's functions, the wait windows, commit latency, the capacity
@@ -335,8 +336,8 @@ tests/DataStudio.Postgres.Integration.Tests/Aurora/  Live on VERS's Aurora shim:
                                          failover, the not-applicable checks, C03's remedy and the spoof-proof markers
 src/DataStudio.Postgres.Diagnostics/Services/Statements/  The Statements page's facts (the statement sweep's own read and history), the plain classifier,
                                          the page's route and the words for pg_stat_statements' state (W5-Q1)
-src/DataStudio.Postgres/Services/Find/         Find by id (1.2-SCOPE-3): the typed value's parser (FindQuery), the seam (IFindContributor), the
-                                         circuit's service (FindService: one Find at a time, a 10 s budget) and Postgres Studio's own
+src/DataStudio.Postgres/Services/Find/         Find by id: the typed value's parser (FindQuery), the seam (IFindContributor), the
+                                         circuit's service (FindService: one Find at a time, a 10 s budget) and the Postgres module's own
                                          kinds, tables and views and statement queryids
 src/DataStudio.Postgres/Services/Statements/   The Statements page's per-visitor view behind the activity gate, and the drill-in's planner
 src/DataStudio.Postgres/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group,
@@ -347,14 +348,14 @@ tests/DataStudio.Postgres.Tests/Statements/    The window and share arithmetic, 
                                          - no database
 tests/DataStudio.Postgres.Tests/Statements/PlanCorpus/  The plan analyzer's corpus (X3, issue #28): one EXPLAIN (FORMAT JSON) fixture
                                          for each of P09 to P20 firing and quiet, and the shapes the views are tested on
-tests/DataStudio.Marten.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
+tests/DataStudio.Marten.Tests/Statements/      The Marten module's classifier over Marten's own recorded SQL, and its metered connections
 tests/DataStudio.Postgres.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
                                          matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes, and
                                          the drill-in's plan on 14, 16 and 18
 tests/DataStudio.Postgres.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
                                          sequence headroom and the lint statements' D27 shape - no database
 src/DataStudio.Postgres.Diagnostics/Diagnostics/  The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
-                                         findings, checks and sections - namespace PostgresStudio, like the registration types
+                                         findings, checks and sections - namespace DataStudio.Postgres, like the registration types
 src/DataStudio.Postgres.Diagnostics/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builder, read limiter and JSON writer (W5-API)
 src/DataStudio.Postgres/Services/Diagnostics/  The Health page's visitor download builder, its Markdown report and the snapshot
                                          compare, which never reach the API (W5-API)
@@ -366,21 +367,21 @@ tests/DataStudio.Postgres.Integration.Tests/Diagnostics/  Live: G9 by applicatio
                                          the statements section on a pg_stat_statements server
 tests/DataStudio.Marten.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
                                          IncludeActivity) and a master-table tenancy that lists nothing
-src/DataStudio.Postgres.Diagnostics/Services/ConnectionHistory/  The opt-in connection history (1.0, issue #43): the sampler and its
+src/DataStudio.Postgres.Diagnostics/Services/ConnectionHistory/  The opt-in connection history: the sampler and its
                                          kept connection per server, the in-memory store and the Holders page's view of a history;
                                          the public options, store seam and sample are at the project's root, beside the registration
 tests/DataStudio.Postgres.Tests/ConnectionHistory/  A sample from a holders reading, the server a connection string names, the in-memory
                                          store's window, the page's view and the registration - no database
-src/DataStudio.Postgres.Diagnostics/Services/Connection/  The connection-insights engine (1.1, NP1): the catalogue of Npgsql keywords, the
+src/DataStudio.Postgres.Diagnostics/Services/Connection/  The connection-insights engine: the catalogue of Npgsql keywords, the
                                          reader that redacts a data source's connection string, the pooler signs, the hints and the
                                          facts the connection checks read (what the server saw of the studio's connection, the
                                          platform, the pools that share the data source)
 tests/DataStudio.Postgres.Tests/Connection/  The catalogue against the loaded Npgsql, the reader's provenance and redaction, every hint
                                          each way, the pooler signs and the sentinel test - no database
-src/DataStudio.Kafka.Core/                        KStudio's engine (D36): catalog, window resolution, scan engine, predicates,
+src/DataStudio.Kafka.Core/                        The Kafka engine (D36): catalog, window resolution, scan engine, predicates,
                                          decoders, governor and redaction, over Confluent.Kafka behind the internal wire
-                                         seam. No ASP.NET Core, no studio, no Npgsql (KStudioCoreFenceTests); packed as a preview (K8)
-src/DataStudio.Kafka/                             The Kafka module's Razor Class Library (D34, D35): AddKafkaStudio(), its options, capabilities
+                                         seam. No ASP.NET Core, no shell, no Npgsql (KafkaCoreFenceTests); packed as a preview (K8)
+src/DataStudio.Kafka/                             The Kafka module's Razor Class Library (D34, D35): AddKafka(), its options, capabilities
                                          and resource; no Marten (hard rule 16), no static web assets; packed as a preview (K8)
 src/DataStudio.Kafka/Components/                  The module's components, under _Imports.razor
 src/DataStudio.Kafka/Components/Layout/           The cluster selector the shell draws in its header on Kafka pages
@@ -389,7 +390,7 @@ src/DataStudio.Kafka/Components/Shared/           The page frame (cluster gate, 
 src/DataStudio.Kafka/Internal/                    The version guard and the startup guard
 src/DataStudio.Kafka/Services/                    The module, the cluster scope, authorization, the capability guard, the action log and its gate,
                                          the log events
-tests/DataStudio.Kafka.Tests/                     KStudio's fast suite: the engine against the hand-written fake broker, the fences
+tests/DataStudio.Kafka.Tests/                     The Kafka module's fast suite, a Kafka-only host: the engine against the hand-written fake broker, the fences
                                          and the public API baseline. No Docker
 src/DataStudio.Kafka.Core/Wire/                   The wire seam (D36): IKafkaWire, the reader, the error values and the neutral records; no
                                          Confluent type crosses it
@@ -417,15 +418,15 @@ src/DataStudio.Kafka.Core/Export/                 The export writer (D45): rows 
                                          name; pure
 src/DataStudio.Kafka.Core/Index/                  The record-index seam (D48): the host's interface, its query and hints, the narrower and the
                                          planner that asks it
-tests/DataStudio.Kafka.Tests/Conventions/         KStudio's fences and convention scans
-tests/DataStudio.Kafka.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
+tests/DataStudio.Kafka.Tests/Conventions/         The Kafka fences and convention scans
+tests/DataStudio.Kafka.Tests/Registration/        AddKafka, the version guard, the startup guard
 tests/DataStudio.Kafka.Tests/Endpoints/           Mounting, endpoint authorization and the shell's front page, on a Kafka-only host and beside a test-defined module
 tests/DataStudio.Kafka.Tests/Shell/               Golden files of the prerendered chrome of a Kafka-only host (no database module is in this suite's output)
 tests/DataStudio.Kafka.Tests/Components/          bUnit: the layout on a Kafka page, the rail, the chip, the frame, Activity
 tests/DataStudio.Kafka.Tests/Services/            Authorization, the capability guard, the cluster scope, the audit gate and action log
-tests/DataStudio.Postgres.Tests/Modules/      The module seam (D34): the composed descriptor, root-keeping routes and a module's audit entries, with fake modules
-tests/DataStudio.Marten.Tests/Settings/       The module seam over Marten Studio's descriptor, with a fake module
-tests/DataStudio.Kafka.Tests/Verify/              DataStudio.Kafka.Core's public API baseline
+tests/DataStudio.Postgres.Tests/Modules/      The module seam (D34): the composed descriptor, a module's page roots and its audit entries, with fake modules
+tests/DataStudio.Marten.Tests/Settings/       The module seam over the Marten module's descriptor, with a fake module
+tests/DataStudio.Kafka.Tests/Verify/              The public API baselines of DataStudio.Kafka and DataStudio.Kafka.Core, and the words baseline
 tests/DataStudio.Kafka.Tests/Support/             Test helpers the fast suite shares
 tests/DataStudio.Kafka.Tests/Support/FakeKafka/   The hand-written fake broker (D36): topics as logs, transactions, configs, groups and an ACL
                                          table, with a wire and a scan reader over it
@@ -445,7 +446,7 @@ tests/DataStudio.Kafka.Tests/Scanning/            The scan engine on the fake: e
 tests/DataStudio.Kafka.Tests/Export/              Export writer, redaction and file name tests (D45)
 tests/DataStudio.Kafka.Tests/Index/               Record-index narrowing, clause choice and planning tests (D48)
 tests/DataStudio.Kafka.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan
-tests/DataStudio.Kafka.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
+tests/DataStudio.Kafka.Integration.Tests/         The Kafka module's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
                                          Testcontainers.Kafka; needs Docker
 tests/DataStudio.Kafka.Integration.Tests/Support/  The broker fixtures, one per image, the live contract cluster and the harness tests
 tests/DataStudio.Kafka.Integration.Tests/Wire/    WireContract on real brokers
@@ -463,7 +464,7 @@ tests/DataStudio.Kafka.Integration.Tests/Sample/  The sample host, started once,
 tests/DataStudio.Kafka.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 src/DataStudio.Kafka.Wolverine/                   DataStudio.Kafka.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka
                                          clusters and topics by reading its built configuration and nothing else. References DataStudio.Kafka.Core and
-                                         WolverineFx.Kafka only (KStudioWolverineFenceTests); packed as a preview (K8)
+                                         WolverineFx.Kafka only (KafkaWolverineFenceTests); packed as a preview (K8)
 src/DataStudio.Kafka.Wolverine/Internal/          The cluster source DataStudio.Kafka.Core runs, the topic reader, the tenant probe (the only reflection) and the version guard
 tests/DataStudio.Kafka.Wolverine.Tests/           The adapter's fast suite (D16): no Docker and no Wolverine host. Its output folder holds no studio
 tests/DataStudio.Kafka.Wolverine.Tests/Conventions/ The IL scan of what the adapter may call, the fences and the version guard
