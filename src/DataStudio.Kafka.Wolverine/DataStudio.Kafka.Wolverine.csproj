@@ -13,8 +13,8 @@
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin;wolverine</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Product>KStudio</Product>
-    <Description>DataStudio.Kafka.Wolverine lists the Kafka clusters and topics of a Wolverine application in KStudio, by reading its configuration and nothing else. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+    <Product>Data Studio</Product>
+    <Description>DataStudio.Kafka.Wolverine lists the Kafka clusters and topics of a Wolverine application in the Kafka pages of Data Studio, by reading its configuration and nothing else. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
     <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props, as DataStudio.Kafka.Core does. -->
     <DataStudioKafkaCorePinsExtensions>true</DataStudioKafkaCorePinsExtensions>
   </PropertyGroup>

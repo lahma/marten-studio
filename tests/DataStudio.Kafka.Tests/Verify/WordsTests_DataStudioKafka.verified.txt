@@ -1,0 +1,557 @@
+[AuditEventIds]
+9600-9609
+
+[CapabilitiesGroup]
+reads
+
+[CapabilityForbiddenByProfile]
+forbidden by the profile
+
+[ClusterNotAuthorized]
+You are not authorized to view this cluster. Pick another one from the cluster list above.
+
+[CompareHeading]
+Compare
+
+[ConsumerGroupsHint]
+Consumer groups are declared for this cluster with KafkaClusterBuilder.ConsumerGroup("…"), in AddCluster or in the cluster callback of UseWolverineKafka; a topic's page shows their lag.
+
+[CopyLiteralTooLong]
+Not copied as a predicate: the value is longer than the 1,000 characters a search literal may have.
+
+[CouldNotRefresh]
+Could not refresh: showing what was last read. The next refresh will try again.
+
+[DiscoveredLead]
+Read from the application's Wolverine configuration when Data Studio first needed it. They describe how the application uses the topic, not what it holds.
+
+[DiscoveryLead]
+Data Studio read the application's configuration once, and started, connected and wrote nothing. Discovery adds no redaction: declare rules for every topic that carries personal data.
+
+[DiscoveryNotesHeading]
+Not listed
+
+[DuplicatesComparedAsShown]
+Compared as shown: a masked part counts as equal to any other mask.
+
+[ExportAbandoned]
+The export ended before the browser confirmed the file.
+
+[ExportAction]
+ExportRecords
+
+[ExportFailed]
+The export failed. The application's log has the reason.
+
+[ExportGrantChanged]
+Your access changed since these records were read. Search again.
+
+[ExportNotDelivered]
+The file did not reach the browser.
+
+[ExportNothing]
+There are no records to save.
+
+[ExportRecordsNotFromTopics]
+The records do not belong to these topics.
+
+[ExportValueFromOneRecord]
+A value is saved from one record.
+
+[ExportingRecords]
+Exporting records
+
+[ExportsBusy]
+Two exports are being saved; try again in a moment.
+
+[ExposedSentence]
+The Kafka pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, and whatever its capabilities read.
+
+[FindInKafka]
+Find in Kafka
+
+[GrantChanged]
+Your access changed since this search was planned. Search again.
+
+[KcatBootstrapVariable]
+"$BOOTSTRAP"
+
+[KcatCredentialsHint]
+# add your own credentials (-X sasl.username=… -X sasl.password=…)
+
+[Key]
+kafka
+
+[LinksTenantHidden]
+No links to Marten records: this record's tenant-id is redacted or cut, and a link would carry it.
+
+[LiveTailAction]
+Live tail
+
+[NeedsConfirmation]
+This search needs your confirmation first.
+
+[NoConsumerGroups]
+No consumer groups are declared for this cluster.
+
+[NoGroupReadsTopic]
+No consumer group of this application reads this topic.
+
+[NoProfileWarning]
+This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) for this cluster to cap them.
+
+[NoRecordAtThisOffset]
+no record at this offset
+
+[NotConfirmed]
+not confirmed
+
+[OpenIn]
+Open in
+
+[PredicateInvalid]
+The search text has errors; see above.
+
+[PredicateTooLong]
+The search text is longer than 4,096 characters.
+
+[ProductName]
+Kafka
+
+[ProfileHint]
+The host sets a cluster's profile with KafkaClusterBuilder.Profile, in AddCluster or in the cluster callback of UseWolverineKafka. Production forbids export and live tail on that cluster even when they are granted.
+
+[ReadFailed]
+Could not read from the cluster. The application's log has the reason.
+
+[RecordExportAuditText]
+(none: the record page)
+
+[RecordLinkInvalid]
+This record link is not valid.
+
+[RefusedEntry]
+Refused by the cluster or topic policy.
+
+[RelatedChooseTopic]
+Choose at least one topic to search.
+
+[RelatedLead]
+Searches the declared topics you may read on this cluster for records that share a correlation value with this one. Only values this page already shows you are used: a field that is redacted, cut or absent is never a key.
+
+[RelatedLinkInvalid]
+This link names no record or value to look for.
+
+[RelatedNoKeys]
+This record has no correlation value Data Studio can use: its correlation fields are absent, redacted or cut.
+
+[RelatedNothingReason]
+no topic had a field to compare
+
+[RelatedNothingToSearch]
+No topic has a field to compare for these values, so there is nothing to search.
+
+[RelatedScope]
+the declared topics you may read on this cluster
+
+[RelatedValueTooLong]
+The value this link names is longer than the 1,000 characters a search can hold.
+
+[RequestRefused]
+This request was refused by the cluster or topic policy.
+
+[SearchAllPartitions]
+Search all partitions
+
+[SearchFailed]
+The search failed. The application's log has the reason.
+
+[SearchNamesRefusedTopic]
+This search names a topic that is not available to you.
+
+[SearchSyntaxNeedsReadPayloads]
+value and $.json.paths are not available here.
+
+[SearchSyntaxValues]
+Values: value (the text of a value), and $.json.paths into a JSON value or a CloudEvent's data: $.a.b, $.a[0], $.a[*].b; with = in ^= ~ and, on numbers, < <= > >=.
+
+[SearchTopicCount]
+A search reads 1 to 20 topics.
+
+[SearchTopicInvalid]
+A topic name in this search is not valid.
+
+[SearchValuesRefusedTopic]
+This search reads record values, and one of its topics does not allow you to read them.
+
+[SettingsLead]
+The settings this application handed Data Studio for this cluster, one by one. A secret shows only whether it is set; a path is shown and the file is never read; a setting Data Studio does not know is listed with its value withheld.
+
+[TailAction]
+LiveTail
+
+[TailFailed]
+The live tail failed. The application's log has the reason.
+
+[TailGrantChanged]
+Your access changed since this tail started. Start a new tail.
+
+[TopicMissing]
+No topic was named. Open one from the Topics page.
+
+[TopicNotListed]
+Not listed: it does not exist, or this application's credentials cannot describe it
+
+[Trademark]
+Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.
+
+[ValueCloudEventData]
+The event's data:
+
+[ValueCutOnRecordPage]
+Values above the size limit for reading a value are not shown whole.
+
+[ValueCutOpenRecordPage]
+Open the record page to read it whole.
+
+[ValueEmpty]
+Empty: the value has 0 bytes.
+
+[ValueNotAvailable]
+The value of this record is not available to you.
+
+[ValueNotReadBySearch]
+This search could not read values on every topic it named. Open the record page to read this record's value.
+
+[ValueTombstone]
+Tombstone: a null value, which deletes this key on a compacted topic.
+
+[UncommittedHelp]
+Includes uncommitted records: a record may belong to a transaction that is later aborted
+
+[Allowance(null)]
+your hourly allowance
+
+[Allowance(KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+your hourly allowance of 10 MiB
+
+[Allowance(KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+your hourly allowance on this cluster of 1 MiB
+
+[CapabilityNotAvailable(SearchRecords)]
+Searching records is not available here.
+
+[CapabilityNotAvailable(ReadPayloads)]
+Reading values is not available here.
+
+[CapabilityNotAvailable(ExportRecords)]
+Exporting records is not available here.
+
+[CapabilityNotAvailable(LiveTail)]
+Live tail is not available here.
+
+[CapabilityNotAvailable("sample")]
+sample is not available here.
+
+[CapabilityWithoutPolicy("sample", "sample")]
+Data Studio has sample enabled and no policy decides who may use them: every visitor admitted to the studio could read the records of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each capability use, once per topic), or KafkaOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the capabilities off; sample = true turns them all off.
+
+[ClusterAllowance(1234, 1234, Development)]
+1.2 KiB of this cluster's 1.2 KiB an hour left (Development profile)
+
+[ClusterAllowance(1234, 1234, Test)]
+1.2 KiB of this cluster's 1.2 KiB an hour left (Test profile)
+
+[ClusterAllowance(1234, 1234, Production)]
+1.2 KiB of this cluster's 1.2 KiB an hour left (Production profile)
+
+[ClusterOptionText("sample", ["alpha", "beta"])]
+sample (same servers as alpha, beta)
+
+[ContinuedAfter(1234)]
+Continued after offsets read by the previous search (1,234 records).
+
+[ContinuedShowing(1234, 1234, false)]
+Showing matches 1,235-2,468 of this search; the earlier 1,234 matches were cleared from the page.
+
+[ContinuedShowing(1234, 1234, true)]
+Showing matches 1,235-2,468 of this search; the earlier 1,234 matches were cleared from the page. Export before Continue to keep them.
+
+[DiscoveredHeading("sample")]
+Discovered from sample
+
+[DiscoveredRole(Listener)]
+Listener
+
+[DiscoveredRole(Sender)]
+Sender
+
+[DiscoveredRole(ListenerAndSender)]
+Listener and sender
+
+[DiscoveredRole(DeadLetter)]
+Dead letters
+
+[DiscoveryHeading("sample")]
+Discovered from sample
+
+[DiscoveryListed("sample")]
+This cluster was listed from the application's sample configuration.
+
+[DuplicatesHeading(3)]
+Possible duplicates: 3 groups
+
+[DuplicatesScope(3)]
+Compared among the 3 matches on this page. A copy outside these results, or in matches an earlier Continue cleared, is not seen.
+
+[ExportAsShown(3)]
+3 records, as shown: masked parts stay masked
+
+[ExportLimited(3, 3, 1234)]
+Saved 3 of 3 records: the file reached the size limit for an export (1.2 KiB).
+
+[ExportMessage(3, 1234, "sample", false, 3, Search, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; 3 left out at the size limit; from a search that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportMessage(3, 1234, "sample", false, 3, Tail, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; 3 left out at the size limit; from a live tail that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportMessage(3, 1234, "sample", false, 3, Record, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; 3 left out at the size limit; from a record that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportMessage(3, 1234, "sample", true, 3, Search, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; values included; 3 left out at the size limit; from a search that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportMessage(3, 1234, "sample", true, 3, Tail, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; values included; 3 left out at the size limit; from a live tail that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportMessage(3, 1234, "sample", true, 3, Record, 1234, 1234, "sample")]
+3 records (1.2 KiB) saved as sample; values included; 3 left out at the size limit; from a record that read 1,234 records and 1.2 KiB; predicate: sample
+
+[ExportSaved("sample")]
+Saved sample.
+
+[ExportTarget(Search, ["alpha", "beta"], null, null, "sample")]
+export of 2 topics (search)
+
+[ExportTarget(Search, ["alpha", "beta"], null, 11/02/2026 06:00:00 +00:00, "sample")]
+export of 2 topics (search)
+
+[ExportTarget(Search, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, null, "sample")]
+export of 2 topics (search)
+
+[ExportTarget(Search, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, 11/02/2026 06:00:00 +00:00, "sample")]
+export of 2 topics (search 2026-11-02 06:00Z – 06:00Z)
+
+[ExportTarget(Tail, ["alpha", "beta"], null, null, "sample")]
+export of 2 topics (live tail)
+
+[ExportTarget(Tail, ["alpha", "beta"], null, 11/02/2026 06:00:00 +00:00, "sample")]
+export of 2 topics (live tail)
+
+[ExportTarget(Tail, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, null, "sample")]
+export of 2 topics (live tail)
+
+[ExportTarget(Tail, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, 11/02/2026 06:00:00 +00:00, "sample")]
+export of 2 topics (live tail)
+
+[ExportTarget(Record, ["alpha", "beta"], null, null, "sample")]
+export of sample
+
+[ExportTarget(Record, ["alpha", "beta"], null, 11/02/2026 06:00:00 +00:00, "sample")]
+export of sample
+
+[ExportTarget(Record, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, null, "sample")]
+export of sample
+
+[ExportTarget(Record, ["alpha", "beta"], 11/02/2026 06:00:00 +00:00, 11/02/2026 06:00:00 +00:00, "sample")]
+export of sample
+
+[GroupsWithoutOffsets(["alpha", "beta"])]
+Groups with no committed offset on this topic: alpha, beta
+
+[LinkTopicsDropped(3)]
+This link named 3 topic(s) you cannot search here; the search below leaves them out.
+
+[Masked("sample")]
+••• (redacted by sample)
+
+[OpenTransaction(3)]
+An open transaction holds offsets back: the last stable offset is below the high watermark on 3 partitions.
+
+[PredicateDidNotParse(3)]
+(a predicate that did not parse, 3 characters)
+
+[PredicateDidNotRun([PredicateError { Start = 0, Length = 3, Message = an error message, Kind = Invalid, Shown = Position 1: an error message, AuditPhrase = invalid search text }])]
+position 1, invalid search text
+
+[ProfileChipTitle(Development)]
+This cluster's profile is Development: it caps nothing; the limits are the ones the host set (Settings shows them).
+
+[ProfileChipTitle(Test)]
+This cluster's profile is Test: it caps each scan at Data Studio's default limits (Settings shows them).
+
+[ProfileChipTitle(Production)]
+This cluster's profile is Production: it caps scans, the byte rate and the hourly allowance, and turns export and live tail off (Settings shows them).
+
+[ProfileForbids("sample", KafkaClusterEntry { Key = primary, TenantId = , DisplayName = Primary, Environment = staging, Profile = Production, Cluster = primary, SameServersAs = System.String[], CanBeLeftOut = False, Label = Primary })]
+This cluster's profile does not allow sample.
+
+[ProfileSummary(null, DataStudio.Kafka.KafkaScanLimits)]
+None: the host's limits.
+
+[ProfileSummary(Development, DataStudio.Kafka.KafkaScanLimits)]
+Development: the host's limits.
+
+[ProfileSummary(Test, DataStudio.Kafka.KafkaScanLimits)]
+Test: scans capped at 256 MiB, 5,000,000 records and 2 minutes, 10 MiB/s and 2 GiB an hour per visitor on this cluster.
+
+[ProfileSummary(Production, DataStudio.Kafka.KafkaScanLimits)]
+Production: scans capped at 256 MiB, 5,000,000 records and 2 minutes, 10 MiB/s and 2 GiB an hour per visitor on this cluster; export and live tail are off.
+
+[Refusal(ProcessBusy, DataStudio.Kafka.KafkaScanLimits)]
+Two searches or live tails are already running in this application. Try again when one has finished.
+
+[Refusal(OwnerBusy, DataStudio.Kafka.KafkaScanLimits)]
+Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.
+
+[Refusal(OwnerBudgetSpent, DataStudio.Kafka.KafkaScanLimits)]
+You have read your hourly allowance. It frees up as the hour rolls on.
+
+[Refusal(NeedsConfirmation, DataStudio.Kafka.KafkaScanLimits)]
+This search needs your confirmation first.
+
+[Refusal(PredicateInvalid, DataStudio.Kafka.KafkaScanLimits)]
+The search text has errors; see above.
+
+[Refusal(ShuttingDown, DataStudio.Kafka.KafkaScanLimits)]
+The application is shutting down.
+
+[Refusal(ProfileForbids, DataStudio.Kafka.KafkaScanLimits)]
+This cluster's profile does not allow this.
+
+[Refusal(ProcessBusy, null)]
+Two searches or live tails are already running in this application. Try again when one has finished.
+
+[Refusal(ProcessBusy, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+Two searches or live tails are already running in this application. Try again when one has finished.
+
+[Refusal(ProcessBusy, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+Two searches or live tails are already running in this application. Try again when one has finished.
+
+[Refusal(OwnerBusy, null)]
+Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.
+
+[Refusal(OwnerBusy, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.
+
+[Refusal(OwnerBusy, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.
+
+[Refusal(OwnerBudgetSpent, null)]
+You have read your hourly allowance. It frees up as the hour rolls on.
+
+[Refusal(OwnerBudgetSpent, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+You have read your hourly allowance of 10 MiB. It frees up as the hour rolls on.
+
+[Refusal(OwnerBudgetSpent, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+You have read your hourly allowance on this cluster of 1 MiB. It frees up as the hour rolls on.
+
+[Refusal(NeedsConfirmation, null)]
+This search needs your confirmation first.
+
+[Refusal(NeedsConfirmation, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+This search needs your confirmation first.
+
+[Refusal(NeedsConfirmation, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+This search needs your confirmation first.
+
+[Refusal(PredicateInvalid, null)]
+The search text has errors; see above.
+
+[Refusal(PredicateInvalid, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+The search text has errors; see above.
+
+[Refusal(PredicateInvalid, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+The search text has errors; see above.
+
+[Refusal(ShuttingDown, null)]
+The application is shutting down.
+
+[Refusal(ShuttingDown, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+The application is shutting down.
+
+[Refusal(ShuttingDown, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+The application is shutting down.
+
+[Refusal(ProfileForbids, null)]
+This cluster's profile does not allow this.
+
+[Refusal(ProfileForbids, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
+This cluster's profile does not allow this.
+
+[Refusal(ProfileForbids, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
+This cluster's profile does not allow this.
+
+[RelatedMoreTopics(3)]
+3 more declared topics were not searched; choose the topics to search.
+
+[RelatedNoSeedTopic("sample")]
+No declared topic you may read on this cluster has a field for this sample.
+
+[RelatedNotReadable("sample")]
+not readable: sample
+
+[RelatedNothingToCompare(["alpha", "beta"])]
+Nothing to compare on this topic: alpha beta
+
+[RelatedTarget(KafkaRelatedSubject { AnchorTopic = orders.v1, AnchorPartition = 0, AnchorOffset = 12, SeedLabel = order id, SeedStore = , IsSeed = True }, 3, 11/02/2026 06:00:00 +00:00, 11/02/2026 06:00:00 +00:00)]
+records related to a order id value, 3 topics, 2026-11-02 06:00Z – 2026-11-02 06:00Z
+
+[SameServersLine(["alpha", "beta"], false)]
+Same bootstrap servers as alpha, beta: probably one cluster registered twice. Declare it once.
+
+[SameServersLine(["alpha", "beta"], true)]
+Same bootstrap servers as alpha, beta: probably one cluster registered twice. KafkaWolverineOptions.ExcludeBroker leaves one out.
+
+[SearchTarget(["alpha", "beta"], 11/02/2026 06:00:00 +00:00, 11/02/2026 06:00:00 +00:00)]
+alpha, beta · 2026-11-02 06:00Z – 06:00Z
+
+[SpanText(01:30:00)]
+90 minutes
+
+[TailTarget(["alpha", "beta"])]
+live tail of alpha, beta
+
+[TopicNotAvailable("sample")]
+Topic sample was not found, or is not available to you.
+
+[TopicsSelected(3)]
+3 of 20 topics selected (the most one search reads)
+
+[UndecodableReason(InvalidJson)]
+it is not valid JSON
+
+[UndecodableReason(TooLarge)]
+it is larger than the size limit for reading a value
+
+[UndecodableReason(InvalidUtf8)]
+it is not valid UTF-8
+
+[UndecodableReason(NotACloudEvent)]
+the topic declares CloudEvents and this is not one
+
+[UndecodableReason(DecoderFailed)]
+the topic's decoder failed
+
+[UndecodableReason(DecoderRefused)]
+the topic's decoder refused it
+
+[UndecodableReason(InvalidBase64)]
+its data_base64 is not valid base64
+
+[ValueUndecodable("sample")]
+The value could not be decoded: sample.
+
+[ValueWithheld("sample")]
+Value withheld: rule sample could not be applied.

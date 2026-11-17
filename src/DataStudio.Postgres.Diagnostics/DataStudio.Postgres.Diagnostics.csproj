@@ -5,10 +5,10 @@
     <RootNamespace>DataStudio.Postgres</RootNamespace>
     <PackageId>DataStudio.Postgres.Diagnostics</PackageId>
     <IsPackable>true</IsPackable>
-    <Product>Postgres Studio Diagnostics</Product>
+    <Product>Data Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>postgresql;npgsql;database;diagnostics;health;monitoring</PackageTags>
-    <Description>The diagnostics engine of Postgres Studio and Marten Studio, with no ASP.NET Core: the health sweep and its checks, the facts they read and IPostgresDiagnostics, for any host that registers an NpgsqlDataSource.</Description>
+    <Description>The PostgreSQL diagnostics engine of Data Studio, with no ASP.NET Core: the health sweep and its checks, the facts they read and IPostgresDiagnostics, for any host that registers an NpgsqlDataSource.</Description>
     <EnablePackageValidation>true</EnablePackageValidation>
     <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props (AGENTS.md D30). -->
     <DataStudioPostgresPinsNpgsql>true</DataStudioPostgresPinsNpgsql>

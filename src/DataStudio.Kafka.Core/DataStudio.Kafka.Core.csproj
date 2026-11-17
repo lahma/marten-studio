@@ -10,8 +10,8 @@
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Product>KStudio</Product>
-    <Description>The engine of KStudio, with no ASP.NET Core: the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, over Confluent.Kafka behind an internal wire seam. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+    <Product>Data Studio</Product>
+    <Description>The Kafka engine of Data Studio, with no ASP.NET Core: the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, over Confluent.Kafka behind an internal wire seam. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
     <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props (AGENTS.md D36). -->
     <DataStudioKafkaCorePinsExtensions>true</DataStudioKafkaCorePinsExtensions>
   </PropertyGroup>

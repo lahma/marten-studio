@@ -5,10 +5,10 @@
     <RootNamespace>DataStudio.Postgres</RootNamespace>
     <PackageId>DataStudio.Postgres</PackageId>
     <IsPackable>true</IsPackable>
-    <Product>Postgres Studio</Product>
+    <Product>Data Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>postgresql;npgsql;database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
-    <Description>An embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as NpgsqlDataSource.</Description>
+    <Description>The Postgres pages of Data Studio: an embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as NpgsqlDataSource.</Description>
     <EnablePackageValidation>true</EnablePackageValidation>
     <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props (AGENTS.md D30). -->
     <DataStudioPostgresPinsNpgsql>true</DataStudioPostgresPinsNpgsql>

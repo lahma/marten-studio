@@ -13,8 +13,8 @@
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Product>KStudio</Product>
-    <Description>KStudio for Apache Kafka: a Kafka section for Marten Studio or Postgres Studio, over the application's own Kafka credentials. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+    <Product>Data Studio</Product>
+    <Description>Data Studio for Apache Kafka: the Kafka pages of Data Studio, beside the Marten or Postgres pages or alone, over the application's own Kafka credentials. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
   </PropertyGroup>
 
   <!-- Components are bound by name, as in the other studios (D2). -->

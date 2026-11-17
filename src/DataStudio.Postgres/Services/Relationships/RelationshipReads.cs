@@ -163,6 +163,26 @@ internal sealed class RelationshipReads
     }
 
     /// <summary>
+    /// The <c>BrowsableSchemas</c> entries the shared read spans beyond the source's own: all of them when <c>BrowseDatabase</c> is on for the
+    /// process; without it, exactly the schemas the module treats as the source's own (<see cref="StudioText.NamedSchemasAreOwn" />: a plain
+    /// data source's exactly-named schemas, never <c>"*"</c>) and none where the module's configuration declares them.
+    /// </summary>
+    /// <param name="text">The module's words.</param>
+    /// <param name="browse">Whether <c>BrowseDatabase</c> is on for the process.</param>
+    /// <param name="browsable">The configured entries.</param>
+    internal static IReadOnlyList<string> EntriesOf(StudioText text, bool browse, IReadOnlyList<string> browsable)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(browsable);
+
+        return browse
+            ? browsable
+            : text.NamedSchemasAreOwn
+                ? [.. browsable.Where(static x => x != BrowsableSchemaMatcher.Everything)]
+                : [];
+    }
+
+    /// <summary>
     /// The schemas the shared read spans: the source's own, and - when <c>BrowseDatabase</c> is on for the process at
     /// all - every schema <c>BrowsableSchemas</c> admits. In Postgres Studio the schemas it names exactly are the
     /// source's own (D27 in PostgresStudio), so they join whatever <c>BrowseDatabase</c> says; only <c>"*"</c> waits for
@@ -177,14 +197,7 @@ internal sealed class RelationshipReads
 
         IReadOnlyList<string> browsable = settings.BrowsableSchemas;
 
-        bool browse = capabilities.IsEnabled(StudioCapability.BrowseDatabase);
-
-        // A source's exactly-named schemas are structure, shown under the source policy alone.
-        IReadOnlyList<string> entries = browse
-            ? browsable
-            : settings.Text.NamedSchemasAreOwn
-                ? [.. browsable.Where(static x => x != BrowsableSchemaMatcher.Everything)]
-                : [];
+        IReadOnlyList<string> entries = EntriesOf(settings.Text, capabilities.IsEnabled(StudioCapability.BrowseDatabase), browsable);
 
         if (entries.Count > 0)
         {

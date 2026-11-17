@@ -46,8 +46,8 @@
   <PropertyGroup>
     <Authors>Marko Lahma</Authors>
     <Company>Marko Lahma</Company>
-    <!-- Each shipped project names its own Product (1.0): a Postgres Studio user should not read "Marten Studio". -->
-    <Product>Marten Studio</Product>
+    <!-- One product (2.0): every project, shipped or not, is Data Studio; the modules are Marten, Postgres and Kafka. -->
+    <Product>Data Studio</Product>
     <Copyright>Copyright (c) 2026 Marko Lahma</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/lahma/marten-studio</PackageProjectUrl>
