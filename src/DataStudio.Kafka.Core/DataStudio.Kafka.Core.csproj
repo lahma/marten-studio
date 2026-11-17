@@ -4,8 +4,9 @@
     <AssemblyName>DataStudio.Kafka.Core</AssemblyName>
     <RootNamespace>DataStudio.Kafka</RootNamespace>
     <PackageId>DataStudio.Kafka.Core</PackageId>
+    <Title>Data Studio Kafka engine</Title>
     <IsPackable>true</IsPackable>
-    <!-- No baseline: the family's PackageValidationBaselineVersion (Directory.Build.props) must not apply; this package's own baseline stays empty until one release after it graduates from preview (K8). -->
+    <!-- Empty, as the whole family's is for 2.0 (Directory.Build.props): this id has no release on nuget.org to be compared with, and restore refuses a baseline it cannot find (NU1101). Set to 2.0.0-preview.1 one release after this one, with the family's. -->
     <EnablePackageValidation>true</EnablePackageValidation>
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>

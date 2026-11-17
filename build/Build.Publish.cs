@@ -260,6 +260,20 @@ partial class Build
                     ["Microsoft.Extensions.Hosting"] = CentralPackageVersion("Microsoft.Extensions.Hosting"),
                 });
 
+            // The exact sets above already leave no room for one, but the sentence a maintainer reads when the Kafka module grows a database dependency
+            // should say what is wrong: the shell and the three Kafka packages depend on no database module, no Npgsql and no part of the Marten
+            // family, so a Kafka-only host restores none of them (KafkaOnlyHostTests holds the same line on the built output).
+            foreach (var package in new[]
+                     {
+                         PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
+                         PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
+                         PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
+                     })
+            {
+                AssertNuspecDependsOnNoneOf(package, PostgresStudioPackageId, DiagnosticsPackageId, MartenStudioPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
+            }
+
             ReportSummary(_ => _
                 .AddPair("Version", Version)
                 .AddPair("KStudio version", KStudioVersion)
@@ -372,6 +386,35 @@ partial class Build
                 Log.Information("{Package} ({Framework}) depends on {Dependency}", package.Name, framework, line);
             }
         }
+    }
+
+    /// <summary>
+    /// Asserts that no dependency of <paramref name="package" />, in any target-framework group, is one of <paramref name="idPrefixes" /> or below it
+    /// (<c>DataStudio.Postgres</c> is itself and <c>DataStudio.Postgres.Diagnostics</c>; <c>Marten</c> is every package whose id starts with it).
+    /// </summary>
+    static void AssertNuspecDependsOnNoneOf(AbsolutePath package, params string[] idPrefixes)
+    {
+        Assert.True(package.FileExists(), $"'{package}' does not exist");
+
+        using var archive = ZipFile.OpenRead(package);
+        var entry = archive.Entries.SingleOrDefault(x => !x.FullName.Contains('/') && x.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .NotNull($"{package.Name} has no .nuspec at its root");
+
+        XDocument nuspec;
+        using (var stream = entry.Open())
+        {
+            nuspec = XDocument.Load(stream);
+        }
+
+        var forbidden = nuspec.Descendants()
+            .Where(x => x.Name.LocalName == "dependency")
+            .Select(x => (string) x.Attribute("id"))
+            .Where(id => idPrefixes.Any(prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.True(forbidden.Count == 0,
+            $"{package.Name} must depend on no database module, no Npgsql and no part of the Marten family, and its nuspec names [{string.Join(", ", forbidden)}]");
     }
 
     /// <summary>A package's version from its <c>PackageVersion</c> row in <c>Directory.Packages.props</c>.</summary>

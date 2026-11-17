@@ -4,6 +4,7 @@
     <AssemblyName>DataStudio.Postgres</AssemblyName>
     <RootNamespace>DataStudio.Postgres</RootNamespace>
     <PackageId>DataStudio.Postgres</PackageId>
+    <Title>Data Studio for PostgreSQL</Title>
     <IsPackable>true</IsPackable>
     <Product>Data Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>

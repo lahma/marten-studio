@@ -4,6 +4,7 @@
     <AssemblyName>DataStudio.Marten</AssemblyName>
     <RootNamespace>DataStudio.Marten</RootNamespace>
     <PackageId>DataStudio.Marten</PackageId>
+    <Title>Data Studio for Marten</Title>
     <IsPackable>true</IsPackable>
     <Product>Data Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>

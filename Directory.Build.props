@@ -34,7 +34,7 @@
     <VersionPrefix>1.3.1</VersionPrefix>
   </PropertyGroup>
 
-  <!-- K8: KStudio ships as a preview beside the family release. The three KStudio projects (DataStudio.Kafka.Core, KStudio, DataStudio.Kafka.Wolverine) pack
+  <!-- K8: the Kafka module ships as a preview beside the family release. The three Kafka projects (DataStudio.Kafka.Core, DataStudio.Kafka, DataStudio.Kafka.Wolverine) pack
        at `<version>-<label>`, the version being CHANGELOG.md's (above); no other project reads the label. To graduate KStudio, empty it:
        they then pack at the family version and stamp no label. The rest of graduation is words (the READMEs' "preview" and the
        prerelease flag of the install lines) and, a release later, the three projects' empty PackageValidationBaselineVersion element
@@ -57,12 +57,12 @@
          release notes are the CHANGELOG, the version authority (D15). -->
     <PackageIcon>icon.png</PackageIcon>
     <PackageReleaseNotes>What changed in each release: https://github.com/lahma/marten-studio/blob/main/CHANGELOG.md</PackageReleaseNotes>
-    <!-- 1.0: package validation compares each shipped package with the last release on nuget.org (EnablePackageValidation is
-         on in each shipped project). Move it to the version just released, in the release's own pull request
-         (build-and-release.md, Release engineering). -->
+    <!-- Package validation compares each shipped package with a release on nuget.org (EnablePackageValidation is on in each shipped project)
+         once there is one. For 2.0 there is none: the seven ids (DataStudio, DataStudio.Postgres, DataStudio.Postgres.Diagnostics, DataStudio.Marten,
+         DataStudio.Kafka, DataStudio.Kafka.Core, DataStudio.Kafka.Wolverine) are new, no release of them exists to be compared with, and restore refuses
+         a baseline it cannot find (NU1101), so the element is empty. One release later, in that release's own pull request, set it to 2.0.0 (the Kafka
+         three, which carry a preview label, to the version they shipped at, in their own projects: each has its own empty element until then). -->
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
-    <!-- v2 step 2: empty. The renamed ids have no release on nuget.org to be compared with, and restore refuses a baseline it cannot find
-         (NU1101). Step 8 settles it for 2.0 and sets it again after the release. -->
   </PropertyGroup>
 
 </Project>

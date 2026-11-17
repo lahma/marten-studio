@@ -8,6 +8,7 @@
     <AssemblyName>DataStudio</AssemblyName>
     <RootNamespace>DataStudio</RootNamespace>
     <PackageId>DataStudio</PackageId>
+    <Title>Data Studio</Title>
     <IsPackable>true</IsPackable>
     <Product>Data Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>

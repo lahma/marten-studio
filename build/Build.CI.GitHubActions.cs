@@ -34,7 +34,7 @@ using Fallout.Components;
     // asserts it, and asserts that this file cannot mint a nuget.org key either.
     ReadPermissions = [GitHubActionsPermissions.Contents])]
 // .github/workflows/marten-latest.yml - both suites again, at the newest Marten 9.x CI tests, and then
-// PostgresStudio's projects at the newest Npgsql CI tests, and KStudio at the newest Confluent.Kafka.
+// the Postgres projects at the newest Npgsql CI tests, and the Kafka module at the newest Confluent.Kafka.
 //
 // build.yml tests the floors the packages ship with; almost no host runs them. This runs the same
 // `dotnet fallout Test` with MARTEN_VERSION=latest, which Fallout binds to the MartenVersion parameter
@@ -43,9 +43,9 @@ using Fallout.Components;
 // red because Marten shipped. The env value names the property rather than the version so that a bump
 // is one edit to Directory.Packages.props and nothing here.
 //
-// NPGSQL_VERSION=latest is the same for PostgresStudio (Build.Npgsql.cs, DataStudioNpgsqlLatest): a host
-// without Marten is on Npgsql 10, and PostgresStudio declares no upper bound. It does not change the
-// whole-solution pass, which stays at the Npgsql floor so that MartenStudio never meets Npgsql 10; it adds
+// NPGSQL_VERSION=latest is the same for the Postgres module (Build.Npgsql.cs, DataStudioNpgsqlLatest): a host
+// without Marten is on Npgsql 10, and DataStudio.Postgres declares no upper bound. It does not change the
+// whole-solution pass, which stays at the Npgsql floor so that DataStudio.Marten never meets Npgsql 10; it adds
 // a second restore, build and test pass over data-studio-postgres.slnf after Test, in the same job. One workflow
 // for the "latest"s rather than a third file: a third would be a third cache key and a third check for a
 // pass that takes a fraction of this one, and renaming this file would change what the docs and the
