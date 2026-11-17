@@ -4,7 +4,7 @@ namespace DataStudio.Services;
 
 /// <summary>
 /// The shell's own words for the live-update loop (<see cref="StudioLiveLog" />), registered when a host adds the shell, so that a host with no
-/// database module has one: a database module replaces it with its own, in its own words and with the container's throttle.
+/// database module has one: a database module replaces it with its own, which takes the level of event 9220 from the container's throttle.
 /// </summary>
 /// <remarks>
 /// Event 9220 is a Warning the first time per kind of failure per ten minutes and Debug in between, because the loop runs every

@@ -198,7 +198,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio could not read the connection facts of {DatabaseId}", whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio could not read the connection facts of {DatabaseId}", StudioLogValue.Cap(whole.DatabaseId));
             }
 
             return ConnectionPageView.Refused(
@@ -229,7 +229,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
                 // A contributor cannot take the page down; the type's name is what a developer needs.
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "A Connection page contributor ({Contributor}) failed for {DatabaseId}", contributor.GetType().Name, whole.DatabaseId);
+                    logger.LogDebug(exception, "A Connection page contributor ({Contributor}) failed for {DatabaseId}", contributor.GetType().Name, StudioLogValue.Cap(whole.DatabaseId));
                 }
             }
         }
@@ -330,7 +330,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
 
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio could not read the application sessions of {DatabaseId}", whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio could not read the application sessions of {DatabaseId}", StudioLogValue.Cap(whole.DatabaseId));
             }
 
             return ConnectionApplicationsView.Refused(

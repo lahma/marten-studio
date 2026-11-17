@@ -107,8 +107,8 @@ internal static class StudioCoreRegistration
         // The database's half of what a visitor may read of the ring: its entries are judged here, as every module's are by its own gate.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, DatabaseAuditGate>());
 
-        // The words the shell's live-update loop logs in are this module's: its own log methods, in place of the shell's default -
-        // Replace, so that the answer does not depend on which of the two registered first. The shell's loop names no throttle:
+        // The live-update loop's log is this module's: its own log methods, in place of the shell's default (the same sentences, with the
+        // container's throttle for event 9220) - Replace, so that the answer does not depend on which of the two registered first. The shell's loop names no throttle:
         // the database side closes over the container's, so event 9220 takes its level where it is logged.
         services.Replace(ServiceDescriptor.Singleton(static provider => DatabaseLiveLogs.For(provider.GetService<StudioLogThrottle>())));
 

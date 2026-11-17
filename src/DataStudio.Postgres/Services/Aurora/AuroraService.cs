@@ -202,7 +202,7 @@ internal sealed class AuroraService : IAuroraService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio did not read the Aurora facts of {DatabaseId}", whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio did not read the Aurora facts of {DatabaseId}", StudioLogValue.Cap(whole.DatabaseId));
             }
 
             PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
@@ -241,7 +241,7 @@ internal sealed class AuroraService : IAuroraService
 
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio did not read the Aurora session waits of {DatabaseId}", whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio did not read the Aurora session waits of {DatabaseId}", StudioLogValue.Cap(whole.DatabaseId));
             }
 
             sessions = new ServerRead<AuroraSessionWaits>(null, postgres?.SqlState == PostgresErrorCodes.InsufficientPrivilege

@@ -72,9 +72,6 @@ public partial class RefusalLogValuesTests
 
         calls.Should().BeGreaterThan(60, "src/ calls its templates from many sites, and a scan that finds none has stopped working");
 
-        // 9450 (the Statements page refused by its gate, Debug) has never capped the scope it names: its 1.x dispatcher only chose a
-        // template, and the scan skipped every call that had one. Held as it was by this packet; capping it is a decision (hard rule 5).
-        uncapped.RemoveAll(static x => x.StartsWith("src/DataStudio.Postgres/Services/Statements/StatementsService.cs: StatementsPageRefused(", StringComparison.Ordinal));
         uncapped.Should().BeEmpty("a value from the address reaches a log template only escaped and bounded");
     }
 

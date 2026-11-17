@@ -1807,7 +1807,7 @@ internal sealed class StatementsService : IStatementsService
     {
         if (logger.IsEnabled(LogLevel.Debug))
         {
-            logger.StatementsPageRefused(scope.StoreKey, scope.DatabaseId, refusal.ToString());
+            logger.StatementsPageRefused(StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId), refusal.ToString());
         }
 
         return StatementsView.Refused(refusal, reason);

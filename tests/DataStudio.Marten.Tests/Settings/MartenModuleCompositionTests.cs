@@ -13,7 +13,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Marten.Tests.Settings;
 
 /// <summary>
-/// D34 over Data Studio's descriptor: with no other module the shell has the Marten module alone; with one the modules compose in key order, the
+/// D34 over Data Studio's descriptor: with no other module the shell has the Marten module alone; with one the modules compose in registration order, the
 /// module's own sections and the static descriptor are untouched, the shell's own section closes the rail, and the module's pages join the assemblies.
 /// The module is a fake whose pages name this test assembly, so no route table is built.
 /// </summary>

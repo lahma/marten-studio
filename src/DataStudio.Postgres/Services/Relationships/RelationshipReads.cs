@@ -124,7 +124,7 @@ internal sealed class RelationshipReads
             // catalog read reports, and it is not a studio fault worth a Warning of its own.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
+                logger.LogDebug(exception, "Data Studio drew the relationships of {StoreKey} without tables", StudioLogValue.Cap(scope.StoreKey));
             }
 
             return (null, DatabaseAccess.CatalogFailure(exception, known));

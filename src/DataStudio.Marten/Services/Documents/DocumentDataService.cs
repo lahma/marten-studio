@@ -358,7 +358,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // is the one the host configured (QueryTimeout) doing its job.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio's exact count of '{Alias}' timed out", alias);
+                logger.LogDebug(exception, "Data Studio's exact count of '{Alias}' timed out", StudioLogValue.Cap(alias));
             }
 
             return DocumentCount.Unknown;
@@ -429,7 +429,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // in time - Npgsql's own client-side timeout, which is the same budget expiring.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+                logger.LogDebug(exception, "Data Studio's recent-documents read of {StoreKey} timed out", StudioLogValue.Cap(scope.StoreKey));
             }
 
             return RecentDocuments.TooLarge();

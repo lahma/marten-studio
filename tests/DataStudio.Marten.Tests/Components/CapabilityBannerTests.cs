@@ -120,7 +120,7 @@ public class CapabilityBannerTests
 
     /// <summary>
     /// Two groups, because two kinds of switch: the console and the database browser change nothing, and
-    /// a list headed "Mutating operations" that held them would describe a narrower switch than the host set.
+    /// a list headed "Marten: mutating operations" that held them would describe a narrower switch than the host set.
     /// </summary>
     [Fact]
     public void The_popover_groups_the_reads_beyond_the_store_apart_from_the_mutating_operations()

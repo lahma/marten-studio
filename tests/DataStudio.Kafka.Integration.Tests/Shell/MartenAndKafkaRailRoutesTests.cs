@@ -34,7 +34,8 @@ public class MartenAndKafkaRailRoutesTests
 
         shell.Modules.Select(static x => x.Key).Should().Equal(martenFirst ? ["marten", "kafka"] : ["kafka", "marten"]);
         shell.Navigation.Select(static x => x.Title).First().Should().Be(martenFirst ? "Data" : "Kafka");
-        shell.Navigation.Select(static x => x.Title).Last().Should().Be("Studio", "the shell's own section is last, and always Studio");        shell.Navigation.SelectMany(static x => x.Items).Select(static x => x.Route).Should().OnlyContain(
+        shell.Navigation.Select(static x => x.Title).Last().Should().Be("Studio", "the shell's own section is last, and always Studio");
+        shell.Navigation.SelectMany(static x => x.Items).Select(static x => x.Route).Should().OnlyContain(
             static x => x == "activity" || x!.StartsWith("kafka", StringComparison.Ordinal) || x.StartsWith("marten", StringComparison.Ordinal) || x.StartsWith("postgres/", StringComparison.Ordinal));
         ComposedRailAssertions.NoOneDotXAddressIsAPage(shell);
     }

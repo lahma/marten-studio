@@ -25,12 +25,27 @@ public class LogEventConventionsTests
     [InlineData("    [LoggerMessage(EventId = 8,\n        Message = \"KStudio \" + \"split\")]\nprivate static partial void M(this ILogger l);", 8, "KStudio split")]
     [InlineData("logger.LogWarning(exception, \"Postgres Studio could not {Thing}\", thing);", null, "Postgres Studio could not {Thing}")]
     [InlineData("Logger.LogDebug(\"Data Studio could not\");", null, "Data Studio could not")]
+    [InlineData("logger.Log(LogLevel.Information, \"Postgres Studio started {Thing}\", thing);", null, "Postgres Studio started {Thing}")]
     public void The_scan_reads_an_event_and_a_direct_call(string source, int? id, string template)
     {
         LogEventScan.Site site = LogEventScan.Read("f.cs", source).Should().ContainSingle().Subject;
 
         site.EventId.Should().Be(id);
         site.Template.Should().Be(template);
+    }
+
+    /// <summary>
+    /// The scan fails what it cannot read: an attribute with a positional id or a message held in a constant is reported, so it cannot hide a duplicate
+    /// id or a product name.
+    /// </summary>
+    [Theory]
+    [InlineData("[LoggerMessage(9200, LogLevel.Warning, \"Data Studio did it\")]\npublic static partial void M(this ILogger l);")]
+    [InlineData("[LoggerMessage(EventId = 9201, Message = SomeConstant)]\npublic static partial void M(this ILogger l);")]
+    public void An_attribute_the_scan_cannot_read_is_a_failure_not_a_blind_spot(string source)
+    {
+        Action act = () => LogEventScan.AssertEveryAttributeIsReadable(LogEventScan.Read("f.cs", source));
+
+        act.Should().Throw<Exception>();
     }
 
     [Theory]

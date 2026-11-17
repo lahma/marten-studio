@@ -144,7 +144,7 @@ internal sealed class StudioCapabilityGuard
 
     /// <summary>
     /// The capabilities that change nothing and are still authorized like writes - what the capability
-    /// chip lists under "Reads authorized like writes" rather than under "Mutating operations".
+    /// chip lists under "&lt;module&gt;: reads authorized like writes" rather than under "&lt;module&gt;: mutating operations".
     /// </summary>
     /// <remarks>
     /// <para>

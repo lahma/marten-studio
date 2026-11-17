@@ -27,9 +27,13 @@ public class ShellFrontEndpointTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    private static void AddKafka(DataStudioBuilder studio) =>
+        studio.AddKafka(static options => options.AddCluster("primary", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Primary")));
+
     private static WebApplication CreateApp(
         bool postgres,
         bool kafka = true,
+        bool kafkaFirst = false,
         Action<DataStudioOptions>? configureShell = null,
         Action<WebApplicationBuilder>? configureBuilder = null,
         string? pathBase = null)
@@ -44,15 +48,21 @@ public class ShellFrontEndpointTests
 
         DataStudioBuilder studio = builder.Services.AddDataStudio(configureShell);
 
+        // The order the host calls them in is the order of the rail, the chip and the front tiles.
+        if (kafka && kafkaFirst)
+        {
+            AddKafka(studio);
+        }
+
         if (postgres)
         {
             builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
             studio.AddPostgres();
         }
 
-        if (kafka)
+        if (kafka && !kafkaFirst)
         {
-            studio.AddKafka(static options => options.AddCluster("primary", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Primary")));
+            AddKafka(studio);
         }
 
         configureBuilder?.Invoke(builder);
@@ -147,8 +157,7 @@ public class ShellFrontEndpointTests
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             body.Should().Contain("ms-front-tiles");
             body.Split("ms-front-tile-name").Length.Should().Be(3, "two modules, two tiles");
-            body.Should().Contain("href=\"kafka\"").And.Contain("href=\"postgres\"");
-            body.IndexOf("href=\"kafka\"", StringComparison.Ordinal).Should().BeLessThan(body.IndexOf("href=\"postgres\"", StringComparison.Ordinal), "module order is key order");
+            TileOrder(body).Should().Equal(["postgres", "kafka"], "the tiles follow the order the host registered the modules in");
             body.Should().Contain("Topics, record search and live tail of the application&#x27;s clusters.");
             body.Should().Contain("Health, queries, tables and sessions of the application&#x27;s data sources.");
             body.Should().NotContain("Marten", "the host registered no Marten module");
@@ -158,6 +167,48 @@ public class ShellFrontEndpointTests
         {
             await app.StopAsync(Token);
         }
+    }
+
+    [Fact]
+    public async Task The_front_page_tiles_follow_registration_order_whichever_module_the_host_added_first()
+    {
+        await using WebApplication kafkaFirst = CreateApp(postgres: true, kafkaFirst: true);
+        kafkaFirst.MapDataStudio().AllowAnonymous();
+        await kafkaFirst.StartAsync(Token);
+        try
+        {
+            using HttpClient client = kafkaFirst.GetTestClient();
+            string body = await client.GetStringAsync(new Uri("/studio", UriKind.Relative), Token);
+
+            TileOrder(body).Should().Equal(["kafka", "postgres"], "the host called AddKafka first");
+        }
+        finally
+        {
+            await kafkaFirst.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// The modules' tiles, in the order the front page lists them: each tile's link, read from the tile list alone - the rail is drawn before the
+    /// body and carries links of its own to the same segments, so a search of the whole document would read the rail's order.
+    /// </summary>
+    private static readonly string[] Segments = ["kafka", "postgres"];
+
+    private static string[] TileOrder(string body)
+    {
+        int list = body.IndexOf("ms-front-tiles", StringComparison.Ordinal);
+        list.Should().BeGreaterThan(-1, "the front page draws its tile list");
+
+        string tiles = body[list..];
+
+        return
+        [
+            .. Segments
+                .Select(segment => (segment, at: tiles.IndexOf("href=\"" + segment + "\"", StringComparison.Ordinal)))
+                .Where(static x => x.at >= 0)
+                .OrderBy(static x => x.at)
+                .Select(static x => x.segment),
+        ];
     }
 
     [Fact]

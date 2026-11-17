@@ -265,7 +265,7 @@ internal sealed partial class DocumentDataService
             // honest rendering of that: the link is simply not offered.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio could not check whether a stream '{Id}' exists", id);
+                logger.LogDebug(exception, "Data Studio could not check whether a stream '{Id}' exists", StudioLogValue.Cap(id));
             }
 
             return false;

@@ -176,7 +176,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         logger.LogDebug(
             exception,
             "Data Studio read no relationships for source {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
-            scope.StoreKey,
-            scope.DatabaseId);
+            StudioLogValue.Cap(scope.StoreKey),
+            StudioLogValue.Cap(scope.DatabaseId));
     }
 }

@@ -26,7 +26,8 @@ internal static partial class LogEventScan
     /// <param name="File">The file, relative to the repository root.</param>
     /// <param name="EventId">The event id, or <see langword="null" /> for a direct call.</param>
     /// <param name="Template">The message template.</param>
-    public sealed record Site(string File, int? EventId, string Template);
+    /// <param name="FromAttribute">Whether the site is a <c>[LoggerMessage]</c> attribute rather than a direct call.</param>
+    public sealed record Site(string File, int? EventId, string Template, bool FromAttribute = false);
 
     /// <summary>Every site of <c>src/</c>.</summary>
     public static IReadOnlyList<Site> All()
@@ -51,7 +52,7 @@ internal static partial class LogEventScan
             Match message = MessageArgument().Match(arguments);
             string template = message.Success ? Literals(arguments, message.Index + message.Length) : string.Empty;
 
-            yield return new Site(relativePath, eventId, template);
+            yield return new Site(relativePath, eventId, template, FromAttribute: true);
         }
 
         foreach (Match call in DirectCall().Matches(source))
@@ -200,8 +201,8 @@ internal static partial class LogEventScan
     [GeneratedRegex(@"\bMessage\s*=\s*", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
     private static partial Regex MessageArgument();
 
-    /// <summary>A direct <c>LogWarning(</c>, <c>LogDebug(</c> and the like.</summary>
-    [GeneratedRegex(@"\.\s*Log(?:Warning|Error|Debug|Information|Critical|Trace)\s*\(", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
+    /// <summary>A direct <c>LogWarning(</c>, <c>LogDebug(</c> and the like, and <c>Log(</c> with the level as its first argument.</summary>
+    [GeneratedRegex(@"\.\s*Log(?:Warning|Error|Debug|Information|Critical|Trace)?\s*\(", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
     private static partial Regex DirectCall();
 
     /// <summary>Every event id declared once across <c>src/</c>, and each owned folder declaring at least one.</summary>
@@ -212,6 +213,8 @@ internal static partial class LogEventScan
         Site[] events = [.. sites.Where(static x => x.EventId is not null)];
 
         events.Should().HaveCountGreaterThan(100, "src/ declares its events as [LoggerMessage] templates, and a scan that finds few has stopped working");
+
+        AssertEveryAttributeIsReadable(sites);
 
         foreach (string folder in ownedFolders)
         {
@@ -225,6 +228,22 @@ internal static partial class LogEventScan
         ];
 
         twice.Should().BeEmpty("an event id names one event: it is declared once across src/, whichever assembly declares it");
+    }
+
+    /// <summary>
+    /// A <c>[LoggerMessage]</c> whose id or message the scan could not read - a positional id, a message held in a constant - is a site the two rules
+    /// cannot be held to, so it is a failure rather than a blind spot.
+    /// </summary>
+    /// <param name="sites">Every site of <c>src/</c>.</param>
+    public static void AssertEveryAttributeIsReadable(IEnumerable<Site> sites)
+    {
+        string[] unreadable =
+        [
+            .. sites.Where(static x => x.FromAttribute && (x.EventId is null || x.Template.Length == 0))
+                .Select(static x => x.File + " (" + (x.EventId?.ToString(CultureInfo.InvariantCulture) ?? "no id the scan can read") + ")"),
+        ];
+
+        unreadable.Should().BeEmpty("a [LoggerMessage] states its EventId and its Message as literals, so that the scan can hold them to the rules");
     }
 
     /// <summary>No template or direct log message of an owned folder names a module's product.</summary>

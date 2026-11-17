@@ -127,9 +127,9 @@ public partial class RefusalLogValuesTests
     // Every Warning that names a value from the address.
 
     /// <summary>
-    /// A direct <c>LogWarning</c>, <c>LogError</c> or <c>LogCritical</c> ships at the default log level, so one that names a
-    /// value from the address - a document id, a collection alias, the scope's store, database or tenant - names it through
-    /// <see cref="StudioLogValue.Cap" />.
+    /// A direct <c>Log…</c> call at any level - Warning, Error and Critical ship at the default level, Debug and Information are read by
+    /// whoever switches them on - that names a value from the address (a document id, a collection alias, the scope's store, database or
+    /// tenant) names it through <see cref="StudioLogValue.Cap" />.
     /// </summary>
     [Fact]
     public void Every_Warning_that_names_a_route_value_names_it_capped()
@@ -149,7 +149,7 @@ public partial class RefusalLogValuesTests
         }
 
         calls.Should().BeGreaterThan(10, "src/ logs Warnings directly, and a scan that finds none has stopped working");
-        uncapped.Should().BeEmpty("a value from the address reaches a Warning only escaped and bounded");
+        uncapped.Should().BeEmpty("a value from the address reaches a log line, at any level, only escaped and bounded");
     }
 
     /// <summary>The scan's anti-vacuity half.</summary>
@@ -157,10 +157,15 @@ public partial class RefusalLogValuesTests
     [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", alias);", "alias")]
     [InlineData("logger.LogWarning(exception, \"x '{Id}' of '{Alias}'\", id, StudioLogValue.Cap(alias));", "id")]
     [InlineData("logger.LogError(exception, \"x {StoreKey}\", scope.StoreKey);", "scope.StoreKey")]
-    [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", table.Alias);", "table.Alias")]
+    [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", item.Alias);", "item.Alias")]
+    [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", table.Alias);", null)]
     [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", StudioLogValue.Cap(table.Alias));", null)]
     [InlineData("logger.LogWarning(exception, \"x {StoreKey}\", resolved.Registration.Key, action);", null)]
     [InlineData("logger.LogWarning(exception, \"x {DatabaseId}\", resolved.Database.Id.Identity);", null)]
+    [InlineData("logger.LogDebug(exception, \"x {DatabaseId}\", whole.DatabaseId);", "whole.DatabaseId")]
+    [InlineData("logger.LogInformation(\"x {StoreKey}\", scope.StoreKey);", "scope.StoreKey")]
+    [InlineData("logger.LogDebug(exception, \"x {DatabaseId}\", StudioLogValue.Cap(whole.DatabaseId));", null)]
+    [InlineData("logger.LogDebug(exception, \"x {DatabaseId}\", context.DatabaseId);", null)]
     public void The_route_value_scan_catches_an_uncapped_value(string source, string? caught)
     {
         string code = SourceScanner.StripCommentsAndStrings(source);
@@ -211,11 +216,19 @@ public partial class RefusalLogValuesTests
             }
         }
 
-        return [.. arguments.Where(static x => RouteValue().IsMatch(x))];
+        return [.. arguments.Where(static x => RouteValue().IsMatch(x) && !ResolvedSpellings.Contains(x, StringComparer.Ordinal))];
     }
 
-    [GeneratedRegex(@"\.\s*Log(?:Warning|Error|Critical)\s*\(", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\.\s*Log(?:Trace|Debug|Information|Warning|Error|Critical)\s*\(", RegexOptions.CultureInvariant)]
     private static partial Regex WarningCall();
+
+    /// <summary>
+    /// The spellings the scan is shaped to flag that are the resolved source's or table's own names, never the address's: a health check
+    /// context's store and database (<see cref="The_canonical_spellings_a_template_may_be_passed_are_the_resolved_sources" />), and a
+    /// resolved document table's or relationship node's alias, which come from the store's configuration. The scan reads the shape of an
+    /// argument, not where it came from, so these are named here and every other spelling is capped.
+    /// </summary>
+    private static readonly string[] ResolvedSpellings = ["context.StoreKey", "context.DatabaseId", "table.Alias", "target.Alias"];
 
     /// <summary>A bare document id or collection alias, or a scope's or table's store, database, tenant or alias.</summary>
     [GeneratedRegex(@"^(?:id|alias|(?:[A-Za-z_]\w*\.)+(?:Alias|StoreKey|DatabaseId|TenantId))$", RegexOptions.CultureInvariant)]
