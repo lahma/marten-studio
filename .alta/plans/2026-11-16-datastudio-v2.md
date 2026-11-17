@@ -174,7 +174,8 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       `docs/kafka.md`, AGENTS.md and `docs/maintainers/*` rewritten for the new names (the D-numbers stay; D11, D12, D30,
       D34 and hard rules 7 and 16 are restated), `CHANGELOG.md` `# 2.0.0`, `Directory.Build.props` `VersionPrefix`.
 - [ ] 10. **Release.** (Owner, 2026-11-17: ship `2.0.0-beta.1` first, tag and nuget.org included, to dogfood in real
-      projects; `2.0.0` follows after feedback. All seven packages are `2.0.0-beta.1` in the beta.) Full `build.ps1 Test` at the floors and at the latest-tested versions, `Pack`, `Publish --skip`,
+      projects; `2.0.0` follows after feedback. The Kafka three drop their preview label: all seven packages have one
+      version, always.) Full `build.ps1 Test` at the floors and at the latest-tested versions, `Pack`, `Publish --skip`,
       the `studio-ui-verifier` over the three samples, then the tag. The existing nuget.org trusted-publishing policy
       is not limited to one package id (`docs/maintainers/build-and-release.md`), so the seven new ids need no new
       policy; the owner confirms that before the tag. After it: deprecate the six old ids with their successors.
@@ -202,7 +203,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
 | CSS prefix, script global, cookie names | Kept | Internal, and a saved theme survives. |
 | One wording | Yes: no sentence or log message of 1.x has to stay | Decided 2026-11-16. |
 | The solution file | `marten-studio.slnx` becomes `data-studio.slnx` (step 2); the repository's own name is the owner's to change on GitHub | Decided 2026-11-16. |
-| Kafka's three packages | Stay a preview: `2.0.0-preview.1` beside the family's `2.0.0` | Decided 2026-11-16. |
+| Kafka's three packages | The family's version, no preview label | Decided 2026-11-17, replacing the 2026-11-16 decision to stay a preview. |
 
 No decision is open: the option names, the one wording, the solution file and the Kafka label were settled on 2026-11-16.
 
