@@ -155,7 +155,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       `AddMartenStudio`, `AddPostgresStudio`, `AddKafkaStudio` and their `Map…` calls. Apply the public renames of
       step 1 (`MartenStudioOptions` → `MartenOptions`, and so on). The four public API baselines are replaced, reviewed
       line by line.
-- [ ] 5. **Addresses.** Every module keeps its root as a segment; remove `IsRoot`; `StudioPageRoutes.BaseRelative`, the
+- [x] 5. **Addresses.** Every module keeps its root as a segment; remove `IsRoot`; `StudioPageRoutes.BaseRelative`, the
       route table, the scope-query rewrite and the rail's active match take the Postgres segment; the diagnostics read
       model's page paths stay relative to the mount and start with `postgres/`. The shell's front page (a tile per
       module, or a redirect when there is one) and `/studio/activity`. The tiles carry a name, a sentence and a link:
