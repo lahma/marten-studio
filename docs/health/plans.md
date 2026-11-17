@@ -8,12 +8,12 @@ it: **plan insights**. A plan is drawn in four places:
 - **the SQL console** (`RunSql`): its **Explain** and **Explain analyze** buttons run the statement in the editor as
   `EXPLAIN (FORMAT JSON)` or `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, and an `EXPLAIN (FORMAT JSON …)` typed by hand is
   drawn the same way; **Open in Plan** carries the statement to the Plan page;
-- **Query › Marten where clause** (Marten Studio only): the plan of the statement the clause composed, as before, now drawn
+- **Query › Marten where clause** (Marten module only): the plan of the statement the clause composed, as before, now drawn
   as a tree;
 - **Operations › Statements**: open a statement's **Plan** to see the plan of its text as `pg_stat_statements` recorded it
   (`?queryid=` in the address, so the link reopens the same statement).
 
-Back to the [index](../health.md). Every code, its area and its studios: [codes.md](codes.md).
+Back to the [index](../health.md). Every code, its area and its modules: [codes.md](codes.md).
 
 ## What the tree shows
 
@@ -90,7 +90,7 @@ select list.
 tenth of them or fewer: the shape an index serves. A plain plan prints the rows a scan keeps, not the rows it reads, so it
 is not judged.
 
-**Remedy.** An index whose leading column the filter compares. In Marten Studio, for a document table, it is declared in
+**Remedy.** An index whose leading column the filter compares. In the Marten module, for a document table, it is declared in
 the store's options - a computed index, or a duplicated field - because an index made by hand on a Marten table is
 dropped by the next `CreateOrUpdate`; the Query page's index advisor writes the line for a where clause. For any other
 table, it goes in your own migrations, built `CONCURRENTLY` on a table in use. The studio never creates it.
@@ -122,7 +122,7 @@ every row it reads is tested. Only a filter (or a join filter) counts: a pattern
 already served by an index, a trigram one. A pattern that is a parameter (`~~ $1`) says nothing and is not judged, and
 neither is `NOT LIKE`, which no index serves anyway.
 
-**Remedy.** A trigram index (the `pg_trgm` extension's GIN index, `gin_trgm_ops`) serves it - in Marten Studio declared in
+**Remedy.** A trigram index (the `pg_trgm` extension's GIN index, `gin_trgm_ops`) serves it - in a Marten host declared in
 the store's options for a document table, for the same reason as P04 - and so does searching for a prefix instead, or
 full-text search.
 
@@ -153,8 +153,8 @@ more with its filter, and 10,000 or more - each counted over all its loops. The 
 the table was visited for rows nobody wanted: the filter's column is not in the index.
 
 **Remedy.** The same as P04's, with the placement each studio needs: an index whose leading column the filter compares, or the
-filter's column added to the index this node used, or - when every query has the same condition - a partial index. In Marten
-Studio an index on a document table is declared in the store's options; elsewhere it goes in your own migrations, built
+filter's column added to the index this node used, or - when every query has the same condition - a partial index. In a Marten
+host an index on a document table is declared in the store's options; elsewhere it goes in your own migrations, built
 `CONCURRENTLY` on a table in use. What if? is offered for a sequential scan's filter (P04); an index scan's plan does not give it a
 column to imagine an index on, so P10 offers none.
 
@@ -323,7 +323,7 @@ between the table's least and greatest and take the first row at or above it, wi
 
 ## P26 JSON filter on a document table with no usable index
 
-**Warning**, Marten Studio only (1.0). A plan reads a Marten document table (`mt_doc_*`) of a document type the studio shows, with a
+**Warning**, Marten module only (1.0). A plan reads a Marten document table (`mt_doc_*`) of a document type the studio shows, with a
 **sequential scan** - or, under `ANALYZE`, an index, index-only or bitmap heap scan whose filter threw away P10's share of what the
 index found (ten times the rows it kept, and ten thousand or more) - and the filter tests the document's JSON: a member
 (`data ->> 'Color'`, `data -> 'Address' ->> 'City'`, `data #>> '{Address,City}'`), containment (`data @> …`) or key existence
@@ -364,7 +364,7 @@ either.
 
 ## P27 GIN index on data not used for a containment filter
 
-**Info**, Marten Studio only (1.0). A **sequential scan** of a document table whose filter tests containment (`data @> …`), although
+**Info**, Marten module only (1.0). A **sequential scan** of a document table whose filter tests containment (`data @> …`), although
 the document type declares a GIN index on `data` (`GinIndexJsonData()`), or the Plan page's facts list a GIN index with `data` as its
 column. Postgres read the whole table when an index was there for the filter.
 
@@ -382,7 +382,7 @@ Planning the statement again after `ANALYZE` on the table shows whether the inde
 
 ## P28 Tenant or soft-delete predicate filtered after the index
 
-**Warning**, Marten Studio only (1.0), under `ANALYZE`. An index scan, index-only scan or bitmap heap scan of a document table whose
+**Warning**, Marten module only (1.0), under `ANALYZE`. An index scan, index-only scan or bitmap heap scan of a document table whose
 **filter** - not its index condition - tests `tenant_id` (a conjoined-tenant type) or `mt_deleted` (a soft-deleted one), and threw away
 P10's share and number of rows (ten times what it kept, and ten thousand or more). Marten adds these predicates to every query on
 such a type; when the index cannot narrow by them, it finds the rows of every tenant, or the deleted ones, and the filter rejects
@@ -406,7 +406,7 @@ Plain plans are listed as not judged (the filter's discards are printed only by 
 
 ## Query › Plan: the plan analyzer
 
-The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of
+The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in a Marten host) is the console's Explain buttons as a page of
 its own. Running a plan is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the
 console is; with `RunSql` off (or `ReadOnly` on) the page shows the console's own disabled state, naming the property, in place of
 the editor. **Pasting a plan is every visitor's** (1.0): it reads nothing and runs nothing, so it needs only what opening the

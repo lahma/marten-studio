@@ -1,16 +1,18 @@
-# Marten Studio and Postgres Studio: the security model
+# The security model
 
-Marten Studio is an admin UI that runs *inside* your application, with your application's own
-`IDocumentStore` and your application's own database credentials. It can read and edit every document in
-every Marten store in the process, archive event streams, control the projection daemon, apply schema
+Data Studio is an admin UI that runs *inside* your application, with your application's own
+`IDocumentStore` and your application's own database credentials. With the Marten module it can read and edit every
+document in every Marten store in the process, archive event streams, control the projection daemon, apply schema
 migrations and run SQL. Nothing about that is incidental — it is what an admin UI is for — so the whole
 design is about making every one of those powers something you turned on deliberately, refused in the
 place where the operation happens, and recorded whether it succeeded or not.
 
-Postgres Studio, the core Marten Studio is built on since 0.5, runs the same way against the `NpgsqlDataSource`s an
-application registered. It has no mutating operation at all: its four capabilities are reads authorized like writes.
-Everything below holds for both studios unless a section says otherwise; [Postgres Studio](#postgres-studio) says what
-differs.
+The Postgres module, which the Marten module is built on, runs the same way against the `NpgsqlDataSource`s an
+application registered. It has no mutating operation at all: its four capabilities are reads authorized like writes. The
+Kafka module reads the clusters the application's own credentials can describe, and never writes
+([kafka.md](kafka.md)). Everything below holds for the Marten and Postgres modules unless a section says otherwise;
+[The Postgres module](#the-postgres-module) says what differs, and the Kafka module's own rules (its policies, its redaction,
+its limits) are in [kafka.md](kafka.md).
 
 This page is the long form of the READMEs' *Security model and limits*. It says what the studio
 guarantees, what it merely makes harder, and what you have to configure yourself.
@@ -26,45 +28,44 @@ a Blazor circuit and the request that created it is long gone by the time a page
 
 | | Option | Decides | Asked |
 |---|---|---|---|
-| 1 | `AuthorizationPolicy` | Who may open the studio at all | Once, by the authorization middleware, on every studio endpoint |
-| 2 | `StoreAuthorizationPolicy` | Which store, database and tenant | On **every** data call, resource-based against `MartenStoreResource` |
-| 3 | `WriteAuthorizationPolicy` | Each mutating call | Before every mutation, against the same resource with the capability named |
-| — | `Capabilities` | Which mutating operations exist at all in this process | In the service layer, before layer 3 |
-| — | `ReadOnly` | Nothing mutating exists | Before everything |
+| 1 | `DataStudioOptions.AuthorizationPolicy` | Who may open the studio at all | Once, by the authorization middleware, on every studio endpoint of every module, the front page and Activity included |
+| 2 | `MartenOptions.StoreAuthorizationPolicy` | Which store, database and tenant | On **every** data call, resource-based against `MartenStoreResource` |
+| 3 | `MartenOptions.WriteAuthorizationPolicy` | Each mutating call | Before every mutation, against the same resource with the capability named |
+| — | `MartenOptions.Capabilities` | Which mutating operations exist at all in this process | In the service layer, before layer 3 |
+| — | `MartenOptions.ReadOnly`, `DataStudioOptions.ReadOnly` | Nothing mutating exists: in the Marten module, or in every module | Before everything |
 
-Layer 1 can equally be `RequireAuthorization()` on the builder `MapMartenStudio()` returns. Both cover
+Layer 1 can equally be `RequireAuthorization()` on the builder `MapDataStudio()` returns. Both cover
 the studio's pages **and** its Blazor circuit, which is the half that matters most: a page that answers
 401 while `POST /_blazor/negotiate` answers 200 is a studio anyone can drive. The studio therefore stamps
-no `AllowAnonymous` of its own on the circuit; only the static assets under `_content/PostgresStudio/` (both
-studios' shell) opt out, and only when no studio policy is configured, so that an application with a fail-closed
+no `AllowAnonymous` of its own on the circuit; only the static assets under `_content/DataStudio/` (the shell's, shared by every module) opt out, and only when no studio policy is configured, so that an application with a fail-closed
 `FallbackPolicy` can still load a stylesheet. The `{Path}/_framework/{**file}` forward of the host's own `_framework`
 files is *not* package content and never opts out: it carries the studio policy, or else it is governed by what the caller
 said about the mapping and by the `FallbackPolicy`, and it additionally answers 404 where the host's own root endpoint (or,
 for a file of the web root, the `FallbackPolicy`) would refuse the visitor, or where the root endpoint does not answer GET.
 
-Moving between studio pages is not a request (1.2). Both studios route inside their circuit, as a Blazor app with its own router
+Moving between studio pages is not a request. The studio routes inside its circuit, as a Blazor app with its own router
 does, so layer 1 is asked when a studio page is loaded and whenever the circuit connects or reconnects, not on every click;
 layers 2 and 3 are asked on every data call and every mutation, as before. A sign-in that expires, or a sign-out in another tab,
 therefore ends a studio session at its next page load or reconnect rather than at its next click. An application that needs it
 to end sooner revalidates the circuit's authentication state (`RevalidatingServerAuthenticationStateProvider`): the studio reads
 the visitor from `AuthenticationStateProvider` on every call, so a visitor the provider has dropped is refused by the next one,
-provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Studio) is a policy that refuses that visitor; a
+provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in the Postgres module) is a policy that refuses that visitor; a
 studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link the visitor clicks that names another
 store, database or tenant, and a Back or Forward to such an address (the browser reports both the same way), moves the
 studio to it only when the visitor's own listings carry it, as the store policy decided them; a page's own navigation never
 moves the scope. A confirmation dialog is closed when the scope moves, and confirms only against the scope it
 was opened under.
 
-Find (1.2), the header box, runs each probe through the service of the page it opens, under that page's gates, and audits
+Find, the header box, runs each probe through the service of the page it opens, under that page's gates, and audits
 nothing itself. A hidden document type, a schema the browser's gate withholds, a tenant the store policy refuses and a
 statement below the `Activity` gate never answer and are never counted; a hit in another store, database or tenant is a
 link, which the clicked-link rule above governs.
 
 Layer 2 filters listings rather than annotating them. A tenant you may not see is one you never learn
-exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2
-is `SourceAuthorizationPolicy`, against a `PostgresStudioResource` ([Postgres Studio](#postgres-studio)).
+exists — the *count* of tenants in a process is itself something a tenant should not learn. In the Postgres module layer 2
+is `SourceAuthorizationPolicy`, against a `PostgresResource` ([The Postgres module](#the-postgres-module)).
 
-Under a store policy the studio's own words never say how many tenants a store has (1.2). The header's selector always
+Under a store policy the studio's own words never say how many tenants a store has. The header's selector always
 offers its filtered list with "Other…". The Tenants page never says "more than 200". With no tenant selected, Find reads
 a conjoined store's documents and streams only in the tenants the header lists for the visitor, and says so in the same
 sentence however many tenants the store has. One thing still follows discovery, and is a known limit: whether a *typed*
@@ -89,7 +90,7 @@ public sealed record MartenStoreResource(
 
 One `AuthorizationHandler<TRequirement, MartenStoreResource>` answers for the scope selector, the page
 frame and every data call. `DatabaseIdentifier` is empty only when the studio asks whether to name a store that would not
-build, or whose databases could not be listed (the picker, the Overview and, since 1.2, the Stores page); nothing is read on
+build, or whose databases could not be listed (the picker, the Overview and the Stores page); nothing is read on
 that answer, and a handler must not treat it as every database. `Capability` is `null` for a read and carries the capability's own name for a
 write, so a single handler can be as coarse or as fine as you want.
 
@@ -114,7 +115,7 @@ the rewind - which takes no leadership lock - still restarts the tenant's agents
 new leader starts. This cannot be closed from the studio; the extra agents last until the node's next leadership
 poll stops them (at most one `LeadershipPollingTime` after they started). A tenant id
 with a `:` in it is never rewound: its agents' identity does not read back as its own, and the daemon would stop
-them before Marten refused the rewind. Skip this group (0.6), on the dead-letter page's grouped view, reaches no
+them before Marten refused the rewind. Skip this group, on the dead-letter page's grouped view, reaches no
 further than Skip event: it is Skip event's own path - `ManageDeadLetters`, the write policy, every sequence proved to
 be the scope's, and Marten's `MarkEventsAsSkipped` (its tenant overload under `UseTenantPartitionedEvents`, in one
 tenant, and refused without a tenant as Skip event is) - over at most 1,000 of one group's events, audited once with
@@ -124,7 +125,7 @@ The database-wide rewind has the same shape under HotCold: the daemon's `RewindS
 of the subscription in the daemon it is asked of, whether or not that daemon ran them (JasperFx 2.74 and 2.95). So it is
 refused on a node that does not hold the leadership lock of every one of the projection's shards - asked of the
 coordinator's own distributor, in memory - and made from the node that leads it; a Start of a shard another node leads
-is refused the same way. Marten Studio's pause keeps a node's locks, so a lock it does not hold while paused is another
+is refused the same way. The Marten module's pause keeps a node's locks, so a lock it does not hold while paused is another
 node's, or nobody's.
 
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
@@ -144,7 +145,7 @@ The message names the three ways to answer, and `AllowAnonymous()` is one of the
 to anyone" out loud is allowed, and is what the sample's `--anonymous` switch demonstrates. What is not
 allowed is saying nothing.
 
-One case is out of scope and always will be: a `MapMartenStudio()` made *after* the host has started —
+One case is out of scope and always will be: a `MapDataStudio()` made *after* the host has started —
 from a hosted service, or from a lazily built `EndpointDataSource`. Both of the guard's passes have run
 by then. There is no hook that would catch it without inspecting every endpoint on every request, which
 is a cost the whole application would pay for a mistake nobody has made. Map the studio while the
@@ -152,7 +153,7 @@ application is being built.
 
 ## The capability model
 
-Fourteen flags on `MartenStudioCapabilities`, every one `false` by default:
+Fourteen flags on `MartenCapabilities`, every one `false` by default:
 
 `EditDocuments`, `DeleteDocuments`, `ArchiveStreams`, `ManageDeadLetters`, `ControlDaemon`,
 `RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`, `ViewDefinitions`,
@@ -163,12 +164,14 @@ declares, `ViewDatabaseActivity` reads other sessions and their statements, and 
 expression somebody typed — and they are treated as writes for authorization, because they are the dangerous
 reads. `CompactStreams` is a write that deletes events: what it does is in [`compaction.md`](compaction.md).
 
-`MartenStudioCapabilities.All()` is the one-line, greppable opt-in. `MartenStudioOptions.ReadOnly`
-overrides all fourteen whatever they say.
+`MartenCapabilities.All()` is the one-line, greppable opt-in. `MartenOptions.ReadOnly` overrides all fourteen whatever
+they say, and so does `DataStudioOptions.ReadOnly`, which overrides every module's capabilities alike. A module's switch
+turns off that module's only: it never turns another module's capabilities off, so a host that wants the Kafka module read-only
+sets the shell's.
 
 This is Hangfire's [GHSA-7rq6-7gv8-c37h](https://github.com/advisories/GHSA-7rq6-7gv8-c37h) applied to
 the write axis: the dashboard that is dangerous by default is the one somebody maps without reading the
-docs. A freshly mapped Marten Studio is a read-only browser.
+docs. A freshly mapped studio is a read-only browser.
 
 **The refusal lives in the service layer, not in the markup.** Hiding a button is a UI convenience; a
 Blazor circuit is a long-lived object a client can drive, so every mutating service method begins with
@@ -183,7 +186,7 @@ and the audit record is written on the failing paths too. A refusal you cannot s
 refusal you cannot investigate.
 
 Every disabled control in the UI names the property that would enable it
-(`MartenStudioOptions.Capabilities.EditDocuments`), because "not permitted" with nothing to act on is
+(`MartenOptions.Capabilities.EditDocuments`), because "not permitted" with nothing to act on is
 the failure mode of every feature-flagged admin UI.
 
 ### `ViewDefinitions`
@@ -195,7 +198,7 @@ body is schema the application's own migrations wrote, which is what you need to
 finding points at one. `ViewDefinitions` is the second alone: off by default, included in `All()`, off under `ReadOnly`,
 and authorized as a write - the write policy asked with `Capability = "ViewDefinitions"` and `TenantId = null`.
 
-- **Exactly named schemas only.** It reads the definitions - and, in Marten Studio, the structure - of the schemas
+- **Exactly named schemas only.** It reads the definitions - and, in a Marten host, the structure - of the schemas
   `BrowsableSchemas` names exactly. A schema only `"*"` admits, which is a statement about the database rather than this
   configuration, still needs `BrowseDatabase` for its definitions, as does an object Marten owns outside the store's own
   schemas. The `‹withheld›` masking of every other schema's name inside a definition is unchanged.
@@ -257,10 +260,10 @@ database is one Activity entry and event 9245. On the Health page, the first rep
 any evidence behind the activity gate for a store and database is one Activity entry under
 `ViewDatabaseActivity` (event 9200, with the checks it came from), and another is recorded only when the set
 of checks showing it changes; the sidebar's health badge and the Stores page's chips show no evidence and record nothing,
-and the Stores page's Check (1.2) starts the same regular sweep an Overview would, for a database the store policy admits. A read that
+and the Stores page's Check starts the same regular sweep an Overview would, for a database the store policy admits. A read that
 fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
 
-Database › Sessions › Blocking (0.6) draws the same snapshot as trees, behind the same gate and audited with the rest of
+Database › Sessions › Blocking draws the same snapshot as trees, behind the same gate and audited with the rest of
 the details: its counts - chains, sessions held up, the longest wait, heads idle in a transaction - are the database's,
 and the trees, which name every session, are details. A relation a session waits for is named only past the gate, and
 masked as the database browser masks it: `‹withheld›`, with no name, for a schema the visitor may not see. The head of a
@@ -268,7 +271,7 @@ chain is shown with its `select pg_terminate_backend(<pid>);` - and `pg_cancel_b
 to copy for whoever may run it: there is no button that runs either, and nothing in either package executes them. C12,
 which names the heads of chains in its findings, is an activity check.
 
-Database › Sessions › Holders (0.8) groups the **whole server's** client sessions - every database on it - so it is the one
+Database › Sessions › Holders groups the **whole server's** client sessions - every database on it - so it is the one
 read of the page that is not about this database, and what a visitor is shown is decided per piece. The per-database counts,
 ages and states are shown to anybody the store or source policy passes for this database as a whole, and a database is named
 in them only when it is the one the studio is connected to or a registered source's database that policy admits (asked
@@ -296,14 +299,14 @@ A text that still carries a string constant as written, or that is not a plain q
 Comments are masked, and schema names a visitor may not see are masked. A hidden document type's statements are
 grouped as "a hidden type" and never shown. The page's first read in a circuit is one Activity entry (event 9452).
 
-A statement's drill-in (`?queryid=`, 0.6) shows its text, its counters and its generic plan, behind the same gate. It
+A statement's drill-in (`?queryid=`) shows its text, its counters and its generic plan, behind the same gate. It
 plans the text `pg_stat_statements` recorded by `prepare` and `force_generic_plan`, with `VERBOSE`, as
 `SqlConsoleRole`, in the read-only transaction, under the visitor's `search_path` less the schemas withheld from them,
 and deallocates what it prepared. A text withheld from the visitor, one that names a schema the visitor may not see
 (wherever their masked
 text shows `‹withheld›`, or, while any schema is withheld, a `U&"…"` name the mask cannot read), a write, a locking read
 and a cut text are never planned, and no What if? is asked of them: a schema-qualified view or `LANGUAGE sql` function
-would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. Since 1.0 neither is a
+would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. Neither is a
 text that names a view, SQL function, operator or table in a visible schema that itself reaches a withheld schema's view,
 function or operator - through a view's query, a function's body or parameter default, an operator's function, a table's
 row-level-security policy or (PostgreSQL 18) virtual generated column - because the plan would inline or expand that
@@ -317,7 +320,7 @@ plan is masked as the text is.
 Each plan is audited by `queryid` ("Plan database statement"), and so is each What if? there ("What-if database
 statement").
 
-**Index advisor** (1.2). On a press, behind the page's own gate, it plans up to 20 of the statements the visitor may see -
+**Index advisor.** On a press, behind the page's own gate, it plans up to 20 of the statements the visitor may see -
 as the drill-in plans them, as `SqlConsoleRole` in the read-only transaction - now and with up to 12 indexes their plans
 suggest, imagined by hypopg and reset on the same connection, at most 150 plans in 60 seconds; one run per database in the
 process (refused, never joined) and one per tab. `?advise=<schema.table>` narrows it to one table: a statement the visitor
@@ -352,7 +355,7 @@ browser's gate admits to that schema (`BrowseDatabase`, the write policy and a `
 else sees its sizes, with `‹withheld›` in place of its name, owner and link. `pg_database_size` needs `CONNECT` on the
 database, or `pg_read_all_stats`, for the role the studio reads as (`SqlConsoleRole` when set). Without it, the page
 says so, names the grant, and shows the catalog's estimate. The sizes come from the catalog's page counts, so the page
-locks nothing it lists. A mark (1.2) is held in the circuit, never stored, and covers only the tables the page names to
+locks nothing it lists. A mark is held in the circuit, never stored, and covers only the tables the page names to
 you.
 
 ### Measure bloat
@@ -369,7 +372,7 @@ bloat" with the table and nothing else, under `BrowseDatabase` when the table is
 
 ### Actions on a finding
 
-A finding on the Health page can offer an **action** (1.2): a read the visitor starts beyond what the sweep did, for them
+A finding on the Health page can offer an **action**: a read the visitor starts beyond what the sweep did, for them
 alone ([health.md](health.md#actions-on-a-finding)). Like Measure bloat it is audited and needs no capability of its own,
 and it is authorized in the service, never by the page: each press asks the finding's own gate again (the store policy for
 the database with `TenantId = null`, and `ViewDatabaseActivity` with the write policy for a finding that needs it, a
@@ -435,7 +438,7 @@ migrates its table and, through `AllObjects()`, `mt_hilo`. The studio builds Mar
 that changes it makes the mode absent rather than falling back to `ToCommand`. Marten's statement must then
 pass the console's `ReadOnlySqlGuard` as well.
 
-**Events (since 1.1).** The same capability queries the event log, through Marten's own
+**Events.** The same capability queries the event log, through Marten's own
 `IReadOnlyEventStore.QueryRawEvents()` called with no tenant argument (the overload with one opens a session the
 studio did not pin). The members are a closed list computed from `StoreOptions.Events` — the columns Marten keeps —
 and the tenant and archive filters are Marten's. On events nothing divides by tenant, a read from a tenant scope
@@ -461,11 +464,11 @@ runs under `QueryTimeout`. An exception a method throws is shown on the page, it
 stepper stops on that event and logs nothing, since a projection that fails on an event is what it is there to
 find; time travel reports it as a failed read (event 9217, throttled). The aggregate types offered are the
 store's own single-stream projections and the document types `IsDocumentTypeVisible` shows, and a type name is
-never looked up from what the browser sent. An event whose type name this process has not mapped is not folded (1.2): handing
+never looked up from what the browser sent. An event whose type name this process has not mapped is not folded: handing
 it to Marten's resolver would load the .NET type its `mt_dotnet_type` names and add it to your store's event mappings for the
 life of the process, after which E05 would no longer report that alias.
 
-### Check shapes (1.2)
+### Check shapes
 
 On Documents and Event types: a plain read under the store policy, like the list it sits on, and not audited (9227 and
 9228, at Debug). It reads a bounded sample of one visible collection or one event type in scope with the studio's own SQL,
@@ -473,7 +476,7 @@ round-trips each document through the store's serializer and hands each event to
 process maps, and reports paths, kinds, counts, ids and sequences - never a value or an exception's message. A hidden,
 unknown or Marten-owned alias gets one sentence. Results are shared for five minutes between visitors who resolve the same
 store, database and tenant. With a tenant selected, the event types only the log holds are taken only from that tenant's
-counted listing; the planner's statistics, which span every tenant, are read only with every tenant in scope. Events › Event flow (1.2) is a configuration read under the store policy: no connection,
+counted listing; the planner's statistics, which span every tenant, are read only with every tenant in scope. Events › Event flow is a configuration read under the store policy: no connection,
 nothing audited, and its model shared by every visitor of the store.
 
 ### What `IsDocumentTypeVisible` hides
@@ -485,18 +488,18 @@ the event types such a projection declares; a snapshot or single-stream projecti
 The event screens - Streams, a stream's events and their JSON, Event types with each type's .NET name (`Compacted<T>` names
 its `T`), LINQ over events and an event type's shape check - show every event the store holds, a hidden aggregate's streams
 included. Keep a type's name or its events from a visitor with the store policy, not with the delegate. The delegate must
-answer from the type alone, and the same way every time: since 1.2 a shape check's result and the Event flow's model are
+answer from the type alone, and the same way every time: a shape check's result and the Event flow's model are
 shared between visitors who resolve the same scope.
 
 ### The opt-in health check
 
-`services.AddHealthChecks().AddMartenStudio()` (or `.AddPostgresStudio()`) runs the advisor's configuration and
+`services.AddHealthChecks().AddMartenDiagnostics()` (or `.AddPostgresDiagnostics()`) runs the advisor's configuration and
 catalog checks with no visitor at all - every registered store or source, up to 25 databases a run in rotation, no
 studio policy asked - so the host's own health endpoint is its only gate. That is acceptable only because of what it
 reports: check codes, outcomes, severities and counts, never a tenant, a stream, a session, a role, a table, a
 statement, a store or source key, a database name or anything Postgres said ([`health.md`](health.md#export)). With a
 response writer that prints the data, `databases + databasesSkipped` on a database-per-tenant tenancy is the number of
-tenant databases this process holds. Neither `AddMartenStudio()` nor `AddPostgresStudio()` registers it.
+tenant databases this process holds. Neither `.AddMarten()` nor `.AddPostgres()` registers it.
 
 ### The studio checks its own configuration
 
@@ -519,7 +522,7 @@ own, and nothing a mute writes reaches the database or another visitor ([health.
 
 ### Comparing an earlier snapshot
 
-Health › Snapshot › "Compare with an earlier snapshot" (1.2) reads a snapshot file the visitor chooses, at most 4 MB, in the
+Health › Snapshot › "Compare with an earlier snapshot" reads a snapshot file the visitor chooses, at most 4 MB, in the
 visitor's own circuit. It builds the visitor's current gated view first, as Download JSON does, and reads the file only
 past it: a visitor the store policy refuses is told so and the file is never opened, so it does not even start crossing the circuit. The file is the visitor's own, so the
 compare is not audited, and it is never stored, cached, logged or sent anywhere; no policy is asked with a value from the
@@ -556,43 +559,43 @@ not a visitor; it is event 9250, at Debug. If you expose a result yourself, put 
 The Health page's Snapshot download is not this API. It is built from the visitor's own pages, and holds only what they
 show that visitor.
 
-## Postgres Studio
+## The Postgres module
 
-Postgres Studio has the same three layers, the same switches and the same startup guard. What differs:
+The Postgres module has the same three layers, the same switches and the same startup guard. What differs:
 
-- **The resource.** Layer 2 is `SourceAuthorizationPolicy`, asked about a `PostgresStudioResource(SourceName,
+- **The resource.** Layer 2 is `SourceAuthorizationPolicy`, asked about a `PostgresResource(SourceName,
   DatabaseIdentifier, Capability)`: the source's key (`default`, or a name given to `AddDataSource` or
   `AddDatabaseSource`) and the database's identity in that source - a registration name or a name the host listed,
-  never a connection string. It has **no tenant**, and nothing in Postgres Studio filters a table by tenant: a visitor
+  never a connection string. It has **no tenant**, and nothing in the Postgres module filters a table by tenant: a visitor
   who may read a table's rows reads all of them. It is a different type from `MartenStoreResource` on purpose, so a
   handler written for one is never handed the other.
 - **Four capabilities, all reads.** `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity` and `RunSql`, off by
-  default, in `All()`, off under `ReadOnly`, and each asked of the write policy with its name. There is nothing to edit,
+  default, in `All()`, off under either `ReadOnly`, and each asked of the write policy with its name. There is nothing to edit,
   delete, rebuild or apply.
 - **The schemas it browses.** `BrowsableSchemas` plays the store's own schemas: the schemas it names exactly - `public`
   when it names none - have their structure shown to anyone the source policy admits, their definitions need
   `ViewDefinitions` or `BrowseDatabase`, and their rows `BrowseDatabase`, each with the write policy. A schema only `"*"`
-  admits needs `BrowseDatabase` for its structure and definitions too. As in Marten
-  Studio, it limits what the screens show, not what the console can read; `SqlConsoleRole` is the boundary.
-- **Marten's tables.** Postgres Studio knows no store's declarations, so the `mt_` prefix is the only thing that names
+  admits needs `BrowseDatabase` for its structure and definitions too. As in the Marten
+  module, it limits what the screens show, not what the console can read; `SqlConsoleRole` is the boundary.
+- **Marten's tables.** The Postgres module knows no store's declarations, so the `mt_` prefix is the only thing that names
   an object Marten's, and it fails closed: such an object's rows are never read, nor a view over one, and its
   definition is shown only with `BrowseDatabase`. It cannot honour another application's `IsDocumentTypeVisible`; a
-  Marten database whose types a host hides belongs in Marten Studio.
+  Marten database whose types a host hides belongs in the Marten module.
 - **What it reads with.** The application's own data sources, with their role, pool and TLS; a factory's result is kept
   for the process and never disposed, and a scoped or transient registration is refused rather than resolved per
   visitor. A host database source must list without creating anything, and its names are identities.
-- **How much of the pool, and under what name** (1.0, #44). The studio holds at most `MaxStudioConnections` (2 by
+- **How much of the pool, and under what name.** The studio holds at most `MaxStudioConnections` (2 by
   default, and never above the data source's own `Maximum Pool Size`) of each pool at a time; a read past it waits for one, at most `QueryTimeout`, and then fails as a connection
   failure that says so and names the option, audited where the operation is. A health check that could not get one is
   "not checked" for that interval with the same sentence, never failed, and the opt-in health check stays Healthy for it:
   it is the host's cap at work, not the database's state. A second connection opened in the same flow as one the operation
   already holds rides on its slot instead of waiting; no read the studio ships opens a second connection while it holds
   one (the sweep's checks share one), so the cap cannot deadlock. Each of the studio's read-only transactions names its session with `set_config('application_name',
-  …, true)` - by default the application's own name with the studio's after it - which reverts at the transaction's end,
+  …, true)` - by default the application's own name with "(Data Studio)" after it - which reverts at the transaction's end,
   so a pooled connection goes back to the application with its own name whatever `No Reset On Close` says. The short
-  single-statement reads outside such a transaction (Marten Studio's document and event lists) keep the application's
+  single-statement reads outside such a transaction (the Marten module's document and event lists) keep the application's
   name for their milliseconds.
-- **The connection history's own connection** (1.0, #43). Only when the host registers `AddPostgresConnectionHistory()`:
+- **The connection history's own connection.** Only when the host registers `AddPostgresConnectionHistory()`:
   one connection per server from the application's own data source, kept open and outside `MaxStudioConnections` - it is
   the one that must be there when the server refuses new ones - named with "history" after the product for as long as it
   is kept. Its read is Holders' own, read-only, under `QueryTimeout` and `SqlConsoleRole`. What it stores is counts by application name and the
@@ -612,10 +615,10 @@ Every statement runs on a connection of its own as:
 ```sql
 BEGIN;
   SET TRANSACTION READ ONLY;
-  SET LOCAL statement_timeout = …;                    -- MartenStudioOptions.QueryTimeout
+  SET LOCAL statement_timeout = …;                    -- MartenOptions.QueryTimeout
   SET LOCAL lock_timeout = …;                         -- 3 seconds
   SET LOCAL idle_in_transaction_session_timeout = …;  -- 60 seconds
-  SET LOCAL ROLE …;                                   -- MartenStudioOptions.SqlConsoleRole, when set
+  SET LOCAL ROLE …;                                   -- MartenOptions.SqlConsoleRole, when set
   <your statement>
 ROLLBACK;                                             -- always, on its own cancellation token
 ```
@@ -624,7 +627,7 @@ Every GUC — the role included — is set through `select set_config(@name, @va
 `SET` statement, because `SET` takes no parameters and would mean interpolating text into SQL. The role
 is *also* validated at startup against the shape of a plain Postgres identifier; both, not either.
 
-Since 1.2 the statement is first described inside that transaction - Parse and Describe, never executed - so that
+The statement is first described inside that transaction - Parse and Describe, never executed - so that
 pgvector's types, and others Npgsql cannot read, are requested as text; on a data source with `Max Auto Prepare` above zero
 the step is skipped, because Npgsql would cache the formats against the statement's text.
 
@@ -651,17 +654,17 @@ integration tests assert it comes back as `25006` with the table unchanged.
 
 ### Explain analyze and What if?
 
-The console's **Explain analyze** button (0.6), like a typed `EXPLAIN ANALYZE`, runs the statement: that is what
+The console's **Explain analyze** button, like a typed `EXPLAIN ANALYZE`, runs the statement: that is what
 `ANALYZE` means. So it runs only in the console, under `RunSql`, for a statement the guard accepts, inside the same
 read-only transaction and `statement_timeout`. A write the guard misses is refused by Postgres (`25006`) and changes
 nothing, and every run and refusal is audited as a `RunSql` run (9204, 9205). Mode A's plan, LINQ mode's and the
 Statements drill-in's are `EXPLAIN` without `ANALYZE`.
 
-Query › Plan's **paste a plan** (1.0) is every visitor's: the visitor's own text, JSON or `EXPLAIN`'s text format, is read
+Query › Plan's **paste a plan** is every visitor's: the visitor's own text, JSON or `EXPLAIN`'s text format, is read
 and drawn on the server with no connection to any database, no lookup of facts and no What if?, so it is not audited and
 needs no capability. Running a plan on that page keeps the console's gate above.
 
-**What if?** (0.6) plans a statement again with one index imagined by hypopg. The studio never runs
+**What if?** plans a statement again with one index imagined by hypopg. The studio never runs
 `CREATE EXTENSION`: whether hypopg is installed is the host's decision, and without it, or when the role the studio
 plans as may not use it, the page says which. The index is only one a builder wrote - read off the plan's sequential
 scan, or Marten's own DDL for the advisor's `StoreOptions` line - and the service finds it again from the plan or the
@@ -732,7 +735,7 @@ its own connections.
 
 ### The only true narrowing
 
-**`MartenStudioOptions.SqlConsoleRole`.** A Postgres role that was never granted `EXECUTE` on those
+**`MartenOptions.SqlConsoleRole`.** A Postgres role that was never granted `EXECUTE` on those
 functions cannot call them however they are spelled, and a role granted `SELECT` on only the tables you
 meant can read only those. That is a guarantee the database makes; everything above it is a guarantee
 the studio makes. If you enable `RunSql` on anything that matters, configure a role.
@@ -809,7 +812,7 @@ write policy refuses the console to, which is the hole the policy exists to clos
 Rule 6 has deliberate false positives: `from` is in the list, so `extract(year from …)`,
 `substring(x from 1)` and `trim(both ' ' from x)` are refused. The list is structural, the escape hatch
 is the capability, and a parser treated as a security boundary is how these features get CVEs. Every
-refusal names `MartenStudioOptions.Capabilities.RunSql` as the thing that would lift it.
+refusal names `MartenOptions.Capabilities.RunSql` as the thing that would lift it.
 
 ### What Mode A does **not** do
 
@@ -854,18 +857,18 @@ should not have been typed is on the record either way.
   write path is how a UI corrupts a store. Writes go through a Marten session (`StoreObjects`,
   `UpdateExpectedVersion<T>`, `UpdateRevision<T>`, `Delete<T>(id)`, `UndoDeleteWhere<T>`), so metadata
   columns, soft-delete semantics, hierarchy discriminators and tenancy stay exactly as Marten defines
-  them. Reads are parameterised SQL built in one place per assembly, `Internal/Sql/` in PostgresStudio and in
-  MartenStudio, with identifiers quoted through a builder and values always parameters.
+  them. Reads are parameterised SQL built in one place per assembly, `Internal/Sql/` in the Postgres module and in
+  the Marten module, with identifiers quoted through a builder and values always parameters.
 - **Never replaces your `StoreOptions.Logger`.** A live SQL tail would require it, which is exactly the
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a
   "Show SQL" disclosure instead.
 - **Never shows a raw connection string or a credential.** A database is identified by server, port, name
   and schema, everywhere — in the Overview, in the Configuration dump, in the audit log and in
-  `MartenStoreResource.DatabaseIdentifier`. The Connection page (1.1) lists the data source's settings one by one as
+  `MartenStoreResource.DatabaseIdentifier`. The Connection page lists the data source's settings one by one as
   Npgsql parsed them, with every password and every value the studio does not know withheld; see
   [`connection.md`](connection.md) for what it shows and why.
 - **The studio keeps and logs nothing you paste, and cannot stop your host's logging of what the browser sends.** The
-  pasted text of Database › Connection's "Compare a connection string" (1.1) is a call's argument and nothing more:
+  pasted text of Database › Connection's "Compare a connection string" is a call's argument and nothing more:
   passwords are removed on the server before anything is read, and the studio logs, audits, stores and connects to
   nothing of it.
   But a Blazor Server circuit is SignalR, and ASP.NET Core's SignalR logs every hub invocation's arguments at Debug
@@ -903,16 +906,17 @@ A checklist for a deployment that is not a demo:
 9. **Log retention for event ids 9200–9299, 9300–9329 and 9400–9519.** The Activity page is a 500-entry
    in-memory ring that dies with the process; your own `ILogger` is the copy that survives a deployment.
 10. **Browser security headers** — CSP, HSTS, frame options — are your application's, as they are for
-    every other page it serves. The studio sets none and would be wrong to. Since 0.5 its stylesheet and script are
-    served under `{Path}/_content/PostgresStudio/`; a policy that names the old `_content/MartenStudio/` must follow.
+    every other page it serves. The studio sets none and would be wrong to. Its stylesheet and script are
+    served under `{Path}/_content/DataStudio/`; a policy that names assets must name that path.
 
-In Postgres Studio, item 3 is `SourceAuthorizationPolicy`, item 8 does not apply, and the capabilities of item 5 are
+In the Postgres module, item 3 is `SourceAuthorizationPolicy`, item 8 does not apply, and the capabilities of item 5 are
 its four reads.
 
 ## Audit events
 
-Ids **9200–9299**, and from 0.5 **9300–9329** and **9400–9519**, are reserved for the two studios, which share one id
-space: Postgres Studio logs each shared event under Marten Studio's id, level and properties, in its own words. The
+Ids **9200–9299**, **9300–9329** and **9400–9519**, are reserved for the Marten and Postgres modules, which share one id
+space: each shared event has one id, level, set of properties and template, whichever module logs it. The Kafka module's are
+9600–9699. The
 audit events are these, and the numbers are fixed: an operator's log query is written against the number, and
 renumbering one later would silently change what a saved query matches. The README lists the operational ones, which
 say something went wrong.

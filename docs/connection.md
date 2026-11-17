@@ -1,7 +1,8 @@
 # Database › Connection
 
-Since 1.1, both studios have a page that shows how your application actually connects to its database, and what you would
-change: **Database › Connection** (`/postgres/database/connection`, `/marten/database/connection`). It is for the people
+Data Studio has a page that shows how your application actually connects to its database, and what you would
+change: **Database › Connection** (`/studio/postgres/database/connection`, in a Postgres host and in a Marten host).
+It belongs to the Postgres module. It is for the people
 who run the application, not for the people who browse its data, and it is built so that it can never show a password.
 
 It reads and changes nothing. It is in the Overview too, as one line - "Connection: TLS verified · pool 100 · 2 things
@@ -27,7 +28,7 @@ worth a look" - that links to it.
 
 **Worth a look** lists the health advisor's findings about the connection (C13 to C18, S05, S11 to S13, K04, K08) and the
 page's own hints, most severe first. Each is a card with the settings it is about and the change to make, written twice: as
-a connection string and as `NpgsqlDataSourceBuilder` code (in Marten Studio, inside `opts.ConfigureNpgsqlDataSourceBuilder`),
+a connection string and as `NpgsqlDataSourceBuilder` code (in a Marten host, inside `opts.ConfigureNpgsqlDataSourceBuilder`),
 with a copy button for each. A hint is a sentence, never a finding: hints are not counted, ranked or exported by the advisor.
 Where there are "Good to know" notes the heading counts each kind apart - "1 finding · 2 hints · 2 notes" (a kind with none is
 left out); with none it is the number of things worth a look.
@@ -57,7 +58,7 @@ share on TLS. It is behind `ViewDatabaseActivity` (see "The gates").
 password provider, a logger factory), and the default password file. It is a closed disclosure with a one-line summary; open
 or closed is remembered per browser.
 
-**In Marten Studio**, "How Marten uses this connection" adds:
+**In a Marten host**, the Marten module's "How Marten uses this connection" adds:
 
 - the command timeout Marten applies to its sessions, worked out as Marten does - or, where only a numeric default and a
   different connection-string value are left to tell apart, both numbers, with a sentence that says Marten does not say
@@ -85,10 +86,10 @@ The page is built so that a connection string never reaches it ([D33 in the main
 
 A data source you gave a `Name` (`NpgsqlDataSourceBuilder.Name`, set directly or in the builder callback that
 `AddNpgsqlDataSource` and Aspire take) is reported to Npgsql's meter under that name, not its connection string. C18 identifies such
-a pool in memory, from the data sources the studio already resolves - the one this page is about, Postgres Studio's
-`AddDataSource` sources and Marten Studio's stores' databases - and keeps only counts, as above. A named pool the studio does not
+a pool in memory, from the data sources the studio already resolves - the one this page is about, the Postgres module's
+`AddDataSource` sources and the Marten module's stores' databases - and keeps only counts, as above. A named pool the studio does not
 resolve, several pools that share one name, and a pool the bounded walk did not reach are **not judged**: C18 says "Not judged for N
-named pool(s)" rather than "nothing found". Marten Studio cannot be told about a data source no store uses; drop its `Name`, or
+named pool(s)" rather than "nothing found". The Marten module cannot be told about a data source no store uses; drop its `Name`, or
 accept C18. See [C18](health/connections.md#c18-several-pools-to-one-database-in-this-process).
 
 Tests run a data source made entirely of sentinel strings through every one of those places and fail if one appears.
@@ -101,14 +102,14 @@ Each hint names the setting and gives its fix. They appear only when they apply.
 |---|---|---|
 | TLS | The server's certificate is not checked (`SSL Mode` below `VerifyCA`), or the connection is never encrypted. Names the provider's CA bundle where the studio has a source (Amazon RDS, Azure); behind an Amazon RDS Proxy it advises no `Root Certificate`. | `SSL Mode=VerifyFull` (with `Root Certificate`) |
 | LIFETIME | `Connection Lifetime=0` never recycles connections, so they do not rebalance after a failover or a scale-out; behind an Amazon RDS Proxy, a lifetime of 0 or over 24 hours outlives the proxy's 24-hour limit. | `Connection Lifetime=3600` |
-| MULTIHOST | Several hosts and no `Target Session Attributes`: a write can land on a standby. In Marten Studio it says which host Marten picks for reads and writes. | `Target Session Attributes=primary` |
+| MULTIHOST | Several hosts and no `Target Session Attributes`: a write can land on a standby. In a Marten host it says which host Marten picks for reads and writes. | `Target Session Attributes=primary` |
 | KEEPALIVE | No `Keepalive` where something cuts idle connections (a managed platform, a pooler, the server's `idle_session_timeout`). | `Keepalive=` half the shortest cut |
 | POOLSIZE | Sessions with this `Application Name` peaked at N on the server, against the pool's maximum. Counted by name across every process and database using it. | none: weigh `Maximum Pool Size` |
-| BUFFER | The average row or document read is larger than `Read Buffer Size`. In Marten Studio the size comes from the deeper checks E04 and T09. | `Read Buffer Size=` a little above the row |
+| BUFFER | The average row or document read is larger than `Read Buffer Size`. In a Marten host the size comes from the deeper checks E04 and T09. | `Read Buffer Size=` a little above the row |
 | PREPARE | `Max Auto Prepare` on Supabase's transaction pooler (port 6543) can break; or `Max Auto Prepare=0` elsewhere leaves planning on the table. | `Max Auto Prepare=0` or `20` |
 | RESET | Npgsql's reset on release against PgBouncer (its compatibility page) or an Amazon RDS Proxy (the reset pins the connection). | `No Reset On Close=true` |
 | ENLIST | `Enlist=true` makes Npgsql look for an ambient transaction on every open (shown in the full settings list). | `Enlist=false` where `System.Transactions` is unused |
-| CMDTIMEOUT | Which timeout cancels a long command first: Npgsql's `Command Timeout` or the server's `statement_timeout` / `transaction_timeout`. In Marten Studio, the one that counts is Marten's. | none |
+| CMDTIMEOUT | Which timeout cancels a long command first: Npgsql's `Command Timeout` or the server's `statement_timeout` / `transaction_timeout`. In a Marten host, the one that counts is Marten's. | none |
 | COLDSTART | A `Timeout` under 5 s on Neon, which scales a compute to zero. | `Timeout=15` |
 | AUTH | The server's `password_encryption` is `md5`, or `Channel Binding=Disable`. | `Channel Binding=Prefer` |
 | MUX | `Multiplexing` is experimental and changes connection semantics. | `Multiplexing=false` |
@@ -131,7 +132,7 @@ checks. Their pages are in [health/](health/):
   into logs or exceptions;
 - [C13 to C15](health/connections.md#c13-idle-connections-hoarded-near-the-limit), the server's connection limit;
 - [K04](health/configuration.md#k04-hotcold-daemon-behind-a-transaction-pooler) and
-  [K08](health/configuration.md#k08-server-timeouts-end-the-daemons-leadership), in Marten Studio.
+  [K08](health/configuration.md#k08-server-timeouts-end-the-daemons-leadership), in a Marten host.
 
 ## Compare a connection string
 
@@ -160,8 +161,8 @@ passwords taken out.
 
 ## The gates
 
-- The page, the Overview's line and paste-to-compare are D29's `Database` gate: the store (Marten Studio) or source
-  (Postgres Studio) authorization policy, asked about the database as a whole with `TenantId = null`. A visitor the policy
+- The page, the Overview's line and paste-to-compare are D29's `Database` gate: the store (Marten module) or source
+  (Postgres module) authorization policy, asked about the database as a whole with `TenantId = null`. A visitor the policy
   refuses sees nothing of it.
 - "This application's sessions", and the pool peak counted by application name, are D29's `Activity` gate: the
   `ViewDatabaseActivity` capability, then the policies, with the write policy asked with that capability named. Without

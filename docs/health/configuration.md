@@ -6,12 +6,12 @@ Configuration page does not: its store card shows `AutoCreate`, its Events card 
 daemon mode and the leadership lock's scope, and its Runtime card the host's environment name. The one exception
 is K04's host and port, which are evidence at the database-wide gate - the store policy for the database as a
 whole - because that is what the Configuration page asks before it lists a database's server and port. K05-K07 read
-the studio's own options the same way, in both studios. K08 is the one that reads the server too: three timeouts in
+the studio's own options the same way, in both modules. K08 is the one that reads the server too: three timeouts in
 `pg_settings`, a catalog read, so it is shown at the database-wide gate, and so is K09, which reads the catalog for document
 tables named under a Turkish or Azerbaijani culture. (K10 is retired.) Back to the [index](../health.md).
 
-**Studios.** K05, K06 and K07 run in both studios. K01 to K04, K08 and K09 read a Marten store's configuration, and run
-only in Marten Studio ([codes.md](codes.md)).
+**Modules.** K05, K06 and K07 run in both modules. K01 to K04, K08 and K09 read a Marten store's configuration, and run
+only in a Marten host ([codes.md](codes.md)).
 
 ## K01 AutoCreate in Production
 
@@ -76,7 +76,7 @@ opts.Events.EnableExtendedProgressionTracking = true;
 
 **K02 fires on Marten's defaults, by design.** A new store with an async projection and nothing else configured
 gets this Info. It is an Info, not a Warning: nothing is wrong, and muting it in the browser is a reasonable
-answer. `samples/MartenStudio.Sample` turns the switch on, so that the sample starts healthy and its landing
+answer. `samples/DataStudio.Sample.Marten` turns the switch on, so that the sample starts healthy and its landing
 page's "Make it unhealthy" switches are what makes the advisor warn - the throwaway server's own
 [S02](server.md#s02-settings-that-blind-or-endanger-the-store) Info aside.
 
@@ -156,19 +156,19 @@ Marten's) or a process that runs no daemon.
 
 ## K05 SQL console without a narrowed role
 
-**Warning.** Both studios. `Capabilities.RunSql` is on, `ReadOnly` is off, and `SqlConsoleRole` is not set - so every
+**Warning.** Both modules. `Capabilities.RunSql` is on, `ReadOnly` is off, and `SqlConsoleRole` is not set - so every
 statement typed into the console runs as the role the data source logs in as, the role that owns the application's tables.
 
 The console's read-only transaction stops writes, never reads (D13): whoever is granted `RunSql` reads every row that role
 can, in every schema, whatever `BrowsableSchemas` says. The role the console runs as is its real boundary. Like K01-K04 it
-reads only the studio's options, with no I/O, and is shown to anybody the scope admits; unlike them it runs in both studios,
-and names the option in the studio's own type (`MartenStudioOptions.SqlConsoleRole`, `PostgresStudioOptions.SqlConsoleRole`).
+reads only the studio's options, with no I/O, and is shown to anybody the scope admits; unlike them it runs in both modules,
+and names the option in the studio's own type (`MartenOptions.SqlConsoleRole`, `PostgresOptions.SqlConsoleRole`).
 `ReadOnly` mutes it.
 
 What to change:
 
 ```csharp
-// In AddMartenStudio(options => ...): the role the SQL console and the database browser read as
+// In AddDataStudio().AddMarten(options => ...): the role the SQL console and the database browser read as
 options.SqlConsoleRole = "studio_reader";
 ```
 
@@ -178,7 +178,7 @@ either.
 
 ## K06 Database browser open to every schema without a narrowed role
 
-**Warning.** Both studios. `Capabilities.BrowseDatabase` is on, `ReadOnly` is off, `BrowsableSchemas` contains `"*"`, and
+**Warning.** Both modules. `Capabilities.BrowseDatabase` is on, `ReadOnly` is off, `BrowsableSchemas` contains `"*"`, and
 `SqlConsoleRole` is not set: event 9230's condition, now a finding too (D27). `"*"` admits every schema the reading role
 has `USAGE` on but Postgres' own and extensions', and without `SqlConsoleRole` the reading role is the data source's own
 login, so every table it may select from is browsable, row by row, by anyone granted `BrowseDatabase`.
@@ -188,7 +188,7 @@ does a visitor read through it. `ReadOnly` mutes it. The remedy is K05's: a `Sql
 
 ## K07 Studio open to anonymous visitors with a capability on
 
-**Critical in Production, Warning anywhere else.** Both studios. The studio's pages are served to anybody - they carry
+**Critical in Production, Warning anywhere else.** Both modules. The studio's pages are served to anybody - they carry
 `AllowAnonymous`, from the mapping's own `AllowAnonymous()` or a group above it, observed on the finished endpoints the
 start-up guard reads, the same fact the layout's banner draws - and at least one capability is on (and `ReadOnly` off).
 
@@ -201,15 +201,15 @@ What to change:
 
 ```csharp
 // Ask who the visitor is:
-app.MapMartenStudio().RequireAuthorization();
+app.MapDataStudio().RequireAuthorization();
 
 // ...or keep it anonymous, with every capability off:
-options.Capabilities = new MartenStudioCapabilities();
+options.Capabilities = new MartenCapabilities();
 ```
 
 ## K08 Server timeouts end the daemon's leadership
 
-**Warning**, one finding per setting. Marten Studio only. This process runs the async daemon `HotCold`, and a server
+**Warning**, one finding per setting. Marten module only. This process runs the async daemon `HotCold`, and a server
 timeout the store's role is subject to ends the leader's session or transaction - and with it the leadership. Another node
 takes the lead and every projection the leader ran restarts there, over and over as each new leader is ended in turn.
 Three variants, read from the Server page's settings read (`pg_settings` on a connection of the store's own data source,
@@ -256,7 +256,7 @@ A session-scoped lock cannot work behind a transaction-mode pooler (K04), so the
 
 ## K09 Document storage named under a Turkish or Azerbaijani culture
 
-**Warning**, one finding per table (or per function that belongs to no table). Marten Studio only, database-wide gate. Since 0.10.
+**Warning**, one finding per table (or per function that belongs to no table). Marten module only, database-wide gate.
 Marten 9.55 lowers document aliases, `DdlTemplate` lookups and flat-table upsert function names with the invariant culture
 (marten#5778, #5783). Before it, a host running under `tr-TR` or `az-AZ` got `mt_doc_ınvoice` (a dotless `ı`, U+0131) for
 the document type `Invoice`; from 9.55 Marten expects `mt_doc_invoice` and creates it, empty. The existing documents stay in

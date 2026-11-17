@@ -1,8 +1,8 @@
 # Stream compaction
 
-Marten Studio can compact one event stream from its Stream detail page. Compaction is off by default.
-`MartenStudioOptions.Capabilities.CompactStreams` turns it on (it is part of `MartenStudioCapabilities.All()`),
-and `ReadOnly` turns it off again. The write policy is asked about the scope as selected, tenant included,
+The Marten module can compact one event stream from its Stream detail page. Compaction is off by default.
+`MartenOptions.Capabilities.CompactStreams` turns it on (it is part of `MartenCapabilities.All()`),
+and either `ReadOnly` switch (`MartenOptions.ReadOnly`, `DataStudioOptions.ReadOnly`) turns it off again. The write policy is asked about the scope as selected, tenant included,
 with `CompactStreams` named. Every attempt is written to the audit log, whether it succeeds or fails.
 
 This page is the longer version of what the confirmation dialog says. Everything here was read from

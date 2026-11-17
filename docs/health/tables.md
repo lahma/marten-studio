@@ -7,10 +7,10 @@ statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`
 [below](#the-statement-checks-t02-t22-t23)); T14 also reads who holds the vacuum horizon back (`pg_stat_activity`,
 `pg_locks`, `pg_prepared_xacts`, `pg_replication_slots`, `pg_stat_replication`). Back to the [index](../health.md).
 
-**Studios.** T01 to T08, T12 to T16, T19, T20 and T23 to T26 read Postgres alone and run in both studios: in Marten
-Studio over the store's tables and the tables beside them, in Postgres Studio over every table of the schemas
-`BrowsableSchemas` admits. T09, T10, T11, T17, T18 and T22 read what a Marten store declares, and run only in Marten Studio.
-The list of every code and its studios is [codes.md](codes.md).
+**Modules.** T01 to T08, T12 to T16, T19, T20 and T23 to T26 read Postgres alone and run in both modules: in a Marten
+host over the store's tables and the tables beside them, in a Postgres host over every table of the schemas
+`BrowsableSchemas` admits. T09, T10, T11, T17, T18 and T22 read what a Marten store declares, and run only in a Marten host.
+The list of every code and its modules is [codes.md](codes.md).
 
 What every check here has in common:
 
@@ -187,7 +187,7 @@ tenant's partition after the tenant.
 Variants: `index`, whose subject is the invalid index (`T03|index|public.mt_doc_order.mt_doc_order_idx_status`), and
 `partitions`, whose subject is the table whose partitions carry invalid indexes (`T03|partitions|public.mt_doc_order`).
 Until 0.5 the second was the subject `public.mt_doc_order#partitions`, a kind and an object at once, so both keys moved
-once. Both studios run it.
+once. Both modules run it.
 
 ## T04 Redundant index
 
@@ -296,7 +296,7 @@ Critical. Behind means a counter at least **10,000 past twice its trigger**, the
 kind more than **an hour** ago or never, and the table **not being vacuumed now** - held for ten minutes of
 samples, unless autovacuum is switched off for the table or the server, when there is nothing to wait for. The
 fixed 20% dead and one-day rules of 0.4 are gone: a table tuned to `scale_factor 0.01` is caught long before it
-is a fifth dead. Studios: both.
+is a fifth dead. Modules: both.
 
 Variants:
 
@@ -798,7 +798,7 @@ long query, a DBA can raise `jit_above_cost` for the store's role instead.
 ## T16 Autovacuum workers saturated
 
 **Warning** when every autovacuum worker on the server has been busy in **three samples running** - so a table that
-crosses its trigger now waits for one to come free, however far past it it goes (T07). Studios: both. The server's
+crosses its trigger now waits for one to come free, however far past it it goes (T07). Modules: both. The server's
 `autovacuum = off` is S02's, and T16 then says only that no worker runs.
 
 How busy they are is counted as the reading role can count them:
@@ -822,7 +822,7 @@ process id and relation number - numbers only, never a name.
 ## T24 Autovacuum switched off for a table
 
 **Warning; Critical** once the table's oldest transaction-id age - its own, its TOAST table's and its partitions'
-`age(relfrozenxid)`, the age T12 reads - is past half of `autovacuum_freeze_max_age`. Studios: both.
+`age(relfrozenxid)`, the age T12 reads - is past half of `autovacuum_freeze_max_age`. Modules: both.
 
 A table, its TOAST table (`toast.autovacuum_enabled`) or some of its partitions have the storage parameter
 `autovacuum_enabled = false`: autovacuum leaves it alone - dead rows are never cleared, statistics never refreshed,
@@ -838,7 +838,7 @@ own table that statement for its migrations.
 
 ## The Maintenance page
 
-**Operations › Maintenance** (both studios) shows what autovacuum makes of each table, and reads nothing the health
+**Operations › Maintenance** (both modules) shows what autovacuum makes of each table, and reads nothing the health
 sweep did not: its facts are the regular sweep's own reads, once per `HealthInterval` for everybody watching. It is
 shown to a visitor the store policy passes for the database as a whole (`TenantId = null`).
 
@@ -877,7 +877,7 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
 
 ## T15 Foreign key without a covering index
 
-**Warning** (variant `uncovered`) or **Info** (variant `partly-covered`). Studios: both. Gate: Database. A foreign key on a
+**Warning** (variant `uncovered`) or **Info** (variant `partly-covered`). Modules: both. Gate: Database. A foreign key on a
 judged table of 8 MiB or more (its heap, from `relpages`) that no index covers:
 
 - `uncovered` - no usable index leads with any of the key's columns: the lookup reads the whole table.
@@ -932,7 +932,7 @@ shown: the lookup's plan reads another table, through a row-level security polic
 ## T17 Orphaned document tables
 
 **Info.** Tables in the store's own schemas named like Marten document tables (`mt_doc_*`) that no store in this process
-declares, counted, with their estimated size together (heap, TOAST and indexes, from `relpages`). Studios: Marten Studio.
+declares, counted, with their estimated size together (heap, TOAST and indexes, from `relpages`). Modules: Marten.
 
 Marten creates a document type's table and never drops it: a type renamed, moved to another schema or removed leaves its
 old table on disk and in every backup. **Never named**, because a document type Marten has not loaded yet - one never
@@ -944,7 +944,7 @@ nothing.
 
 ## T18 Tenant skew
 
-**Info.** Studios: Marten Studio. Gate: Database, and - because a finding names its tenant - the activity gate and that
+**Info.** Modules: Marten. Gate: Database, and - because a finding names its tenant - the activity gate and that
 tenant's store policy. One tenant holds more than half of a conjoined table's rows, in a table of 100,000 rows or more with 5
 tenants or more: a conjoined document type's table, and `mt_events` and `mt_streams` when the event store is conjoined. With
 fewer tenants, one being large is the shape of the data.
@@ -979,7 +979,7 @@ and back: `AutoCreate.CreateOrUpdate` is not additive.
 
 ## T19 Partitions against the lock table
 
-**Info** (variant `per-transaction`) or **Warning** (variant `capacity`). Studios: both. For each partitioned table:
+**Info** (variant `per-transaction`) or **Warning** (variant `capacity`). Modules: both. For each partitioned table:
 
 `locks = 1 + intermediate partitioned tables + Σ leaf partitions (1 + the indexes on it)`, plus its partitioned indexes
 from PostgreSQL 16 - what one query that is not pruned takes, and a generic plan of a query that filters on the partition
@@ -1005,14 +1005,14 @@ catalog, never by locking anything.
 
 ## T20 Range partitions running out
 
-**Critical** or **Warning**. Studios: both. For a table partitioned by range on one `date`, `timestamp` or `timestamptz`
+**Critical** or **Warning**. Modules: both. For a table partitioned by range on one `date`, `timestamp` or `timestamptz`
 column, judged by the newest partition's upper bound against now and the newest partition's own width - and, on one
 `smallint`, `integer` or `bigint` column, against where its rows stop:
 
 - `running-out` - **Critical** when there is no `DEFAULT` partition and the bound has passed or is within one width of
   now: inserts for the next period then fail ("no partition of relation found for row"). **Warning** when it is ahead by
   fewer than two widths, or - with a `DEFAULT` partition, which catches the rows - when it has passed. A `MAXVALUE` bound
-  never runs out. A Marten document table on `ByRollingRange(...)` (Marten Studio) is warned of only within one width:
+  never runs out. A Marten document table on `ByRollingRange(...)` (the Marten module) is warned of only within one width:
   Marten provisions its periods ahead and always gives it a `DEFAULT` partition, and the recommended `periodsAhead: 1`
   leaves the newest bound more than one width ahead whenever the roll-forward has run - so a finding means the
   roll-forward has fallen behind.
@@ -1052,7 +1052,7 @@ A static `ByRange()` always has a `DEFAULT` partition (Weasel writes one), so a 
 
 ## T25 Bloated index
 
-**Warning** (variant `issue-rule`) or **Info** (variant `key-width`). Studios: both. A b-tree index of 64 MiB or more that
+**Warning** (variant `issue-rule`) or **Info** (variant `key-width`). Modules: both. A b-tree index of 64 MiB or more that
 is mostly empty space, by a lock-free estimate from the catalog:
 
 - `issue-rule` - at least 10 times `reltuples × 64` bytes: the issue's own rule.
@@ -1073,7 +1073,7 @@ and the definition, so the next apply sees no change.
 
 ## T26 Integer key running out
 
-**Warning** at half the range, **Critical** at four fifths (T11's lines). Studios: both. A `smallint` or `integer` column
+**Warning** at half the range, **Critical** at four fifths (T11's lines). Modules: both. A `smallint` or `integer` column
 of a judged table - a library's included - that a sequence feeds (an identity column, a `serial`, or a default that calls
 one, as `pg_depend` records it, never matched as text), or a `bigint` column fed by a `smallint` or `integer` sequence or
 by one whose `MAXVALUE` is set below `bigint`'s:

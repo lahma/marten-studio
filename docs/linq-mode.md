@@ -13,7 +13,7 @@ The studio parses it with JasperFx's Dynamic LINQ (`JasperFx.Linq.DynamicQuery`)
 soft-delete filter, a subclass's `mt_doc_type` filter, enum storage and duplicated fields are therefore Marten's,
 exactly as your application gets them.
 
-Since 1.1 the same tab also queries the event log: see [Events](#events).
+The same tab also queries the event log: see [Events](#events).
 
 The page shows the rows, the statement Marten built, its plan (`EXPLAIN`, never `ANALYZE`), and index advice: the
 member each condition reads, whether an index can serve it, and the `StoreOptions` line that would declare one,
@@ -24,9 +24,9 @@ such as `options.Schema.For<Order>().Duplicate(x => x.Customer.Name);`.
 LINQ mode is off by default.
 
 ```csharp
-builder.Services.AddMartenStudio(options =>
+builder.Services.AddDataStudio().AddMarten(options =>
 {
-    options.Capabilities.RunLinqQueries = true;   // or MartenStudioCapabilities.All()
+    options.Capabilities.RunLinqQueries = true;   // or MartenCapabilities.All()
 });
 ```
 
@@ -155,7 +155,7 @@ A visitor the policies refuse the plan still gets the rows. The panel says why t
 
 ## Events
 
-Since 1.1 the same tab queries the **event log**. Pick **Events (mt_events)** in the **Query** list, or press **Query these
+The same tab queries the **event log**. Pick **Events (mt_events)** in the **Query** list, or press **Query these
 events with LINQ** on the Event feed, which carries the feed's stream, type and time filters over as a predicate (a link
 only: it fills the boxes and never runs).
 
@@ -482,7 +482,7 @@ It leaves out:
 A refusal never names a type the graph leaves out or the host hides. It says "a type LINQ mode does not query"
 instead, because the refusal is shown to whoever typed the text.
 
-#### The event graph (1.1)
+#### The event graph
 
 The same three walls, with a different graph. `IEvent` is an interface Marten maps only partly, so reflection alone would
 offer members that mean something else:
@@ -533,7 +533,7 @@ offer members that mean something else:
   all. The hidden subclass is not offered, and cannot be chosen or named, but its rows are not filtered out of the
   root's. This is how the Documents screen lists a hierarchy too. A host that must keep a subclass's rows unseen hides
   the root.
-- **Recent and saved queries live in the visitor's own browser.** From 1.2 LINQ mode has the same drawer as the SQL console
+- **Recent and saved queries live in the visitor's own browser.** LINQ mode has the same drawer as the SQL console
   and the Marten clause box, with a list of its own for each store (a LINQ entry is a target, a predicate, an ordering and,
   for the event log, an archived selector, and it is never offered to another mode). The lists are in the browser's
   `localStorage` (a cookie when that is refused) and nowhere on the server, so a colleague never sees them and they cost the
@@ -585,7 +585,7 @@ offer members that mean something else:
   - `ToCommand` reaches for the database to create the table, and the studio's builder does not;
   - with nothing to create, both build the same statement;
   - Marten binds the session's tenant.
-- For the events (1.1):
+- For the events:
   - `LinqEventMembersTests` pins Marten's `EventQueryMapping`: every offered member's predicate and ordering builds to a
     column, every withheld one is a body read or replaces the archive filter, and Marten's tenant term survives a predicate
     that names `TenantId`;

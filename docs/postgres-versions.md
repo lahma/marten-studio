@@ -1,14 +1,14 @@
 # PostgreSQL versions
 
-Marten Studio and Postgres Studio are **tested on PostgreSQL 15 to 19**, and every release is tested on each of them -
-19 on its release candidate until its general availability. **14 works but reaches its end of life on 2026-11-12 and is untested from
-1.1:** the studio keeps every read it makes on 14, and warns about its end of life, but no release is run against it any
+Data Studio is **tested on PostgreSQL 15 to 19**, and every release is tested on each of them -
+19 on its release candidate until its general availability. **14 works but reaches its end of life on 2026-11-12 and is
+untested:** the studio keeps every read it makes on 14, and warns about its end of life, but no release is run against it any
 more. The studio reads every server it is pointed at; the floor is what it promises, not what it refuses.
 
-| Major | Status in 1.1 | Community end of life |
+| Major | Status | Community end of life |
 |---|---|---|
 | 13 and older | **Below the floor.** The studio still runs, read by read, with no promise | 13: 2025-11-13 (passed) |
-| 14 | **Works, untested from 1.1.** The studio's reads still run on it, and health check S01 says it is out of support from 2026-11-12. Plan the move to 15 | 2026-11-12 |
+| 14 | **Works, untested.** The studio's reads still run on it, and health check S01 says it is out of support from 2026-11-12. Plan the move to 15 | 2026-11-12 |
 | 15 | Supported | 2027-11-11 |
 | 16 | Supported | 2028-11-09 |
 | 17 | Supported; the default of the live test suite | 2029-11-08 |
@@ -27,7 +27,7 @@ Every release runs the **version matrix**: one server per major - `postgres:15.1
 on each one, as the application's own role and as a role with no grant at all:
 
 - a health sweep of the shared studio's checks - the regular ones and the statement checks; it has no deeper ones,
-  and Marten Studio's own checks (the daemon, the event store, the document tables' Marten-only checks) are not part
+  and the Marten module's own checks (the daemon, the event store, the document tables' Marten-only checks) are not part
   of the matrix - in which every check reads, is not applicable, or says why it was not checked, and none fails on a
   column, function or view that version does not have;
 - every list and detail read of the database browser, the Sessions read, the Overview's server read and the

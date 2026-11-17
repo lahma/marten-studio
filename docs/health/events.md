@@ -2,7 +2,7 @@
 
 These checks look at the event store's traffic and shape. Back to the [index](../health.md).
 
-**Studios.** Every check here reads a Marten store's event store, and runs only in Marten Studio
+**Modules.** Every check here reads a Marten store's event store, and runs only in a Marten host
 ([codes.md](codes.md)).
 
 They read in two ways, and say which in every finding's caveat:

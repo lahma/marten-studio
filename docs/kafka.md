@@ -1,37 +1,57 @@
-# KStudio for Apache Kafka® (preview)
+# The Kafka module for Apache Kafka® (preview)
 
-KStudio is the Kafka section of Marten Studio and Postgres Studio. It shows the clusters and topics your application's own
-Kafka credentials can describe, and, behind a capability that is off by default, searches their records. It runs inside
-your application, with your configuration and your policies, and it never writes to Kafka.
+The Kafka module (the `DataStudio.Kafka` package) is the Kafka section of Data Studio, beside the Marten or Postgres pages
+or alone. It shows the clusters and topics your application's own Kafka credentials can describe, and, behind a capability
+that is off by default, searches their records. It runs inside your application, with your configuration and your
+policies, and it never writes to Kafka. It is a preview: its API and screens may change in a minor release, and its three
+packages (`DataStudio.Kafka`, `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`) are versioned `<version>-preview.1`
+and installed with `--prerelease`.
 
-Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache
+Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache
 Software Foundation.
 
 ## Registration
 
-```csharp
-builder.Services.AddMartenStudio();   // or AddPostgresStudio(): KStudio is a module of the studio you register
-builder.Services.AddKafkaStudio(o =>
-{
-    o.AddCluster("primary", consumerConfig, c => c
-        .DisplayName("Production")
-        .Environment("prod")
-        .ConsumerGroup("orders-handler"));      // its lag is shown on each topic it reads
-    o.Topic("orders.v1", t => t
-        .Description("Orders, as CloudEvents.")
-        .Key(KafkaKeyFormat.Utf8String)
-        .Value(KafkaDecoders.CloudEvents));
-});
-app.MapMartenStudio();                // there is no MapKafkaStudio(): the pages are under the studio's path, at /kafka
+```shell
+dotnet add package DataStudio.Kafka --prerelease
 ```
 
+```csharp
+using DataStudio;
+using DataStudio.Kafka;
+
+builder.Services
+    .AddDataStudio()
+    .AddMarten()           // or .AddPostgres(), or nothing: the Kafka module needs no database module
+    .AddKafka(o =>
+    {
+        o.AddCluster("primary", consumerConfig, c => c
+            .DisplayName("Production")
+            .Environment("prod")
+            .ConsumerGroup("orders-handler"));      // its lag is shown on each topic it reads
+        o.Topic("orders.v1", t => t
+            .Description("Orders, as CloudEvents.")
+            .Key(KafkaKeyFormat.Utf8String)
+            .Value(KafkaDecoders.CloudEvents));
+    });
+
+app.MapDataStudio();                // there is no map call for a module: the pages are under the studio's path, at /studio/kafka
+```
+
+The Kafka module joins the studio the host registered: `AddKafka()` is called on the same `DataStudioBuilder`, in any order
+beside the other modules (the modules appear in the order the calls were written), and there is no `MapKafka…`: the one
+`MapDataStudio()` serves its pages. A host with only Kafka is `AddDataStudio().AddKafka(...)`; it references no Postgres
+module, no diagnostics engine and no Npgsql, and its output folder holds none of them. The pages are under
+`/studio/kafka` (the mount, `/studio` unless the host chose another, and the module's segment): the topics, a topic,
+Search, a record, Related records, the Live tail and Settings.
+
 `AddCluster` copies your `ClientConfig` (a `ConsumerConfig` or an `AdminClientConfig` will do) when the options are
-first resolved; KStudio never writes to your instance. A topic you do not declare is still listed and searchable, with its
-key format assumed to be UTF-8 text.
+first resolved; the Kafka module never writes to your instance. A topic you do not declare is still listed and searchable,
+with its key format assumed to be UTF-8 text.
 
 ## What it never does
 
-KStudio reads and never writes. Its clients are copies of your configuration with these changes: no topic is ever
+The Kafka module reads and never writes. Its clients are copies of your configuration with these changes: no topic is ever
 auto-created, no offset is committed or stored, no consumer group is joined (each search assigns its partitions with
 explicit offsets), no statistics or client metrics are sent, and your builder delegates are never run. The Cluster
 settings page lists every change. A search reads at most a budget you set, at a byte rate you set, and stops with its
@@ -55,11 +75,12 @@ names an option or a builder method except **Cluster settings**, which lists eac
 says how a profile and consumer groups are declared. The header's capabilities list and the audit entries on Activity name the options too: they
 are for the people who run the application.
 
-`KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
+`KafkaOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a
 search naming one is refused whole. `CapabilityAuthorizationPolicy` is asked for each use of a capability, per topic,
-and falls back to the cluster policy. The studio's own `AuthorizationPolicy` decides who gets in, and its `ReadOnly`
-turns every Kafka capability off. A host that turns a capability on with neither Kafka policy set refuses to start:
+and falls back to the cluster policy. The shell's `DataStudioOptions.AuthorizationPolicy` decides who gets in, and
+`DataStudioOptions.ReadOnly` turns every Kafka capability off: the Kafka module has no read-only switch of its own, and the
+Marten and Postgres modules' own switches do not reach it. A host that turns a capability on with neither Kafka policy set refuses to start:
 every visitor could otherwise read every topic your credentials can read.
 
 ## Search
@@ -103,7 +124,7 @@ page. Possible duplicates and related records compare the matches on the page. "
 records read and everything that could make it untrue.
 
 A search link keeps the cluster, topics and window in the address and the predicate after `#`, which browsers never send
-to a server. A record link (`kafka/record?cluster=…&topic=…&partition=…&offset=…`) carries no record data.
+to a server. A record link (`/studio/kafka/record?cluster=…&topic=…&partition=…&offset=…`) carries no record data.
 
 Limits (`o.Limits`) bound every search: bytes and records per search, duration, matches kept, an hourly allowance per user,
 two searches at a time per application and one per user, and a byte rate for the whole application. They can only be
@@ -113,7 +134,7 @@ lowered.
 
 **Related records** on a record's page searches the topics around it for records that share one of its correlation
 values. The values come only from what the page already shows you: a field that is redacted, cut or absent is never
-used. By default KStudio compares Wolverine's headers (`correlation-id`; `id`, `conversation-id` and `causation-id`;
+used. By default the Kafka module compares Wolverine's headers (`correlation-id`; `id`, `conversation-id` and `causation-id`;
 `saga-id`), the CloudEvents `id` and the record's trace id. Declare more per topic:
 
 ```csharp
@@ -134,7 +155,7 @@ listed. A topic Kafka refuses shows why. Nothing runs until you press **Search r
 
 ## Record index
 
-KStudio keeps no index of your topics. If your application already knows where its records went (a document that stored the
+The Kafka module keeps no index of your topics. If your application already knows where its records went (a document that stored the
 partition and offset its producer got back, say), it can tell a search where to look:
 
 ```csharp
@@ -181,7 +202,7 @@ export holds the value whole up to `Limits.MaxDecodeBytes`.
 Redaction holds in the file: a masked key, header, attribute or part of a value is written as the page shows it
 (`••• (redacted by header authorization)`), and each row lists what was masked in `redacted`. Values are included only for
 records you could read the value of. A file is at most `Limits.MaxExportBytes` (32 MiB); records past it are left out and the
-page says how many. The file travels to your browser over the page's own connection; KStudio maps no download address. Every
+page says how many. The file travels to your browser over the page's own connection; the Kafka module maps no download address. Every
 export is recorded (event 9606) with the records, the size, the format and the search's predicate, its redacted values replaced
 by `<redacted>`.
 
@@ -242,14 +263,14 @@ character at a time, and a search link leaves its value out.
 
 ## Profiles
 
-A cluster can say what kind of cluster it is, and KStudio lowers its limits there:
+A cluster can say what kind of cluster it is, and the Kafka module lowers its limits there:
 
 ```csharp
 o.AddCluster("prod", config, c => c.Profile(KafkaProfile.Production));
 ```
 
 A profile only lowers limits and forbids; it never turns a capability on and never raises a limit above yours. A cluster with no
-profile uses your limits as they are; KStudio never guesses one from the host's environment or the cluster's `Environment` text.
+profile uses your limits as they are; the Kafka module never guesses one from the host's environment or the cluster's `Environment` text.
 
 | Limit | `Development` | `Test` | `Production` |
 |---|---|---|---|
@@ -289,13 +310,17 @@ The cluster selector and the Settings page show each cluster's profile and the l
 
 ## Wolverine
 
-`KStudio.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
+`DataStudio.Kafka.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
 
-```csharp
-builder.Services.AddKafkaStudio(k => k.UseWolverineKafka());
+```shell
+dotnet add package DataStudio.Kafka.Wolverine --prerelease
 ```
 
-It reads `WolverineOptions` once, when KStudio first needs its clusters, and starts, connects and writes nothing. Each
+```csharp
+builder.Services.AddDataStudio().AddKafka(k => k.UseWolverineKafka());
+```
+
+It reads `WolverineOptions` once, when the Kafka module first needs its clusters, and starts, connects and writes nothing. Each
 Kafka transport becomes a cluster (`wolverine`, or `wolverine-{broker}` for a named broker), and each broker-per-tenant
 registration becomes a cluster of its own, `wolverine/{tenant}`, which your policies see as `Cluster = "wolverine"`
 with `TenantId` set. Listener and sender endpoints become topics with their direction, message types, serializer and
@@ -303,12 +328,12 @@ consumer group, and the native dead-letter topic is listed. A topic Wolverine se
 CloudEvents.
 
 **A serializer of your own.** A custom `IMessageSerializer` that writes structured CloudEvents (with the content type
-`application/json`, say) is not recognised by what it writes: KStudio guesses nothing from a value, because that would
+`application/json`, say) is not recognised by what it writes: the Kafka module guesses nothing from a value, because that would
 change what `$.x` means on topics that are not CloudEvents. Declare the serializer, and the topics of every endpoint that
 uses it, or a type derived from it, are decoded as CloudEvents, so `ce.type = '…'` and the `ce.*` chips find their records:
 
 ```csharp
-builder.Services.AddKafkaStudio(k => k.UseWolverineKafka(w => w
+builder.Services.AddDataStudio().AddKafka(k => k.UseWolverineKafka(w => w
     .CloudEventsSerializer<MyStructuredCloudEventsSerializer>()));
 ```
 
@@ -321,25 +346,25 @@ other: a topic the application only publishes to lists no group of it. A group y
 durable broker and a buffered twin, for example), and each is listed as a cluster of its own, `{ClusterKey}-{slug}` (the
 cluster key is `wolverine` unless you changed it): the slug is the broker's name lower-cased, with every character outside
 letters, digits and hyphens replaced by a hyphen, runs of hyphens collapsed to one and the ends trimmed. It is shown as
-`Wolverine · {broker}`. KStudio never connects to merge them. Where two listed clusters have the same bootstrap servers
+`Wolverine · {broker}`. The Kafka module never connects to merge them. Where two listed clusters have the same bootstrap servers
 (compared as a set, from configuration, so order and spaces do not matter), the selector adds *(same servers as …)* to
 their names and the Settings page says so, naming only the clusters you may see (it names `ExcludeBroker` only when one of
 them is a named broker, which is the only kind it can leave out; otherwise it says to declare the cluster once). Leave a broker out of discovery by its
 name, and nothing of it is listed (no cluster, topics, groups or tenants):
 
 ```csharp
-builder.Services.AddKafkaStudio(k => k.UseWolverineKafka(w => w.ExcludeBroker("besteffort")));
+builder.Services.AddDataStudio().AddKafka(k => k.UseWolverineKafka(w => w.ExcludeBroker("besteffort")));
 ```
 
 The default transport has no broker name and is always listed.
 
-KStudio never reads Wolverine's message store, never runs Wolverine's builder callbacks (pass a token refresh through
+The Kafka module never reads Wolverine's message store, never runs Wolverine's builder callbacks (pass a token refresh through
 `w.Cluster((broker, c) => c.OAuthBearerTokenRefresh(…))`), and never consumes with Wolverine's group ids. **Discovery
 adds no redaction rule:** declare rules for every topic that carries personal data.
 
-Wolverine 6.61 keeps its broker-per-tenant registrations internal. KStudio reads them through a guarded probe that lists
+Wolverine 6.61 keeps its broker-per-tenant registrations internal. The Kafka module reads them through a guarded probe that lists
 nothing when Wolverine's shape differs. A tenant's cluster has no configuration until Wolverine has connected it, which
-happens as the application starts, so KStudio reads tenants only after the application has started: until then the
+happens as the application starts, so the Kafka module reads tenants only after the application has started: until then the
 Settings page says "Not listed: some clusters, because the application had not started", and the first read after it adds the
 tenants Wolverine has connected. A tenant Wolverine had not connected by then is not listed.
 
@@ -349,7 +374,7 @@ A policy that checks only `Cluster` admits every tenant entry of that cluster: c
 
 ## Links
 
-In Marten Studio, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
+In the Marten module, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
 or stream, in the tenant of the record's `tenant-id` header. The document and stream pages offer **Find in Kafka**, which
 opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
 `tenant-id` is redacted has no Marten links.
@@ -367,7 +392,7 @@ they tell you nothing about databases or tenants you may not see. Picking a data
 
 `o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
 `{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is
-shown to every visitor, and KStudio refuses user info and credential parameters at start: in the query or the fragment, any parameter named
+shown to every visitor, and the Kafka module refuses user info and credential parameters at start: in the query or the fragment, any parameter named
 `key`, `sig`, `auth`, `pwd`, `passwd` or `code`, or ending in `token`, `secret`, `password`, `signature`, `apikey`, `accesskey` or `credential`, whatever
 its case and whatever `-`, `_` or `.` it holds (`api-key`, `X-Amz-Signature` and `private_token` are refused; `tokenizer` and `author` are not). A
 placeholder goes in the path, the query or the fragment, never in the scheme or the host.

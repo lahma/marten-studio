@@ -2,8 +2,8 @@
 
 Amazon Aurora PostgreSQL-Compatible Edition is PostgreSQL with Aurora's own storage underneath: a cluster volume shared by
 every instance, "copies of the data across three Availability Zones" (*Amazon Aurora storage*), readers that read that
-volume instead of streaming WAL, and on Serverless v2 a compute capacity, in ACU, that scales while the server runs. Both
-studios recognise an Aurora server and read it the way Aurora documents it (issue #8, A1-A8). This page says what the
+volume instead of streaming WAL, and on Serverless v2 a compute capacity, in ACU, that scales while the server runs. The
+Postgres and Marten modules recognise an Aurora server and read it the way Aurora documents it (issue #8, A1-A8). This page says what the
 studio reads there, what it marks as not applicable and why, how a host supplies the capacity SQL cannot see, and what the
 studio does for each of issue #8's Aurora items in this release.
 
@@ -85,7 +85,7 @@ documentation:
 | T01-T08, T12-T16, T24 | Tables, indexes and vacuum | apply | Aurora runs autovacuum like PostgreSQL; its autovacuum settings are cluster-level parameters (A6) |
 | T02, T22, T23 | Statements | apply | `pg_stat_statements`, preloaded by Aurora's default parameter group (A7) |
 
-MartenStudio's own checks (the daemon, events, documents) read the store and apply unchanged. The Replication page's
+The Marten module's own checks (the daemon, events, documents) read the store and apply unchanged. The Replication page's
 checkpoint, WAL, archiver and tablespace sections say "Not applicable on Aurora"; its standbys become **Aurora replicas**
 (A3). `pg_control_checkpoint()` and `pg_control_system()`, which the statistics window reads for the timeline and the
 system identifier, are not documented by AWS for Aurora either way; a revoked or failing call nulls only the timeline and
@@ -238,7 +238,7 @@ These need an AWS account, or a page AWS has not written:
 
 ## Testing
 
-`PostgresStudio.Integration.Tests` has VERS's Aurora shim (`Versions/AuroraShim.cs`): Aurora's functions written as plain
+`DataStudio.Postgres.Integration.Tests` has VERS's Aurora shim (`Versions/AuroraShim.cs`): Aurora's functions written as plain
 SQL in `pg_catalog`, from AWS's signatures, in a database of their own on the version matrix's PostgreSQL 17 - never one a
 self-hosted test reads, because the shim makes its database an Aurora server for the detector. `Aurora/AuroraShimLiveTests`
 proves the instance, R03 `aurora-reader` firing and quiet, the wait section, a failover between two sweeps, the
