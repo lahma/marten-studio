@@ -233,8 +233,8 @@ This is the full text of hard rules 1 to 17. AGENTS.md states each rule in brief
       `PostgresDiagnosticsVersionGuard`, which `AddMarten()`'s guard repeats for the engine). `SharedStudioReferenceTests`
       holds that the reference runs from the Marten module to the Postgres module and never back.
     - **The Postgres module, the engine and the Marten module reference no `Confluent.*`, `Wolverine*` or `DataStudio.Kafka*`
-      assembly or package, and their source names no Kafka** (`PostgresKafkaFenceTests` and `KafkaFenceTests` in
-      `DataStudio.Marten.Tests` for the references, `ModuleNeutralityTests` for the text).
+      assembly or package, and their source names no Kafka** (`PostgresKafkaFenceTests` in `DataStudio.Postgres.Tests` and
+      `KafkaFenceTests` in `DataStudio.Marten.Tests` for the references, `ModuleNeutralityTests` for the text).
     - **The Kafka module, `src/DataStudio.Kafka`, references the shell and its engine, and no Postgres module, no
       Postgres engine, no `Npgsql`, no Marten, JasperFx, Weasel or Wolverine**; its built assembly references no `Confluent.*`
       (the client is the engine's). `KafkaFenceTests` (`DataStudio.Kafka.Tests`) holds it at the project file, restore graph,

@@ -54,7 +54,7 @@ shell's and the Kafka module's own:
    - **The fences** (hard rule 16): `ShellFenceTests` (`DataStudio.Tests`: the shell references ASP.NET Core and nothing else);
      `PostgresFenceTests` (`DataStudio.Postgres.Tests`: the Postgres module and the engine, and the engine's own no-ASP.NET-Core fence) and
      `CoreFenceTests` (the text half); `SharedStudioReferenceTests` (the Marten module references the Postgres module, never the reverse);
-     `PostgresKafkaFenceTests` and `KafkaFenceTests` (`DataStudio.Marten.Tests`) with `ModuleNeutralityTests` (no Kafka in the shell, the Postgres module,
+     `PostgresKafkaFenceTests` (`DataStudio.Postgres.Tests`) and `KafkaFenceTests` (`DataStudio.Marten.Tests`) with `ModuleNeutralityTests` (no Kafka in the shell, the Postgres module,
      the engine or the Marten module, in project files or text); `KafkaFenceTests`, `KafkaCoreFenceTests` (`DataStudio.Kafka.Tests`) and
      `KafkaWolverineFenceTests` (`DataStudio.Kafka.Wolverine.Tests`) for the Kafka three. Each fence test carries a theory that proves its
      name list catches what it forbids and lets through what it must (the shell, a module and its own engine are all named `DataStudio…`).

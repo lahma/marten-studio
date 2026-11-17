@@ -233,8 +233,8 @@ viewer deserializes into types found at run time. Full text: [architecture.md](d
 
 **D3 — Few dependencies a package, and no upper bound on any.** The shell (`DataStudio`) takes `Microsoft.AspNetCore.App.Internal.Assets`
 (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App`, nothing else. The Postgres module takes the shell and
-`DataStudio.Postgres.Diagnostics`, each at exactly its own version, plus the framework reference. The Marten module takes `Marten`
-(floor `9.57.0`) and the Postgres module at exactly its own version, plus the framework reference; it has no direct `Npgsql`, which
+`DataStudio.Postgres.Diagnostics`, each at exactly its own version, plus the framework reference. The Marten module takes two dependencies
+(`Marten`, floor `9.57.0`, and the Postgres module at exactly its own version), plus the framework reference; it has no direct `Npgsql`, which
 arrives through `Weasel.Postgresql`. The engine (`DataStudio.Postgres.Diagnostics`) takes `Npgsql` (floor `9.0.4`) and four
 `Microsoft.Extensions.*` abstractions (floor `10.0.0`), with no framework reference at all. The Kafka module takes the shell and
 `DataStudio.Kafka.Core`, each at exactly its own version, plus the framework reference; the Kafka engine takes `Confluent.Kafka` (floor
@@ -428,7 +428,7 @@ beside `AddPostgres()`. Settings split in seams: `IShellSettings` (the shell's, 
 for the engine and `IStudioSettings` for the Postgres module; a module's one options object answers the ones it is. The public
 `AddMarten`'s own body stays free of Postgres types (`PostgresVersionGuardTests` scans its IL). `PostgresResource` has no tenant and
 is deliberately unrelated to `MartenStoreResource` and `KafkaTopicResource`: a handler written for one must never be handed another. Each
-module's words come from its own `StudioText` (D49), so a change in one module moves no other's; static assets live only in
+module's words are its own (`MartenText`, `PostgresText`, `KafkaText`, D49), so a change in one module moves no other's; static assets live only in
 `_content/DataStudio/`. Full text: [architecture.md](docs/maintainers/architecture.md#d30).
 
 **D31 — The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the

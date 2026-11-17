@@ -160,9 +160,10 @@ of its own: it obeys the shell's (D35).
 *Routes and assets* follow hard rule 16 and D11; the stylesheet and the script are the shell's, in `_content/DataStudio/`, and no module ships
 an asset of its own that the host would load.
 
-*Words.* Each module has its own words (`StudioText`): the Marten module's in `DataStudio.Marten`, the Postgres module's in
-`DataStudio.Postgres`, the engine's own (the health export's and the checks') in the engine, the Kafka module's in `DataStudio.Kafka`, and the shell's
-in `StudioShellIdentity`. Each is pinned by a `WordsTests` baseline (D49).
+*Words.* Each module has its own words, as a `StudioText` (the class is the engine's, with every sentence the database modules share): the Marten module's `MartenText` in
+`DataStudio.Marten`, the Postgres module's `PostgresText.Instance` in the engine's assembly, and the engine's own set, `PostgresText.DiagnosticsInstance`, for a host that
+calls `AddPostgresDiagnostics()` and has no studio; the Kafka module's `KafkaText` is in `DataStudio.Kafka`, and the shell's are in `StudioShellIdentity`. Each is pinned by a
+`WordsTests` baseline (D49).
 
 ## D31
 
@@ -276,8 +277,8 @@ every secret before the text is read, and keeps, logs, audits and connects to no
 
 - **One product and one wording.** The product is Data Studio; a module is Marten, Postgres or Kafka. There is no `StudioProduct` that picks
   between two sets of sentences, and no sentence, title, credit, tile or heading says "Marten Studio", "Postgres Studio" or "KStudio"
-  (`ProductNamesTests` holds every module's words and every string literal and Razor text of `src/`, with an allow-list of the few that
-  name a 1.x thing on purpose). A module says what only it knows in its own words, and the nouns a module's source kind needs ("Marten
+  (`ProductNamesTests` holds the Marten and Postgres modules' words and every string literal and Razor text of `src/`, the Kafka module's own
+  suite its words, with an allow-list of the few literals that name a 1.x thing on purpose). A module says what only it knows in its own words, and the nouns a module's source kind needs ("Marten
   store", "data source") stay descriptor data. The words of each module are pinned in a baseline of its own, so a change of wording is read as a
   diff and never by accident: `WordsTests_DataStudioMarten`, `…Postgres`, `…PostgresDiagnostics` (the engine alone) and `…Kafka`
   (`WordsTests` in each suite).
