@@ -12,6 +12,10 @@ namespace DataStudio.Kafka.Tests.Conventions;
 public class PackReadinessTests
 {
     private const string AsfLine =
+        "Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.";
+
+    // The package README's prose is the documentation step's (v2 step 9): it still says the line as 1.x did.
+    private const string ReadmeAsfLine =
         "Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.";
 
     public static TheoryData<string, string, string> Projects => new()
@@ -81,7 +85,7 @@ public class PackReadinessTests
         var text = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka", "README.md")).Replace("\r\n", "\n");
 
         text.Should().StartWith("# KStudio for Apache Kafka®");
-        text.Replace("\n", " ").Should().Contain(AsfLine);
+        text.Replace("\n", " ").Should().Contain(ReadmeAsfLine);
     }
 
     [Fact]

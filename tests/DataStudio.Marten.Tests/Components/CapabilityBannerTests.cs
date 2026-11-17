@@ -74,6 +74,26 @@ public class CapabilityBannerTests
     }
 
     /// <summary>
+    /// The chip's one template names the switch that is on, a module's own included: under the module's first group a line says so, and while the
+    /// module's switch is off the line is not drawn.
+    /// </summary>
+    [Fact]
+    public void A_modules_own_ReadOnly_is_named_under_its_first_group_and_only_while_it_is_on()
+    {
+        using var on = new StudioComponentContext().WithAllCapabilities();
+        on.Options.ReadOnly = true;
+
+        var banner = on.Render<CapabilityBanner>();
+
+        banner.TextOfAll(".ms-popover-title").Should().Equal("Marten: reads authorized like writes", "Marten: mutating operations");
+        banner.TextOfAll(".ms-popover-footnote").Should().Contain(static x => x.Contains("MartenOptions.ReadOnly is true, so every capability of this module is off.", StringComparison.Ordinal));
+
+        using var off = new StudioComponentContext().WithAllCapabilities();
+
+        off.Render<CapabilityBanner>().TextOfAll(".ms-popover-footnote").Should().NotContain(static x => x.Contains("is true, so every capability of this module is off", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Every row names the exact property a host would have to set (D4). "Not permitted" with nothing to
     /// act on is the failure mode of every feature-flagged admin UI.
     /// </summary>
