@@ -358,10 +358,36 @@ public class EventStatisticsChecksTests
         finding.Severity.Should().Be(HealthSeverity.Info, "the statistics cannot say which aggregate a long stream belongs to");
         finding.Remedy!.Code.Should().Be("opts.Projections.Snapshot<Basket>(SnapshotLifecycle.Inline);");
         finding.Evidence.Should().Contain(new HealthEvidence("Longest stream the statistics saw", "2,500 events"));
-        finding.Evidence.Should().Contain(static x => x.Label == "Aggregated only live" && x.Value.Contains("Basket (aggregated in code, not registered)", StringComparison.Ordinal));
+        finding.Evidence.Should().Contain(static x => x.Label == "Aggregated only live" && x.Value == "Basket (not registered with the store), Order");
         finding.Evidence.Should().Contain(static x => x.Label == "Streams over 1,000 events" && x.Value.StartsWith("about", StringComparison.Ordinal));
         finding.Caveat.Should().Contain("cannot say which aggregate");
+        finding.Caveat.Should().EndWith(LongStreamsWithoutSnapshotCheck.NotRegisteredCaveat, "one listed aggregate has no registration, so the finding says what being listed means");
+        finding.Caveat.Should().NotContain("not known", "Marten lists an aggregate it found by its generated evolver whether or not this process ever fetched it");
         finding.Link!.Route.Should().Be(DataStudio.Marten.Services.Events.EventLinks.StreamsRoute);
+    }
+
+    [Fact]
+    public void E06_says_nothing_about_unregistered_aggregates_when_every_listed_one_is_registered()
+    {
+        LongStreamsFacts facts = new([new LiveAggregate("Order", Registered: true)], 0, Streams(10_000, [("3", 0.5)], ["1", "500", "2500"]));
+
+        HealthFinding finding = new LongStreamsWithoutSnapshotCheck().Evaluate(facts, At()).Findings.Should().ContainSingle().Subject;
+
+        finding.Caveat.Should().NotContain("not registered");
+        finding.Evidence.Should().Contain(new HealthEvidence("Aggregated only live", "Order"));
+    }
+
+    [Fact]
+    public void E06_an_aggregate_only_found_in_code_is_quiet_while_no_stream_is_long()
+    {
+        // The path every real host takes: Marten lists the aggregate because it found its generated evolver, nothing keeps it,
+        // and the longest stream is at the threshold, not over it.
+        LongStreamsFacts facts = new([new LiveAggregate("Basket", Registered: false)], 0, Streams(5_000, [("3", 0.5)], ["1", "400", "1000"]));
+
+        HealthVerdict verdict = new LongStreamsWithoutSnapshotCheck().Evaluate(facts, At());
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Be("The longest stream the statistics of mt_streams saw has 1,000 events.");
     }
 
     [Fact]

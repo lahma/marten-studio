@@ -13,8 +13,9 @@ namespace DataStudio.Marten.Services.Health.Checks;
 /// <summary>An aggregate this store only ever builds live, by replaying its stream.</summary>
 /// <param name="Name">Its type's name in code, for the remedy.</param>
 /// <param name="Registered">
-/// Whether it is registered (<c>LiveStreamAggregation&lt;T&gt;()</c> or a live <c>SingleStreamProjection</c>), rather
-/// than only aggregated live by code in this process.
+/// Whether it is registered (<c>LiveStreamAggregation&lt;T&gt;()</c> or a live <c>SingleStreamProjection</c>). An aggregate that
+/// is not is one Marten found at startup by its source-generated evolver, in any assembly the application loads, or one
+/// this process has aggregated live: the list cannot tell the two apart, and the first says nothing about use.
 /// </param>
 internal sealed record LiveAggregate(string Name, bool Registered);
 
@@ -35,8 +36,9 @@ internal sealed record LongStreamsFacts(IReadOnlyList<LiveAggregate> LiveOnly, i
 /// document instead, and stream compaction folds an old stream into one event.
 /// </para>
 /// <para>
-/// <b>Tier 1, no scan.</b> The aggregates come from the configuration and from what this process has aggregated live
-/// (<c>ProjectionOptions.AllAggregateTypes()</c>); the stream lengths from <c>pg_stats.histogram_bounds</c> of
+/// <b>Tier 1, no scan.</b> The aggregates come from the configuration, from the source-generated evolvers Marten finds in the
+/// application's assemblies at startup (<c>DiscoverGeneratedEvolversOnStartup</c>, on by default) and from what this process
+/// has aggregated live (<c>ProjectionOptions.AllAggregateTypes()</c>); the stream lengths from <c>pg_stats.histogram_bounds</c> of
 /// <c>mt_streams.version</c>, shared with E05 and E07. The statistics describe every stream together and cannot say
 /// which aggregate a long stream belongs to, so the finding is an Info and says so. The 20 longest streams are a
 /// scan of <c>mt_streams</c>, which this check never runs; the finding's on-demand action does
@@ -54,6 +56,18 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
         "Adds the aggregate's document table and keeps it in the appending transaction; on an existing store, rebuild the "
         + "snapshot projection once to fill it. SnapshotLifecycle.Async keeps it off the append path instead, at the cost "
         + "of a fetch that may lag.";
+
+    /// <summary>What follows the name of an aggregate no registration declares.</summary>
+    internal const string NotRegisteredMark = " (not registered with the store)";
+
+    /// <summary>
+    /// What the caveat says of such an aggregate: being listed is not being used, because Marten lists every aggregate whose
+    /// source-generated evolver it finds, and an aggregate with neither a registration nor an evolver is listed only once fetched.
+    /// </summary>
+    internal const string NotRegisteredCaveat =
+        " An aggregate marked not registered is one Marten found in the application's code at startup, by its source-generated "
+        + "evolver, or one this process has aggregated live: being listed does not mean it has been fetched. An aggregate with "
+        + "neither a registration nor a generated evolver is missing from the list until this process fetches it.";
 
     /// <summary>The <c>StoreOptions</c> line that snapshots an aggregate inline.</summary>
     /// <param name="aggregate">The aggregate's name in code.</param>
@@ -141,7 +155,7 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
             new("Streams over " + EventHealth.Count(LongStream) + " events", overText),
             new("Longest stream the statistics saw", EventHealth.Count(seen) + " events"),
             new("Streams", facts.Streams.EstimatedRows is { } rows ? "about " + EventHealth.Count(rows) : "unknown"),
-            new("Aggregated only live", string.Join(", ", facts.LiveOnly.Select(static x => x.Name + (x.Registered ? string.Empty : " (aggregated in code, not registered)")))),
+            new("Aggregated only live", string.Join(", ", facts.LiveOnly.Select(static x => x.Name + (x.Registered ? string.Empty : NotRegisteredMark)))),
         ];
 
         LiveAggregate first = facts.LiveOnly[0];
@@ -162,7 +176,7 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
             Evidence = evidence,
             Caveat = EventHealth.StatisticsCaveat(facts.Streams)
                 + " The statistics describe every stream together and cannot say which aggregate a long stream belongs to - it may "
-                + "be one that is already snapshotted. Aggregates this process has never fetched live are not known to it.",
+                + "be one that is already snapshotted." + (facts.LiveOnly.Any(static x => !x.Registered) ? NotRegisteredCaveat : string.Empty),
             Remedy = new HealthRemedy(SnapshotRemedyLine(first.Name), SnapshotRemedyExplanation),
             Link = new HealthLink("Open Streams", EventLinks.StreamsRoute),
         });
@@ -170,7 +184,7 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
 
     /// <summary>
     /// The aggregates no inline or async projection keeps: every type <c>AllAggregateTypes()</c> lists - registered
-    /// projections, live sources and what this process has aggregated live - whose every aggregate registration is
+    /// projections, live sources, the aggregates of the generated evolvers Marten found and what this process has aggregated live - whose every aggregate registration is
     /// <c>Live</c>.
     /// </summary>
     internal static IEnumerable<(Type Type, bool Registered)> LiveOnly(StoreOptions options)

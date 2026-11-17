@@ -43,11 +43,11 @@ public static class SampleStore
 
         opts.Connection(connectionString);
 
-        // v2 rename: JasperFx's scan of the loaded assemblies for [GeneratedEvolver] markers skips every assembly whose name
-        // begins with "Marten", and this domain's and the tests' assemblies were such assemblies (MartenStudio.*), so the demo
-        // never listed its own aggregates as "aggregated in code". Under their DataStudio.* names the scan would read them, and
-        // the health page (E06) would start naming every demo aggregate. Dispatch does not depend on the scan, which is why
-        // switching it off keeps the demo exactly as it was.
+        // Marten scans the loaded assemblies at startup for the evolvers its source generator emitted and lists each one's
+        // aggregate, used or not. A real host leaves that on. The demo switches it off so that its health page (E06) names
+        // only the aggregates the demo itself declares or fetches, and not every self-aggregating type of every assembly a
+        // test run happens to load beside it; dispatch does not depend on the scan. What E06 says of a scanned aggregate is
+        // held by GeneratedEvolverAggregatesTests and the E06 tests of EventStatisticsChecksTests.
         opts.Projections.DiscoverGeneratedEvolversOnStartup = false;
 
         // Its own schemas, so the demo never collides with whatever else lives in the database and the
