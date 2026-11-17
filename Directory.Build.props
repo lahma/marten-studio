@@ -31,7 +31,7 @@
        builds with, and so the tag its health docs links point at - and VersionFallbackTests holds it to CHANGELOG.md's top
        version. -->
   <PropertyGroup>
-    <VersionPrefix>1.3.1</VersionPrefix>
+    <VersionPrefix>2.0.0</VersionPrefix>
   </PropertyGroup>
 
   <!-- K8: the Kafka module ships as a preview beside the family release. The three Kafka projects (DataStudio.Kafka.Core, DataStudio.Kafka, DataStudio.Kafka.Wolverine) pack
