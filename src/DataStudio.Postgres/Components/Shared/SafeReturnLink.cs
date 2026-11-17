@@ -80,20 +80,31 @@ internal static class SafeReturnLink
             return null;
         }
 
+        // A dot segment climbs out of the studio's base however the rest reads, in either spelling of the dot.
+        foreach (string segment in value.Split('?')[0].Split('/'))
+        {
+            if (Uri.UnescapeDataString(segment) is "." or "..")
+            {
+                return null;
+            }
+        }
+
         string path = StudioLink.NormalizeRelativePath(value);
 
         // Both base shapes the studio renders under: on the interactive circuit the base URI is the
         // studio root, so the path is already studio-relative; under static rendering it still carries
-        // the mount prefix. Either is fine, as long as what is left is the area asked for.
-        if (StudioLink.TryStripDashboardPrefix(path, settings, out string stripped))
+        // the mount prefix. The address is judged as written first, and only then below the mount: a mount
+        // may be named like a segment of an address (a mount of /marten puts every return link at
+        // marten/marten/...), and stripping it first would judge the link by the wrong half.
+        if (IsInside(path, root))
         {
-            path = stripped;
+            return value;
         }
 
-        bool inside =
-            path.Equals(root, StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
-
-        return inside ? value : null;
+        return StudioLink.TryStripDashboardPrefix(path, settings, out string stripped) && IsInside(stripped, root) ? value : null;
     }
+
+    private static bool IsInside(string path, string root) =>
+        path.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
 }

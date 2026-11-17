@@ -1,4 +1,5 @@
 using DataStudio.Marten.Services;
+using DataStudio.Services.Settings;
 using Bunit;
 
 using DataStudio.Marten.Components.Pages.Documents;
@@ -104,6 +105,71 @@ public class DocumentPageHardeningTests
     public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
     {
         SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().Be(from);
+    }
+
+    private static MartenStudioSettings AtMount(string path) =>
+        MartenStudioSettings.Of(new MartenOptions(), new ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { Path = path })));
+
+    /// <summary>
+    /// A mount may be named like a module's segment (<c>/marten</c> was 1.x's default), and then every return link starts with the mount's own word:
+    /// the link is judged by its address as written first, and by its address below the mount only after that.
+    /// </summary>
+    [Theory]
+    [InlineData("/marten", "marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/marten", "marten/marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/marten", "marten/documents")]
+    [InlineData("/postgres", "marten/documents/customer?page=3")]
+    [InlineData("/kafka", "kafka/marten/documents/customer?page=3")]
+    [InlineData("/studio", "marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/studio", "studio/marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/a/b", "a/b/marten/documents/customer?page=2")]
+    public void A_return_link_into_the_documents_area_is_kept_whatever_the_mount_is_called(string mount, string from)
+    {
+        SafeReturnLink.Sanitize(from, AtMount(mount)).Should().Be(from);
+    }
+
+    [Theory]
+    [InlineData("/marten")]
+    [InlineData("/postgres")]
+    [InlineData("/kafka")]
+    [InlineData("/studio")]
+    public void And_whatever_the_mount_is_called_what_is_not_a_page_of_the_studio_is_still_refused(string mount)
+    {
+        string[] refused =
+        [
+            "marten",
+            "postgres/query?mode=sql",
+            "other/marten/documents/customer",
+            "//evil.example/marten/documents/customer",
+            "/marten/documents/customer",
+            "\\\\evil.example\\marten\\documents",
+            "/\\evil.example/marten/documents",
+            "https://evil.example/marten/documents/customer",
+            "javascript:alert(1)",
+            "marten/documents/../../../evil",
+            "marten/documents/%2E%2E/%2e%2e/evil",
+            "marten/documents/./../evil",
+        ];
+
+        foreach (string from in refused)
+        {
+            SafeReturnLink.Sanitize(from, AtMount(mount)).Should().BeNull("'{0}' is not a page of the studio's documents area under {1}", from, mount);
+        }
+    }
+
+    [Fact]
+    public void Back_from_a_document_keeps_the_lists_filter_sort_and_page_under_a_mount_named_marten()
+    {
+        using var context = new DocumentsComponentContext();
+        context.ShellOptions.Path = "/marten";
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        const string from = "marten/documents/customer?q=ada&sort=id&dir=desc&page=2";
+        context.Navigate($"marten/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
+
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        page.Find(".ms-breadcrumb a:nth-of-type(2)").GetAttribute("href").Should().Be(from);
     }
 
     [Fact]
