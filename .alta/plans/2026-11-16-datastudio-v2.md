@@ -174,8 +174,9 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       `docs/kafka.md`, AGENTS.md and `docs/maintainers/*` rewritten for the new names (the D-numbers stay; D11, D12, D30,
       D34 and hard rules 7 and 16 are restated), `CHANGELOG.md` `# 2.0.0`, `Directory.Build.props` `VersionPrefix`.
 - [ ] 10. **Release.** Full `build.ps1 Test` at the floors and at the latest-tested versions, `Pack`, `Publish --skip`,
-      the `studio-ui-verifier` over the three samples, then the tag. Before it: the trusted-publishing policy for each
-      of the seven new ids on nuget.org (yours). After it: deprecate the six old ids with their successors.
+      the `studio-ui-verifier` over the three samples, then the tag. The existing nuget.org trusted-publishing policy
+      is not limited to one package id (`docs/maintainers/build-and-release.md`), so the seven new ids need no new
+      policy; the owner confirms that before the tag. After it: deprecate the six old ids with their successors.
 
 ## How it is verified
 
@@ -212,8 +213,9 @@ No decision is open: the option names, the one wording, the solution file and th
   becomes an href, but pushes and redirects built by hand exist; both browser suites are the gate.
 - **The diagnostics API's page paths change meaning** (relative to the Postgres module, not to the mount). A host that
   builds links from them must prefix the segment; `docs/upgrading.md` says so.
-- **Seven new package ids need seven trusted-publishing policies** before the tag, or the publish workflow fails
-  half-way through the family.
+- **Seven new package ids go out under the one existing trusted-publishing policy**, which covers every id of the
+  repository; if that turns out not to hold for a new id, the publish workflow fails half-way through the family, so
+  the owner confirms it before the tag.
 
 ## Out of scope
 
