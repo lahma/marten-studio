@@ -26,8 +26,8 @@ internal static class ShellRegistration
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<DataStudioOptions>, DataStudioOptionsValidator>());
         services.TryAddSingleton<ShellRegistrationMarker>();
 
-        // The shell's descriptor: every registered module composed, when first resolved (D34), after every Add*(), so registration is
-        // order-independent.
+        // The shell's descriptor: every registered module composed, when first resolved (D34), after every Add*(), in the order the host added
+        // them: that is the order of the rail, the banner, the chip, the credit and the front tiles.
         services.TryAddSingleton(static provider => StudioModuleComposition.Compose(provider.GetServices<IStudioModule>()));
 
         // Refuses to start an application whose mapped studio nothing authorizes. Registered here rather

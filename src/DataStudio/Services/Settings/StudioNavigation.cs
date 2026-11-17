@@ -6,9 +6,9 @@ namespace DataStudio.Services.Settings;
 internal sealed record StudioNavSection(string Title, IReadOnlyList<StudioNavItem> Items)
 {
     /// <summary>
-    /// The key of the module that contributed the section, set by the composition and never by a module (D34): the root's sections carry the
-    /// root's key, so "a host section" is "a section of the root module". The rail asks the module's <see cref="IStudioModuleRail" />, if it
-    /// has one, for the section's links and entries. <see langword="null" /> only on a section no composition has stamped.
+    /// The key of the module that contributed the section, set by the composition and never by a module (D34). The rail asks the module's
+    /// <see cref="IStudioModuleRail" />, if it has one, for the section's links and entries. <see langword="null" /> on the shell's own section
+    /// and on a section no composition has stamped.
     /// </summary>
     public string? ModuleKey { get; init; }
 }

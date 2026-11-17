@@ -76,7 +76,6 @@ internal static class DocumentLinks
     /// <param name="id">The document id.</param>
     public static string ToDocument(string? storeKey, string? tenantId, string alias, string id)
     {
-
         var url = StudioLink.To(Root + "/" + Uri.EscapeDataString(alias) + "/doc");
 
         if (!string.IsNullOrEmpty(storeKey))

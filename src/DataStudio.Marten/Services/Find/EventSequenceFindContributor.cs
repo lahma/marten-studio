@@ -1,8 +1,6 @@
 using System.Globalization;
 
 using DataStudio.Marten.Services.Events;
-
-
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Find;
 

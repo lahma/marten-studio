@@ -15,7 +15,7 @@ public class KafkaOnlyRailRoutesTests
 
         StudioShellDescriptor shell = ComposedRailAssertions.EveryRailRouteMatchesAPage(host);
 
-        shell.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "System");
+        shell.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Studio");
         ComposedRailAssertions.NoOneDotXAddressIsAPage(shell);
     }
 }

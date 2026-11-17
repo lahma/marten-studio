@@ -112,13 +112,13 @@ public class MartenModuleCompositionTests
     }
 
     [Fact]
-    public void Modules_compose_in_key_order_with_the_shells_own_section_last_and_nothing_of_the_marten_module_moves()
+    public void Modules_compose_in_registration_order_with_the_shells_own_section_last_and_nothing_of_the_marten_module_moves()
     {
         StudioShellDescriptor composed = StudioModuleComposition.Compose([Database(), new FakeModule()]);
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
-        hostTitles[^1].Should().Be("System", "the Marten module closes its own rail with System, which is why the shell's own section is titled Studio");
-        composed.Navigation.Select(static x => x.Title).Should().Equal(["Fake section", .. hostTitles, "Studio"]);
+        hostTitles[^1].Should().Be("System", "the Marten module closes its own rail with System, and the shell's own section is titled Studio whatever it holds");
+        composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles, "Fake section", "Studio"]);
         composed.Navigation[^1].Items.Select(static x => (x.Label, x.Route)).Should().Equal(("Activity", "activity"));
         composed.Navigation[^1].ModuleKey.Should().BeNull("the shell's own section is no module's");
         composed.Navigation.Single(static x => x.ModuleKey == "fake").Title.Should().Be("Fake section");

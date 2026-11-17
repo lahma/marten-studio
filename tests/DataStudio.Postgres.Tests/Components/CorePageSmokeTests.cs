@@ -344,7 +344,7 @@ public class CorePageSmokeTests
         var banner = context.Render<CapabilityBanner>();
 
         banner.Find("button.ms-chip").TextContent.Trim().Should().Be("0 / 4 capabilities");
-        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent).Should().Equal("Reads authorized like writes");
+        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent).Should().Equal("Postgres Studio: reads authorized like writes");
         banner.FindAll(".ms-capability-name").Select(static x => x.TextContent)
             .Should().Equal("RunSql", "BrowseDatabase", "ViewDefinitions", "ViewDatabaseActivity");
         banner.FindAll(".ms-capability-option").Select(static x => x.TextContent)

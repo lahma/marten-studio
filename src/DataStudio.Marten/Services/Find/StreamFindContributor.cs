@@ -3,8 +3,6 @@ using System.Globalization;
 using JasperFx.Events;
 
 using DataStudio.Marten.Services.Events;
-
-
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Find;
 

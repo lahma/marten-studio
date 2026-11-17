@@ -74,12 +74,13 @@ internal sealed class DatabaseStudioModule : IStudioModule
     {
         get
         {
-            List<StudioModuleCapabilityGroup> groups = [new("Reads authorized like writes", Rows(guard.OfferedReads))];
+            // Each heading names its module, as every other module's does, so that beside another module's groups none reads as nobody's.
+            List<StudioModuleCapabilityGroup> groups = [new(descriptor.ProductName + ": reads authorized like writes", Rows(guard.OfferedReads))];
 
             IReadOnlyList<StudioCapability> mutating = guard.OfferedMutating;
             if (mutating.Count > 0)
             {
-                groups.Add(new("Mutating operations", Rows(mutating)));
+                groups.Add(new(descriptor.ProductName + ": mutating operations", Rows(mutating)));
             }
 
             return groups;

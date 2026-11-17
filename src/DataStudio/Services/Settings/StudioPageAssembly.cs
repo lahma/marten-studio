@@ -12,8 +12,8 @@ namespace DataStudio.Services.Settings;
 internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeRoot)
 {
     /// <summary>
-    /// The root's first segment, lower-cased as written: <c>marten</c> for <c>/marten</c>, and the empty string for the shell's own <c>/</c>.
-    /// The composition judges roots by it (<see cref="StudioModuleComposition" />).
+    /// The root's one segment, as written: <c>marten</c> for <c>/marten</c>, and the empty string for the shell's own <c>/</c>. The composition
+    /// refuses a root of more than one segment and judges roots by this one (<see cref="StudioModuleComposition" />).
     /// </summary>
     public string Segment => CompileTimeRoot.Trim('/');
 }

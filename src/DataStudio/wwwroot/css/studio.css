@@ -16771,48 +16771,6 @@ dialog.ms-modal::backdrop {
     font-size: var(--ms-font-size-xs);
 }
 
-/* ===== V2-C: the shell's front page, one tile per module ===== */
-/* A name, one sentence and a link to the module's home. No numbers: a tile reads nothing. */
-.ms-front-tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
-    gap: var(--ms-space-md);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.ms-front-tile {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ms-space-xs);
-    height: 100%;
-    padding: var(--ms-space-md);
-    border: 1px solid var(--ms-color-border);
-    border-radius: var(--ms-radius-lg);
-    background: var(--ms-color-surface);
-    color: var(--ms-color-text);
-    text-decoration: none;
-    transition: background var(--ms-transition-fast), border-color var(--ms-transition-fast);
-}
-
-.ms-front-tile:hover,
-.ms-front-tile:focus-visible {
-    border-color: var(--ms-color-primary);
-    background: var(--ms-color-surface-hover);
-}
-
-.ms-front-tile-name {
-    font-size: var(--ms-font-size-lg);
-    font-weight: var(--ms-font-weight-semibold);
-    overflow-wrap: anywhere;
-}
-
-.ms-front-tile-summary {
-    color: var(--ms-color-text-secondary);
-    overflow-wrap: anywhere;
-}
-
 /* ===== KS-SHELL: the module seams (cluster selector, the Kafka capability group, the trademark line) ===== */
 
 /* The Kafka pages end with the Apache Software Foundation disclaimer, small and muted, set apart from the body above it. */
@@ -17897,5 +17855,47 @@ dialog.ms-modal::backdrop {
 
 .ms-k-profile-hint,
 .ms-k-groups-hint {
+    overflow-wrap: anywhere;
+}
+
+/* ===== V2-C: the shell's front page, one tile per module ===== */
+/* A name, one sentence and a link to the module's home. No numbers: a tile reads nothing. */
+.ms-front-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--ms-space-md);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-front-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    height: 100%;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    text-decoration: none;
+    transition: background var(--ms-transition-fast), border-color var(--ms-transition-fast);
+}
+
+.ms-front-tile:hover,
+.ms-front-tile:focus-visible {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-front-tile-name {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-front-tile-summary {
+    color: var(--ms-color-text-secondary);
     overflow-wrap: anywhere;
 }

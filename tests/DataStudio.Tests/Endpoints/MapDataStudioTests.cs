@@ -262,13 +262,13 @@ public class MapDataStudioTests
     }
 
     [Fact]
-    public async Task A_database_less_host_gets_a_System_section_holding_Activity_and_the_page_at_the_mount_activity()
+    public async Task A_database_less_host_gets_a_Studio_section_holding_Activity_and_the_page_at_the_mount_activity()
     {
         await using WebApplication app = CreateApp();
         app.MapDataStudio().AllowAnonymous();
         StudioShellDescriptor descriptor = app.Services.GetRequiredService<StudioShellDescriptor>();
 
-        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "System");
+        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Studio");
         descriptor.Navigation[^1].Items.Select(static x => (x.Label, x.Route)).Should().Equal(("Activity", "activity"));
         descriptor.Navigation[^1].ModuleKey.Should().BeNull("the section is the shell's, not a module's");
         descriptor.Routes.Match("activity")!.PageType.FullName.Should().Be("DataStudio.Components.Pages.Activity");
@@ -281,18 +281,87 @@ public class MapDataStudioTests
         await using WebApplication app = CreateApp(configureServices: static services => services.AddSingleton<IStudioModule, ActivityModule>());
         StudioShellDescriptor descriptor = app.Services.GetRequiredService<StudioShellDescriptor>();
 
-        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Mine", "System");
+        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Mine", "Studio");
     }
 
-    private sealed class ActivityModule : IStudioModule
+    [Theory]
+    [InlineData("Studio", "Something")]
+    [InlineData("Studio", "Activity")]
+    [InlineData("Mine", "Activity")]
+    [InlineData("studio", "Something")]
+    public async Task A_module_may_not_take_the_shells_section_title_or_its_Activity_label(string title, string label)
     {
+        await using WebApplication app = CreateApp(configureServices: services => services.AddSingleton<IStudioModule>(new ActivityModule(
+            new StudioNavSection(title, [new StudioNavItem(label, "mine/page", "list")]))));
+
+        Func<StudioShellDescriptor> compose = () => app.Services.GetRequiredService<StudioShellDescriptor>();
+
+        compose.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("Studio").And.Contain("Activity").And.Contain("is already a section title or a label");
+    }
+
+    [Fact]
+    public async Task The_shells_section_is_titled_Studio_whatever_the_modules_are()
+    {
+        await using WebApplication kafkaOnly = CreateApp();
+        await using WebApplication beside = CreateApp(configureServices: static services => services.AddSingleton<IStudioModule, ActivityModule>());
+
+        kafkaOnly.Services.GetRequiredService<StudioShellDescriptor>().Navigation[^1].Title.Should().Be("Studio");
+        beside.Services.GetRequiredService<StudioShellDescriptor>().Navigation[^1].Title.Should().Be("Studio");
+    }
+
+    [Fact]
+    public async Task Modules_compose_in_the_order_the_host_added_them_and_the_order_decides_nothing_else()
+    {
+        await using WebApplication kafkaFirst = CreateApp(configureServices: static services => services.AddSingleton<IStudioModule, OtherModule>());
+
+        ServiceCollection reversed = new();
+        reversed.AddLogging();
+        reversed.AddSingleton<IStudioModule, OtherModule>();
+        reversed.AddDataStudio().AddKafka(static options => options.AddCluster("primary", new Confluent.Kafka.ClientConfig { BootstrapServers = Cluster }));
+        using ServiceProvider otherFirst = reversed.BuildServiceProvider();
+
+        kafkaFirst.Services.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("kafka", "other");
+        otherFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("other", "kafka");
+
+        // A module with no rail adds no section, and the shell's own is last.
+        otherFirst.GetRequiredService<StudioShellDescriptor>().Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Studio");
+    }
+
+    [Fact]
+    public void A_refusal_does_not_depend_on_the_order_the_modules_were_added_in()
+    {
+        ServiceCollection forward = new();
+        forward.AddLogging();
+        forward.AddDataStudio().AddKafka();
+        forward.AddSingleton<IStudioModule>(new ActivityModule(new StudioNavSection("Studio", [])));
+        ServiceCollection backward = new();
+        backward.AddLogging();
+        backward.AddSingleton<IStudioModule>(new ActivityModule(new StudioNavSection("Studio", [])));
+        backward.AddDataStudio().AddKafka();
+        using ServiceProvider first = forward.BuildServiceProvider();
+        using ServiceProvider second = backward.BuildServiceProvider();
+
+        Action composeForward = () => first.GetRequiredService<StudioShellDescriptor>();
+        Action composeBackward = () => second.GetRequiredService<StudioShellDescriptor>();
+
+        composeForward.Should().Throw<InvalidOperationException>();
+        composeBackward.Should().Throw<InvalidOperationException>();
+    }
+
+    private sealed class ActivityModule(StudioNavSection? section) : IStudioModule
+    {
+        public ActivityModule()
+            : this(null)
+        {
+        }
+
         public string Key => "mine";
 
         public string ProductName => "Mine";
 
         public IReadOnlyList<StudioPageAssembly> PageAssemblies => [];
 
-        public IReadOnlyList<StudioNavSection> Navigation => [new StudioNavSection("Mine", [new StudioNavItem("Activity of mine", "mine/activity", "list")])];
+        public IReadOnlyList<StudioNavSection> Navigation => [section ?? new StudioNavSection("Mine", [new StudioNavItem("Activity of mine", "mine/activity", "list")])];
 
         public Type? ScopeSelector => null;
 

@@ -35,7 +35,7 @@ public enum PostgresPage
     /// <summary>The Replication page.</summary>
     Replication = 9,
 
-    /// <summary>The Overview, the studio's landing page.</summary>
+    /// <summary>The Overview, the Postgres module's home (<c>postgres</c>). In a host that also has the Marten module the module's home is Marten's, and this address leads there.</summary>
     Overview = 10,
 
     /// <summary>Database › Connection: how this application connects (the page since 1.1).</summary>

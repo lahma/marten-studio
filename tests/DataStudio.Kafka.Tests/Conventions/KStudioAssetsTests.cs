@@ -41,7 +41,20 @@ public partial class KStudioAssetsTests
         css.Should().Contain(Header);
         css.IndexOf(Header, StringComparison.Ordinal).Should().BeGreaterThan(css.IndexOf("/* ===== 1.2-FINAL-FIX-4", StringComparison.Ordinal), "sections are appended in cascade order (D26)");
 
-        string section = css[css.IndexOf(Header, StringComparison.Ordinal)..];
+        // KStudio's sections run from its first to the first one that is not its own (the shell's V2-C section is appended after them, D26).
+        int start = css.IndexOf(Header, StringComparison.Ordinal);
+        int end = css.Length;
+        foreach (Match header in SectionHeader().Matches(css, start + Header.Length))
+        {
+            if (!header.Value.StartsWith("/* ===== KS-", StringComparison.Ordinal))
+            {
+                end = header.Index;
+                break;
+            }
+        }
+
+        string section = css[start..end];
+        section.Should().Contain("KS-UI-A").And.Contain("KS-PUI", "the Kafka sections that follow the first are still held to the prefix");
         ClassSelectors(section).Where(static x => !x.StartsWith("ms-k-", StringComparison.Ordinal)).Should().BeEmpty(
             "the module's classes are prefixed ms-k-; it re-declares no host class");
     }
@@ -70,6 +83,9 @@ public partial class KStudioAssetsTests
 
     [GeneratedRegex(@"\bms-k-[a-z0-9-]+", RegexOptions.None, matchTimeoutMilliseconds: 5000)]
     private static partial Regex MsK();
+
+    [GeneratedRegex(@"^/\* ===== [^\n]*$", RegexOptions.Multiline, matchTimeoutMilliseconds: 5000)]
+    private static partial Regex SectionHeader();
 
     [GeneratedRegex(@"\.([a-zA-Z][a-zA-Z0-9_-]*)(?=[\s,{:.>+~\[])", RegexOptions.None, matchTimeoutMilliseconds: 5000)]
     private static partial Regex ClassName();

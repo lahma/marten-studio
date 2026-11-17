@@ -78,7 +78,7 @@ public class ShellModuleComponentTests
     // ---- the rail
 
     [Fact]
-    public async Task Modules_are_drawn_in_key_order_and_the_shells_own_section_closes_the_rail()
+    public async Task Modules_are_drawn_in_registration_order_and_the_shells_own_section_closes_the_rail()
     {
         using KafkaStudioHarness harness = new();
         await harness.Context.ReadyAsync();
@@ -86,7 +86,7 @@ public class ShellModuleComponentTests
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
         string[] sections = [.. rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim())];
-        sections.Should().Equal("Kafka", "Data", "Database", "Operations", "System", "Studio");
+        sections.Should().Equal("Data", "Database", "Operations", "System", "Kafka", "Studio");
         rail.FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain(["Topics", "Cluster settings"]).And.NotContain("Search", "the capability is off");
     }
 
@@ -160,8 +160,8 @@ public class ShellModuleComponentTests
         string[] lines = [.. rail.Find(".ms-rail-credit").QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim())];
         lines.Should().HaveCount(5);
         lines[0].Should().StartWith("Data Studio ");
-        lines[1].Should().Be("KStudio for Apache Kafka®");
-        lines[2].Should().Be("Postgres Studio");
+        lines[1].Should().Be("Postgres Studio");
+        lines[2].Should().Be("KStudio for Apache Kafka®");
         lines[3].Should().Be("MIT licensed");
         lines[4].Should().Be("by Marko Lahma");
     }

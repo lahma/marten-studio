@@ -12,7 +12,7 @@ namespace DataStudio.Kafka.Tests.Components;
 
 /// <summary>
 /// Decision 8 of v2 step 4, on the shell's components: a shell whose only module keeps its own segment (Kafka) has no root module. Its front
-/// address leads to the module's home on the circuit as the mapping does for a document load, its rail ends with the shell's own System section
+/// address leads to the module's home on the circuit as the mapping does for a document load, its rail ends with the shell's own Studio section
 /// holding Activity, and the capability chip lists the module's capabilities and nothing else. The module is the real one over the harness's fakes;
 /// the database module the harness registers is taken out.
 /// </summary>
@@ -36,7 +36,7 @@ public class KafkaOnlyShellTests
         StudioShellDescriptor descriptor = harness.Context.Services.GetRequiredService<StudioShellDescriptor>();
 
         descriptor.Modules.Should().ContainSingle().Which.Key.Should().Be("kafka");
-        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "System");
+        descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Studio");
     }
 
     [Theory]
@@ -88,14 +88,14 @@ public class KafkaOnlyShellTests
     }
 
     [Fact]
-    public async Task The_rail_closes_with_the_shells_System_section_holding_Activity_and_names_no_database_page()
+    public async Task The_rail_closes_with_the_shells_Studio_section_holding_Activity_and_names_no_database_page()
     {
         using KafkaStudioHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
-        rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim()).Should().Equal("Kafka", "System");
+        rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim()).Should().Equal("Kafka", "Studio");
         rail.FindAll("a.ms-nav-link .ms-nav-link-text").Select(static x => x.TextContent.Trim())
             .Should().Equal("Topics", "Cluster settings", "Activity");
         rail.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain("activity");

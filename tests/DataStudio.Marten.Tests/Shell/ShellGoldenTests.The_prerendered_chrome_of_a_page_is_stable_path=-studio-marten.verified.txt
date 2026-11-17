@@ -41,8 +41,8 @@
         <div id="ms-find-popover" popover="auto" class="ms-popover ms-find-popover"><div class="ms-find"><input id="ms-find-input" type="search" class="ms-input ms-find-input" placeholder="Find by id (/)" aria-label="Find by id" aria-describedby="ms-find-hint" autocomplete="off" spellcheck="false" enterkeyhint="search" />
                 <span id="ms-find-hint" class="ms-sr-only">A document or stream id, a natural key, #sequence, an exact table or view name or a queryid</span>
 
-                <div class="ms-find-status" role="status" aria-live="polite"></div></div></div></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="0 of 14 capabilities enabled">0 / 14<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Reads authorized like writes</p>
-            <ul class="ms-capability-list" aria-label="Reads authorized like writes"><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
+                <div class="ms-find-status" role="status" aria-live="polite"></div></div></div></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="0 of 14 capabilities enabled">0 / 14<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Marten Studio: reads authorized like writes</p>
+            <ul class="ms-capability-list" aria-label="Marten Studio: reads authorized like writes"><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
                         <span class="ms-capability-name">RunSql</span>
                         <code class="ms-capability-option">MartenOptions.<wbr>Capabilities.<wbr>RunSql</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
                         <span class="ms-capability-name">BrowseDatabase</span>
@@ -52,8 +52,8 @@
                         <span class="ms-capability-name">ViewDatabaseActivity</span>
                         <code class="ms-capability-option">MartenOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
                         <span class="ms-capability-name">RunLinqQueries</span>
-                        <code class="ms-capability-option">MartenOptions.<wbr>Capabilities.<wbr>RunLinqQueries</code></li></ul><p class="ms-popover-title">Mutating operations</p>
-            <ul class="ms-capability-list" aria-label="Mutating operations"><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
+                        <code class="ms-capability-option">MartenOptions.<wbr>Capabilities.<wbr>RunLinqQueries</code></li></ul><p class="ms-popover-title">Marten Studio: mutating operations</p>
+            <ul class="ms-capability-list" aria-label="Marten Studio: mutating operations"><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
                         <span class="ms-capability-name">EditDocuments</span>
                         <code class="ms-capability-option">MartenOptions.<wbr>Capabilities.<wbr>EditDocuments</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
                         <span class="ms-capability-name">DeleteDocuments</span>

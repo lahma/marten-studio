@@ -1,4 +1,3 @@
-using DataStudio.Services.Settings;
 using DataStudio.Postgres.Components.Pages;
 using DataStudio.Postgres.Components.Pages.Query;
 using DataStudio.Postgres.Services.Connection;
@@ -8,9 +7,10 @@ using DataStudio.Postgres.Services.Maintenance;
 using DataStudio.Postgres.Services.Query;
 using DataStudio.Postgres.Services.Replication;
 using DataStudio.Postgres.Services.Server;
+using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Statements;
 using DataStudio.Postgres.Services.Storage;
-using DataStudio.Postgres.Services.Settings;
+using DataStudio.Services.Settings;
 
 namespace DataStudio.Postgres.Services.Postgres;
 

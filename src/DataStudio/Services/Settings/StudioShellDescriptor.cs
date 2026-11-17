@@ -32,7 +32,7 @@ internal sealed class StudioShellDescriptor
     /// <summary>The startup guard's lead sentence: what an unauthorized mapping would serve (every module's own sentence), and that the shell refuses to start.</summary>
     public string Exposure => exposure.Value;
 
-    /// <summary>The composed modules, by key (ordinal).</summary>
+    /// <summary>The composed modules, in registration order: the order of the host's <c>Add…()</c> calls.</summary>
     public required IReadOnlyList<IStudioModule> Modules { get; init; }
 
     /// <summary>
@@ -91,19 +91,14 @@ internal sealed class StudioShellDescriptor
     public const string ActivityRoute = "activity";
 
     /// <summary>
-    /// The shell's own rail section, last on the rail: Activity, which is the shell's and no module's. It is titled <c>System</c>, unless a module's
-    /// own section already is (both database modules close theirs with one), and then <c>Studio</c>.
+    /// The shell's own rail section, last on the rail: Activity, which is the shell's and no module's. It is always titled <see cref="RailTitle" />,
+    /// whatever modules are composed, so it says whose Activity it is and never renames itself when a module is added; the composition refuses a
+    /// module that takes that title, or the label <c>Activity</c>.
     /// </summary>
-    /// <param name="modules">The composed modules.</param>
-    internal static StudioNavSection ShellRail(IEnumerable<IStudioModule> modules)
-    {
-        ArgumentNullException.ThrowIfNull(modules);
+    internal static StudioNavSection ShellRail() => new(RailTitle, [new StudioNavItem("Activity", ActivityRoute, "list")]);
 
-        const string Preferred = "System";
-        bool taken = modules.Any(static module => module.Navigation.Any(static section => string.Equals(section.Title, Preferred, StringComparison.OrdinalIgnoreCase)));
-
-        return new(taken ? "Studio" : Preferred, [new StudioNavItem("Activity", ActivityRoute, "list")]);
-    }
+    /// <summary>The title of the shell's own rail section.</summary>
+    public const string RailTitle = "Studio";
 
     private List<StudioPageAssembly> BuildPageAssemblies() =>
         [.. Modules.SelectMany(static x => x.PageAssemblies).Append(ShellPages).Distinct()];
@@ -115,6 +110,6 @@ internal sealed class StudioShellDescriptor
     private List<StudioNavSection> BuildNavigation() =>
     [
         .. Modules.SelectMany(static module => module.Navigation.Select(section => section with { ModuleKey = module.Key })),
-        ShellRail(Modules),
+        ShellRail(),
     ];
 }

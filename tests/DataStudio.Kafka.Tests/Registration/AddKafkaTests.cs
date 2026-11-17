@@ -89,7 +89,7 @@ public class AddKafkaTests
     }
 
     [Fact]
-    public void Kafka_before_and_after_AddPostgres_compose_the_same_rail()
+    public void Kafka_before_and_after_AddPostgres_compose_in_the_order_the_host_wrote_them()
     {
         using ServiceProvider before = Build(static services =>
         {
@@ -101,15 +101,42 @@ public class AddKafkaTests
             services.AddDataStudio().AddPostgres();
             services.AddDataStudio().AddKafka();
         });
+        using ServiceProvider chained = Build(static services => services.AddDataStudio().AddPostgres().AddKafka());
+        using ServiceProvider chainedReversed = Build(static services => services.AddDataStudio().AddKafka().AddPostgres());
 
         StudioShellDescriptor first = before.GetRequiredService<StudioShellDescriptor>();
         StudioShellDescriptor second = after.GetRequiredService<StudioShellDescriptor>();
 
-        first.Navigation.Select(static x => x.Title).Should().Equal(second.Navigation.Select(static x => x.Title));
+        first.Modules.Select(static x => x.Key).Should().Equal("kafka", "postgres");
         first.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Data", "Database", "Operations", "System", "Studio");
         first.PageAssemblies.Should().HaveCount(3, "the database's, the shell's Activity page and the module's");
-        first.Modules.Select(static x => x.Key).Should().Equal("kafka", "postgres");
         first.Navigation.Single(static x => x.Title == "Kafka").ModuleKey.Should().Be("kafka");
+
+        second.Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
+        second.Navigation.Select(static x => x.Title).Should().Equal("Data", "Database", "Operations", "System", "Kafka", "Studio");
+        second.PageAssemblies.Should().HaveCount(3);
+
+        chained.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
+        chainedReversed.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.Key).Should().Equal("kafka", "postgres");
+
+        // What is refused does not depend on it: both orders compose, and the same page assemblies are served.
+        second.PageAssemblies.Select(static x => x.CompileTimeRoot).Order().Should().Equal(first.PageAssemblies.Select(static x => x.CompileTimeRoot).Order());
+    }
+
+    [Fact]
+    public void The_order_is_the_banner_the_chip_and_the_front_tiles_order_too()
+    {
+        using ServiceProvider kafkaFirst = Build(static services => services.AddDataStudio().AddKafka().AddPostgres());
+        using ServiceProvider postgresFirst = Build(static services => services.AddDataStudio().AddPostgres().AddKafka());
+
+        string[] Headings(ServiceProvider provider) =>
+            [.. provider.GetRequiredService<StudioShellDescriptor>().Modules.SelectMany(static x => x.CapabilityGroups).Select(static x => x.Heading)];
+
+        Headings(kafkaFirst).First().Should().Be("KStudio for Apache Kafka® reads");
+        Headings(postgresFirst).First().Should().StartWith("Postgres Studio: ");
+        Headings(postgresFirst).Last().Should().Be("KStudio for Apache Kafka® reads");
+        kafkaFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("KStudio for Apache Kafka®", "Postgres Studio");
+        postgresFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("Postgres Studio", "KStudio for Apache Kafka®");
     }
 
     [Fact]

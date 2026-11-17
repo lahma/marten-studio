@@ -40,7 +40,7 @@ public class KafkaRailRoutesTests
 
         StudioShellDescriptor shell = ComposedRailAssertions.EveryRailRouteMatchesAPage(host);
 
-        shell.Modules.Select(static x => x.Key).Should().Equal("kafka", "postgres");
+        shell.Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
         ComposedRailAssertions.NoOneDotXAddressIsAPage(shell);
     }
 

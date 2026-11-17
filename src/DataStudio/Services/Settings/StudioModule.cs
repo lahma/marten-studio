@@ -87,8 +87,10 @@ internal sealed record StudioModuleCapability(string Name, string Option, bool C
 internal sealed record StudioModuleCapabilityGroup(string Heading, IReadOnlyList<StudioModuleCapability> Capabilities);
 
 /// <summary>
-/// Composes the registered modules into the shell's descriptor (D34): every module in key order (ordinal). A module's page assemblies, rail
-/// sections and shortcuts follow in that order, then the shell's own rail section; the shell's words are its own (<see cref="StudioShellIdentity" />).
+/// Composes the registered modules into the shell's descriptor (D34): every module in registration order, the order of the host's <c>Add…()</c>
+/// calls on the builder, so the host that wants a module first writes it first. A module's page assemblies, rail sections, shortcuts, capability
+/// groups and front tile follow in that order, then the shell's own rail section; the shell's words are its own (<see cref="StudioShellIdentity" />).
+/// What is refused does not depend on the order.
 /// </summary>
 internal static class StudioModuleComposition
 {
@@ -100,16 +102,17 @@ internal static class StudioModuleComposition
     internal static readonly string[] ReservedSegments = ["activity", "_blazor", "_framework", "_content", "opaque-redirect"];
 
     /// <summary>Composes the shell's descriptor from <paramref name="modules" />.</summary>
-    /// <param name="modules">The registered modules, in any order.</param>
+    /// <param name="modules">The registered modules, in registration order.</param>
     /// <exception cref="InvalidOperationException">
-    /// Two modules share a key, two page assemblies share a root (ignoring case), a module's root is empty or its first segment is one the shell
-    /// uses, or a section title or item label of a module collides with another one on the composed rail.
+    /// Two modules share a key, two page assemblies share a root (ignoring case), a root is more than one segment, empty or one the shell uses,
+    /// or a section title or item label of a module collides with another one on the composed rail, with the shell's own title (<c>Studio</c>) or
+    /// with its label (<c>Activity</c>).
     /// </exception>
     public static StudioShellDescriptor Compose(IEnumerable<IStudioModule> modules)
     {
         ArgumentNullException.ThrowIfNull(modules);
 
-        IStudioModule[] ordered = [.. modules.OrderBy(static x => x.Key, StringComparer.Ordinal)];
+        IStudioModule[] ordered = [.. modules];
 
         Validate(ordered);
 
@@ -136,7 +139,17 @@ internal static class StudioModuleComposition
             foreach (StudioPageAssembly pages in module.PageAssemblies)
             {
                 string pageRoot = Normalized(pages.CompileTimeRoot);
-                string firstSegment = pages.Segment.Split('/')[0];
+
+                // One segment, so that a root is its own and never inside another's: '/postgres/sub' would put pages inside the Postgres module's
+                // segment, where the router and the layout would attribute them to a module by assembly all the same.
+                if (pages.Segment.Contains('/', StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"The pages of module '{module.Key}' are rooted at '{pages.CompileTimeRoot}', which is more than one segment. A page assembly's root is "
+                        + "exactly one segment below the mount, so that no assembly's pages are inside another's.");
+                }
+
+                string firstSegment = pages.Segment;
 
                 if (firstSegment.Length == 0 || ReservedSegments.Contains(firstSegment, StringComparer.OrdinalIgnoreCase))
                 {
@@ -156,8 +169,9 @@ internal static class StudioModuleComposition
 
         // Every title and label on the composed rail is a sibling @key in one list (NavMenu), so a module's may collide with nothing: not another
         // module's, and not another of its own. The shell's own section is on the rail too, last, and is judged with them.
-        StudioNavSection shell = StudioShellDescriptor.ShellRail(modules);
-        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        // A module may therefore use neither the shell's section title ("Studio") nor its label ("Activity").
+        StudioNavSection shell = StudioShellDescriptor.ShellRail();
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase) { shell.Title };
         names.UnionWith(shell.Items.Select(static x => x.Label));
 
         foreach (IStudioModule module in modules)
@@ -172,13 +186,6 @@ internal static class StudioModuleComposition
                 }
             }
         }
-
-        if (!names.Add(shell.Title))
-        {
-            throw new InvalidOperationException(
-                $"The shell's own rail section is titled '{shell.Title}', which is already a label on the rail of one of the modules. "
-                + "Every title and label is unique, ignoring case, because the rail keys its entries on them.");
-        }
     }
 
     private static void Claim(HashSet<string> names, string name, IStudioModule module)
@@ -186,8 +193,8 @@ internal static class StudioModuleComposition
         if (!names.Add(name))
         {
             throw new InvalidOperationException(
-                $"The rail entry '{name}' of module '{module.Key}' is already a section title or a label on the rail. "
-                + "Every title and label is unique, ignoring case, because the rail keys its entries on them.");
+                $"The rail entry '{name}' of module '{module.Key}' is already a section title or a label on the rail (the shell's own section is titled "
+                + $"'{StudioShellDescriptor.RailTitle}' and holds the label 'Activity'). Every title and label is unique, ignoring case, because the rail keys its entries on them.");
         }
     }
 
