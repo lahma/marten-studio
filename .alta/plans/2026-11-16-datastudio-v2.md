@@ -173,7 +173,8 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       table: package, registration call, option, address, log category), `docs/stability.md`, `docs/kstudio.md` →
       `docs/kafka.md`, AGENTS.md and `docs/maintainers/*` rewritten for the new names (the D-numbers stay; D11, D12, D30,
       D34 and hard rules 7 and 16 are restated), `CHANGELOG.md` `# 2.0.0`, `Directory.Build.props` `VersionPrefix`.
-- [ ] 10. **Release.** Full `build.ps1 Test` at the floors and at the latest-tested versions, `Pack`, `Publish --skip`,
+- [ ] 10. **Release.** (Owner, 2026-11-17: ship `2.0.0-beta.1` first, tag and nuget.org included, to dogfood in real
+      projects; `2.0.0` follows after feedback. All seven packages are `2.0.0-beta.1` in the beta.) Full `build.ps1 Test` at the floors and at the latest-tested versions, `Pack`, `Publish --skip`,
       the `studio-ui-verifier` over the three samples, then the tag. The existing nuget.org trusted-publishing policy
       is not limited to one package id (`docs/maintainers/build-and-release.md`), so the seven new ids need no new
       policy; the owner confirms that before the tag. After it: deprecate the six old ids with their successors.
