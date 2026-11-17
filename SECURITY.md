@@ -9,7 +9,8 @@ and `DataStudio.Kafka.Wolverine`. Security fixes are made in the latest release 
 | Version | Supported |
 |---|---|
 | 2.x (latest minor) | Yes |
-| 1.x (Marten Studio, Postgres Studio, KStudio) | No: upgrade to 2.x ([docs/upgrading.md](docs/upgrading.md)) |
+| 1.3.x (Marten Studio, Postgres Studio, KStudio) | Yes, until 2.0.0 is published; then upgrade to 2.x ([docs/upgrading.md](docs/upgrading.md)) <!-- beta: remove at 2.0.0 --> |
+| 1.2 and earlier | No |
 | 0.x | No |
 
 The Marten module's floor on Marten (9.57.0) follows the latest release. It is well past the first Marten 9 release with

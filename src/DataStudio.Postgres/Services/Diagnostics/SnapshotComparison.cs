@@ -147,7 +147,7 @@ internal sealed record SnapshotComparison
     /// <summary>When the current view was built.</summary>
     public DateTimeOffset? NowAt { get; init; }
 
-    /// <summary>What wrote the earlier file ("the Marten module 1.2.0"), kept to 512 characters.</summary>
+    /// <summary>What wrote the earlier file ("MartenStudio 1.2.0" from 1.x, "Data Studio 2.0.0" from 2.0), kept to 512 characters.</summary>
     public string? EarlierProducer { get; init; }
 
     /// <summary>The verdict, in a line: how many findings are new, worse, better or gone, and what else moved.</summary>

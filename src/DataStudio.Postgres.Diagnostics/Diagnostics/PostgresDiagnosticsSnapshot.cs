@@ -12,7 +12,7 @@ public sealed record PostgresDiagnosticsSnapshot
     /// <summary>The JSON shape's version: 1 in this release. Only a removal, a rename or a change of meaning bumps it.</summary>
     public int SchemaVersion { get; init; }
 
-    /// <summary>Which studio produced it, and its version: <c>The Postgres module 0.5.0</c>, <c>The Marten module 0.5.0</c>.</summary>
+    /// <summary>What produced it, and its version: <c>Data Studio 2.0.0</c>.</summary>
     public string Producer { get; init; } = "";
 
     /// <summary>When the snapshot was put together. Each part has its own <c>MeasuredAt</c>.</summary>

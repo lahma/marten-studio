@@ -58,9 +58,9 @@ reason.
 
 The broker tells the module's clients apart by two names. A consumer's group id starts with `data-studio-` (the engine's
 `GroupIdPrefix`, then the scan's id; the group is never subscribed, so none is created) and a client id ends with
-`.data-studio`. Reading needs no ACL on that group, but a cluster that names groups in its ACLs can grant `READ` and
-`DESCRIBE` on a `PREFIXED` group `data-studio-` (or the host's own prefix) to spare the broker's authorizer log one refused
-lookup per scan and per lag read. An exported file is named `data-studio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}`.
+`.data-studio`. Reading needs no ACL on that group. Without `DESCRIBE` on a `PREFIXED` group `data-studio-` (or the host's
+own prefix), the broker's authorizer log shows one refused lookup per scan, and about one a second while a consumer-lag
+read's reader is alive (up to `AdminIdleTimeout`). `DESCRIBE` is enough; `READ` is not needed. An exported file is named `data-studio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}`.
 
 ## Capabilities and policies
 

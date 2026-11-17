@@ -324,7 +324,7 @@ None of these can be done from this repository, and the first tag will fail with
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.
-3. **After the first 2.0 tag**, deprecate the six 1.x ids (`MartenStudio`, `PostgresStudio`, `PostgresStudio.Diagnostics`, `KStudio`,
+3. **After 2.0.0 is published (not a beta or another prerelease of it)**, deprecate the six 1.x ids (`MartenStudio`, `PostgresStudio`, `PostgresStudio.Diagnostics`, `KStudio`,
    `KStudio.Core`, `KStudio.Wolverine`) on nuget.org, each with its successor. Never push a release version by hand -
    `--skip-duplicate` would then pair packages built from different commits; if an id ever had to be claimed by hand, push a
    `0.0.1-reserve` and unlist it.

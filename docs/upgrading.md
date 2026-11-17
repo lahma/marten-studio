@@ -205,8 +205,9 @@ where 1.x showed `(Postgres Studio Diagnostics)`, and the connection history's o
 
 The Kafka module's clients carry Data Studio's names: a scan consumer's group id starts with `data-studio-` (1.x: `kstudio-`),
 a client id ends with `.data-studio` (1.x: `.kstudio`) and an exported file is named `data-studio-{cluster}-{part}-{timestamp}Z.{ext}`
-(1.x: `kstudio-…`). An operator whose ACLs name the `kstudio-` group prefix adds a `PREFIXED` ACL for `data-studio-`: reading
-needs no group ACL, and what leaving it out costs is one refused group lookup per scan in the broker's authorizer log. A host
+(1.x: `kstudio-…`). An operator whose ACLs name the `kstudio-` group prefix adds a `PREFIXED` ACL for `data-studio-`, and
+`DESCRIBE` is enough. Reading needs no group ACL: without it the broker's authorizer log shows one refused lookup per scan,
+and about one a second while a consumer-lag read's reader is alive (up to `AdminIdleTimeout`). A host
 that set `GroupIdPrefix` itself is unaffected, and a quota or monitor keyed on the old client id suffix must name the new one.
 The Kafka sample's reuse variable is `DATASTUDIO_KAFKA_SAMPLE_REUSE` (1.x: `KSTUDIO_SAMPLE_REUSE`).
 

@@ -74,8 +74,8 @@ and authorization is never widened, but a module's own `ReadOnly` no longer turn
 - The names the Kafka module's clients carry on a broker are Data Studio's: a scan consumer's group id starts with
   `data-studio-` (was `kstudio-`), a client id ends with `.data-studio` (was `.kstudio`) and an exported file is named
   `data-studio-{cluster}-…` (was `kstudio-{cluster}-…`). An operator whose ACLs name the `kstudio-` group prefix adds
-  `data-studio-`; reading needs no group ACL, so the only effect of leaving it out is the refused group lookup the broker's
-  authorizer log shows once per scan. A host that set `GroupIdPrefix` is unaffected. The Kafka sample's reuse variable is
+  `data-studio-` (`DESCRIBE` is enough). Reading needs no group ACL: without it the broker's authorizer log shows one
+  refused lookup per scan, and about one a second while a consumer-lag read's reader is alive. A host that set `GroupIdPrefix` is unaffected. The Kafka sample's reuse variable is
   `DATASTUDIO_KAFKA_SAMPLE_REUSE` (was `KSTUDIO_SAMPLE_REUSE`), and its marker topic is `data-studio-sample.seed-v3`, so a
   broker an earlier sample seeded is refused with the usual line until it is deleted.
 - A host with only Kafka runs: `AddDataStudio().AddKafka(...)` needs no database module, and its output folder holds no
