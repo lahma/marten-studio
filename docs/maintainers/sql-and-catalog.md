@@ -1,6 +1,6 @@
 # SQL and catalog reads
 
-This is the full text of D13 (the SQL console) and D27 (the database browser, with its *Reach, not scope* and *D27 in PostgresStudio* passages), moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D13 (the SQL console) and D27 (the database browser, with its *Reach, not scope* and *D27 in the Postgres module* passages). AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D13
 
@@ -123,14 +123,14 @@ a dynamic tenancy's databases (`AllDatabases()`, `Tenancy.DescribeDatabasesAsync
 `IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.57.0, and the studio, enumerating
 on the first navigation, can be the first caller: a known limit, not a per-poll cost. Measurements, history and
 details: decision-notes.md, D27.
-**D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),
+**D27 in the Postgres module.** The gate is reused with the source policy and `PostgresResource` (D5),
 `BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the source's own, their structure
 shown to anyone the source policy admits, their rows needing `BrowseDatabase` and their definitions `ViewDefinitions` or
-`BrowseDatabase`, each with the write policy (asked with no tenant, as a Postgres Studio scope has none). A schema only
+`BrowseDatabase`, each with the write policy (asked with no tenant, as a Postgres source's scope has none). A schema only
 `"*"` admits needs `BrowseDatabase` for its structure and definitions too, `"*"` being a statement about the database, not
 the configuration; a system schema is never browsable. Naming
 nothing means `public`, applied after every configuration, so naming schemas replaces it. With no declarations only the
 `mt_` prefix names an object Marten's, failing closed: its rows are never read, nor a view over it, its definition shows
-only with `BrowseDatabase`, and the database page says once that it holds a Marten store and points to Marten Studio. A
-Marten database whose host would hide types belongs in Marten Studio: PostgresStudio cannot honour another application's
+only with `BrowseDatabase`, and the database page says once that it holds a Marten store and points to the Marten module. A
+Marten database whose host would hide types belongs in the Marten module: the Postgres module cannot honour another application's
 `IsDocumentTypeVisible`.

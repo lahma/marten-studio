@@ -65,12 +65,12 @@ Statements drill-in's `PlanView` takes `MaskedExport`: its `PlanExport` then off
 `QueryPlan` it draws (`PlanTable.Markdown`, `PlanSpeedscope.Build`), and never a JSON or text export, because there is no masked
 `EXPLAIN` JSON and a JSON of the studio's own masked tree could be mistaken for one. A refused or planless drill-in offers none.
 
-**Marten Studio's plan insights (1.0-P3C, issue #28 phase 3).** P26 to P28 judge a plan against the document tables the store in the
+**The Marten module's plan insights (issue #28 phase 3).** P26 to P28 judge a plan against the document tables the store in the
 visitor's scope declares - a JSON filter no declared index serves, a GIN index on `data` a containment filter did not use, a tenant
-or soft-delete predicate filtered after the index - and exist only in Marten Studio. PostgresStudio defines an internal seam in the
-shape of the health checks' MartenStudio half, `IPlanInsightContributor` (`IEnumerable<IPlanInsightContributor>`, empty where a host
+or soft-delete predicate filtered after the index - and exist only in the Marten module. The Postgres module defines an internal seam in the
+shape of the health checks' Marten half, `IPlanInsightContributor` (`IEnumerable<IPlanInsightContributor>`, empty where a host
 registered none), and `PlanView` asks whatever is registered once per plan, set of facts and scope, merging the findings with its own;
-MartenStudio registers `MartenPlanInsightContributor` in `AddMartenStudio()`. PostgresStudio names nothing Marten (hard rule 16). The
+The Marten module registers `MartenPlanInsightContributor` in `AddMarten()`. The Postgres module names nothing Marten (hard rule 16). The
 evaluators (`MartenPlanInsights`) stay pure over (plan, facts, the declared tables) and read no database. The only asynchronous step is
 learning the declarations: the scope on screen goes through `StudioScopeResolver` with `TenantId = null`, authorization first, so a
 store the visitor may not have is simply not judged. What the store declares comes from `AllKnownDocumentTypes()` and the mappings

@@ -39,21 +39,21 @@ check, runs with no visitor (every store, up to 25 databases, no policy), accept
 outcomes, severities and counts, never a name, a tenant, a statement or anything Postgres said; the host's own endpoint
 is its only gate (`docs/health.md`, `docs/security.md`). A mute lives in the browser as an HMAC-SHA256 under the
 browser's own random key, held only as the host's Data Protection protected it (purpose
-`PostgresStudio.Health.MuteKeys.v1`, `HealthMuteKeys`), never as a plain hash a guess could confirm; an instance whose
+`PostgresStudio.Health.MuteKeys.v1`, `HealthMuteKeys`, a name kept so that no saved mute is orphaned), never as a plain hash a guess could confirm; an instance whose
 key ring cannot open it reads nothing as muted and leaves the list to the instance that made it until the browser next
 mutes there. The studio registers no Data Protection: `AddRazorComponents()` and `AddInteractiveServerComponents()` do,
 and a container without it keys in memory.
-**Whole-database table scope.** MartenStudio's table checks judge every table of the store's own schemas and, while
+**Whole-database table scope.** The Marten module's table checks judge every table of the store's own schemas and, while
 `BrowseDatabase` is on, of those `BrowsableSchemas` admits: the store's declarations over one catalog list
 (`MartenHealthTableSource`, issue #8 G1). A declared table keeps its kind, origins and `StoreOptions` remedies (Marten's
 event and bookkeeping tables are the store's own); an undeclared one is the host's (migration SQL), a recognised
 library's (exempt only from the index-design rules) or somebody else's; one outside the store's schemas carries
 `GatedSchemas`. Left out, and counted in the coverage sentence: other registered stores' tables, as a visitor-less sweep
 cannot ask their policies, and, while any type may be hidden, tables named like a document table.
-**Two studios, one engine.** MartenStudio's checks run only on Marten sources (the registry's source kinds), the shared
+**Two modules, one engine.** The Marten module's checks run only on Marten sources (the registry's source kinds), the shared
 checks on both. A relational table's remedy may be migration SQL, shown "for your own migrations - the studio never runs
 this" and built only in `MigrationSqlText`, which quotes every name and gives no statement for a name it cannot; a
-Marten table's remedy is never DDL: a `StoreOptions` line in Marten Studio, nothing in Postgres Studio.
+Marten table's remedy is never DDL: a `StoreOptions` line in the Marten module, nothing in the Postgres module.
 **The statistics window** (`StatisticsWindow`), the one answer to "since when have these counters counted", is
 `max(database, min(shared, archiver))` over each view's `stats_reset` (`pg_stat_database.stats_reset`; the shared view,
 `pg_stat_bgwriter` up to 16 or `pg_stat_checkpointer` from 17; `pg_stat_archiver`), so one view's
@@ -77,16 +77,16 @@ sentence: listed as not applicable, never run, nothing logged (issue #8, A2), an
 or privilege, never a Warning. The platform is recognised only from markers a role short of a superuser cannot plant.
 
 **Accepted checks** (`AcceptedChecks`, issue #35): a host accepts a check by code with a reason (at most 500 characters,
-validated at startup against that studio's own registry by `AcceptedChecksValidator`, naming only the key). The sweep
+validated at startup against that module's own registry by `AcceptedChecksValidator`, naming only the key). The sweep
 stamps the check's findings `Accepted`, so every reader sees the same mark; it never drops one. An accepted finding is
 shown on its check's row, never a card, and is out of every count and state: the Overview tile, the badge, the toast, the
 banners (all through `HealthReportFinding.Counts` and the one list `CachedAsync` builds), and the export's `Degraded` and
 `Unhealthy` (counted apart under `accepted`). It changes no gate: a withheld accepted finding is still counted as
 withheld, and its reason is shown on the check's row only beside a finding the visitor may see. The *Accepted checks*
-list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
+list (the Server page, the Marten module's Configuration page) is configuration, shown to anyone who may open that page.
 
-**Actions on a finding** (1.2). A finding may offer an on-demand action (`IHealthFindingAction`, internal; MartenStudio
-registers E06's "Find the 20 longest streams", and PostgresStudio registers, for both studios, T15's "What if it had an
+**Actions on a finding.** A finding may offer an on-demand action (`IHealthFindingAction`, internal; the Marten module
+registers E06's "Find the 20 longest streams", and the Postgres module registers, for both database modules, T15's "What if it had an
 index?" and T01's "Try indexes against this table's statements"), which `HealthActionService` runs for the visitor who pressed it and never
 in a sweep. Each press asks the finding's own gate (and its tenant's store policy) again, through the one
 `HealthVisitorGate` the report asks, before anything is read, then whatever else the action asks: E06's asks the
@@ -99,13 +99,13 @@ value it read; a failure is logged as 9223 (Warning, one line per press), a refu
 result, so nothing reaches another circuit and nothing is cached, and no result is in the sweep, the snapshot, the
 health-check export or the diagnostics API. Hidden document types are never named (`StreamAggregateMap.ShownAliases`).
 
-**The connection-settings checks** (1.1: C16, C17, C18, S11, S12, S13) judge one memoized `ConnectionFacts` per sweep
+**The connection-settings checks** (C16, C17, C18, S11, S12, S13) judge one memoized `ConnectionFacts` per sweep
 (`ConnectionFacts.SharedAsync`: the redacted settings, what the server saw of the studio's connection as a new session
 of the login starts with it, the platform, the session statistics when pooling is off, and the count of this process's
 pools to the database). All six are `Database` checks, none shows a value of a secret keyword, a path, a host, a pool
 name or an `Options` value (`ConnectionChecksSentinelTests`, `ConnectionSettingChecksLiveTests`), and a remedy shows the
-connection-string form and the `NpgsqlDataSourceBuilder` form through `StudioText.DataSourceBuilderRemedy`, which Marten
-Studio wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for
+connection-string form and the `NpgsqlDataSourceBuilder` form through `StudioText.DataSourceBuilderRemedy`, which the Marten
+module wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for
 C16, a pooler for C17, the Cloud SQL Auth Proxy or an unreadable TLS row for S11) is
 `HealthCheckNotApplicableException`; an unread server is `HealthCheckUnavailableException`. The six rethrow the
 connection read's failure (`ConnectionFacts.ObservedFailure`, captured once, thrown by
@@ -126,7 +126,7 @@ unavailable. C16 skips its server variant behind an Amazon RDS Proxy with `No Re
 cut reaches the client only on a pinned connection. K10 was retired in 1.1 with the Marten 9.57 floor: its row stays in
 `docs/health/codes.md`, and an `AcceptedChecks` entry for it is ignored with one Information line.
 
-**Database › Connection, the page's gates** (1.1, D33). The page and the Overview's line are the `Database` gate (the
+**Database › Connection, the page's gates** (D33). The page and the Overview's line are the `Database` gate (the
 source policy asked with `TenantId = null`); "This application's sessions" and the pool peak counted by application name
 are the `Activity` gate (`ViewDatabaseActivity`, then the source and write policies), audited by signature like Sessions'
 details and refused as a value. The pool peak and the sessions are recorded separately, and the Overview's line asks for
@@ -139,7 +139,7 @@ download and is not part of the D31 read model. **Paste-to-compare** ("Compare a
 parameter, never a field: `PastedConnectionString` removes every catalogue `Secret` keyword (resolved through Npgsql's own
 canonicalisation, never an alias list) and every `Options` value before `NpgsqlSettingsReader` reads it, re-checks the
 result, and refuses a keyword by name only; `ConnectionCompareService` has no logger and no audit call, and nothing is
-connected to. The only server facts it uses are the connection in effect's own cached ones. **Marten Studio's contributor**
+connected to. The only server facts it uses are the connection in effect's own cached ones. **The Marten module's contributor**
 (`MartenConnectionInsightContributor`, internal) adds a section and hint notes to the same page behind the same `Database`
 gate. It reads only in-memory options, `IMartenDatabase.ConfiguredCommandTimeout` (a number parsed inside Marten), the
 regular sweep's own daemon lookup and `MartenRowSizeCache`, and learns whether Marten built its data source from Weasel's
