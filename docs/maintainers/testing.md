@@ -72,8 +72,8 @@ shell's and the Kafka module's own:
      original); `MuteKeyHashTests` holds the mute list to the HMAC.
    - **Composition** (D30, D34): `StudioModuleCompositionTests` (the composed descriptor, its refusals and its order, over fake modules in the Postgres suite),
      `MartenModuleCompositionTests` (the Marten module's two page roots and its seams), `StudioRouteTableModuleTests` and `StudioRouteTableTests` (the route table: roots, collisions and
-     the 404), `KafkaOnlyRailRoutesTests`, `PostgresRailRoutesTests`, `MartenRailRoutesTests` and `KafkaRailRoutesTests` (every rail link of a host resolves to a page of
-     that host), `KafkaOnlyHostTests` and `KafkaOnlyShellTests` (a host with only Kafka), and the live `Composition/` folder of the Kafka integration suite
+     the 404), `KafkaOnlyRailRoutesTests`, `PostgresRailRoutesTests`, `MartenRailRoutesTests` and `KafkaRailRoutesTests` (every rail route and link constant of a module is a
+     page below the module's segment, and no 1.x address is one; `MartenAndKafkaRailRoutesTests` in the Kafka live suite holds the two modules composed in either order), `KafkaOnlyHostTests` and `KafkaOnlyShellTests` (a host with only Kafka), and the live `Composition/` folder of the Kafka integration suite
      (Kafka beside Postgres, the audit beside it, anonymous). The shell's prerendered chrome of each module's front pages is held by `ShellGoldenTests`
      (golden files, in the Postgres, Marten and Kafka suites).
    - **Versions and packages**: `PostgresDiagnosticsVersionGuardTests` (`DataStudio.Postgres.Tests`: the engine's version guard, which refuses a newer or

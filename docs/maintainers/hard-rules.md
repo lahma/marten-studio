@@ -71,7 +71,7 @@ This is the full text of hard rules 1 to 17. AGENTS.md states each rule in brief
    three, or to any `Action`, fails the suite; `KafkaNoAsyncVoidTests` holds the same line over `DataStudio.Kafka.Core`
    and `DataStudio.Kafka` (sources and compiled assemblies).
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** Each package has a baseline of its
-   own, `PublicApiTest_<assembly>.verified.txt` in its test project's `Verify/` folder, and what a package may publish
+   own, `PublicApiTest_<assembly name without its dots>.verified.txt` (`PublicApiTest_DataStudioMarten.verified.txt`) in its test project's `Verify/` folder, and what a package may publish
    is this and nothing else:
    - **`DataStudio`** (`tests/DataStudio.Tests`), two static classes and two classes:
      `DataStudioServiceCollectionExtensions` (`AddDataStudio`), `DataStudioEndpointRouteBuilderExtensions`
