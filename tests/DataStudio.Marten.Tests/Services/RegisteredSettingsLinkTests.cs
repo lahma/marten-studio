@@ -4,7 +4,6 @@ using DataStudio.Components;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Services.Health;
-using DataStudio.Marten.Tests.Health;
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
@@ -17,67 +16,33 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
-/// REVIEW-V2-A finding 5: the module's link helpers take the container's registered settings, and nothing in production builds
-/// a default shell of its own, so a host's own <c>DataStudioOptions.Path</c> is the one source of truth.
+/// REVIEW-V2-A finding 5: nothing in production builds a default shell of its own, so a host's own <c>DataStudioOptions.Path</c> is the one
+/// source of truth.
 /// </summary>
 /// <remarks>
-/// The links themselves are relative to the studio-rooted <c>&lt;base href&gt;</c> and read nothing of the path
-/// (<c>StudioLink.To</c> says so), so "follows the path" is proved in the only form it can take: at a mount that is not
-/// <c>/studio</c> every site still answers a link below the studio root, which names neither the default mount nor the host's own.
+/// The links themselves are relative to the studio-rooted <c>&lt;base href&gt;</c> and take no settings (v2 step 5, REVIEW-V2-B finding 2): what holds them
+/// is the route tests (every rail route and route constant is a page) and the exact-address tests of the link classes, not a theory that could not fail.
 /// </remarks>
 public class RegisteredSettingsLinkTests
 {
-    private const string Mount = "/ops/data";
-
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
-    /// <summary>Each of the five sites that used to build a default shell, and the two link builders that fed them.</summary>
-    public static TheoryData<string> Sites => new()
-    {
-        "StudioLink.To",
-        "HealthLinks.ToPage",
-        "HealthLinks.ToFinding",
-        "DatabaseLinks.ToObject",
-        "DatabaseLinks.ToRows",
-        "DocumentLinks.ToDocument",
-        "EventLinks.To",
-    };
-
-    [Theory]
-    [MemberData(nameof(Sites))]
-    public async Task A_link_built_through_the_registered_settings_is_below_the_studio_root_at_a_custom_mount(string site)
-    {
-        await using StudioComponentContext context = new();
-        context.ShellOptions.Path = Mount;
-
-        IStudioSettings settings = context.Services.GetRequiredService<IStudioSettings>();
-
-        settings.HasCustomPath.Should().BeTrue("the settings are the registered ones, over the host's own DataStudioOptions");
-        settings.TrimmedPath.Should().Be(Mount);
-
-        string link = site switch
-        {
-            "StudioLink.To" => StudioLink.To("marten/documents/orders/doc"),
-            "HealthLinks.ToPage" => HealthLinks.ToPage(Scope),
-            "HealthLinks.ToFinding" => HealthLinks.ToFinding(Scope, Finding()),
-            "DatabaseLinks.ToObject" => DatabaseLinks.ToObject(Scope, "public", "orders"),
-            "DatabaseLinks.ToRows" => DatabaseLinks.ToRows(Scope, "public", "orders", "id = 1"),
-            "DocumentLinks.ToDocument" => DocumentLinks.ToDocument(Scope, "orders", "7"),
-            "EventLinks.To" => EventLinks.To(EventLinks.StreamsRoute, Scope),
-            _ => throw new InvalidOperationException(site),
-        };
-
-        link.Should().NotBeNullOrEmpty().And.NotStartWith("/", "a studio link is relative to the studio-rooted base href")
-            .And.NotContain("/studio").And.NotContain("ops/data");
-    }
-
+    /// <summary>
+    /// The exact address of one link of each module, at a mount that is not <c>/studio</c>: the whole address below the mount, a module's segment first,
+    /// the scope on the end, and nothing of the mount in it - the document's <c>&lt;base href&gt;</c> carries that.
+    /// </summary>
     [Fact]
-    public async Task The_schema_data_service_names_the_registered_store_policy_in_its_refusal()
+    public async Task A_link_is_the_exact_address_below_the_mount_with_its_modules_segment_at_a_custom_mount()
     {
         await using StudioComponentContext context = new();
-        context.Options.StoreAuthorizationPolicy = "store-ops";
+        context.ShellOptions.Path = "/ops/data";
+        context.Services.GetRequiredService<IStudioSettings>().TrimmedPath.Should().Be("/ops/data");
 
-        DatabaseAccess.StorePolicyName(context.Services.GetRequiredService<IStudioSettings>()).Should().Be("store-ops");
+        HealthLinks.ToPage(Scope).Should().Be("postgres/health?store=default&db=localhost.marten&tenant=acme");
+        DatabaseLinks.ToObject(Scope, "public", "orders").Should().Be("postgres/database/object?schema=public&name=orders&store=default&db=localhost.marten&tenant=acme");
+        EventLinks.To(EventLinks.StreamsRoute, Scope).Should().Be("marten/events/streams?store=default&db=localhost.marten&tenant=acme");
+        DocumentLinks.ToDocument(Scope, "orders", "7").Should().StartWith("marten/documents/orders/doc?");
+        StudioLink.To("kafka/search").Should().Be("kafka/search");
     }
 
     /// <summary>
@@ -114,10 +79,4 @@ public class RegisteredSettingsLinkTests
         @"\b(?:Marten|Postgres)StudioSettings\.Of\(|new\s+(?:Marten|Postgres)StudioSettings\(\s*[^,()]*(?:\([^()]*\))?[^,()]*\)|new\s+ShellSettings\(|new\s+DataStudioOptions\(",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
-
-    private static HealthReportFinding Finding()
-    {
-        HealthFinding finding = FakeHealthService.Finding("K05", HealthSeverity.Warning, "A finding");
-        return new HealthReportFinding(finding, finding.Evidence, "key", "https://example.invalid/docs", true, null);
-    }
 }
