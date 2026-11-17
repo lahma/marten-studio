@@ -163,10 +163,10 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
 - [x] 6. **One wording.** Remove `StudioProduct`, merge `StudioLog` and `PostgresStudioLog` (same event ids, one
       template each), move module-specific sentences to their module, retire `StudioTextPinTests`. Shortcuts move to
       the Postgres module; the chip and the banner get their single templates.
-- [ ] 7. **Golden files and browser suites.** Re-accept the shell's golden files once, after steps 4 to 6, reading the
+- [x] 7. **Golden files and browser suites.** Re-accept the shell's golden files once, after steps 4 to 6, reading the
       diff; both browser suites and the Kafka shell live tests over the new addresses; a Kafka-only host test whose
       output folder holds no `Npgsql.dll` and no `DataStudio.Postgres*.dll`.
-- [ ] 8. **Build and packaging.** `Pack` and `Publish` handle the seven packages in dependency order and assert every
+- [x] 8. **Build and packaging.** `Pack` and `Publish` handle the seven packages in dependency order and assert every
       pin; `PackageValidationBaselineVersion` is removed (no baseline exists for the new ids) and set again after 2.0;
       the workflows are regenerated from the attributes (hard rule 2).
 - [ ] 9. **Documentation.** README (one product, three modules), each package's README, `docs/upgrading.md` (a 1.x → 2.0
