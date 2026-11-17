@@ -196,7 +196,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
         : "Not signed in.";
 
     string studioPath = sample.Path is { Length: > 0 } mounted ? mounted : "/studio";
-    string mode = sample.Anonymous ? "anonymous (no policy on the mapping)" : "behind the MartenStudio policy";
+    string mode = sample.Anonymous ? "anonymous (no policy on the mapping)" : "behind the DataStudio policy";
     string capabilities = sample.ReadOnly ? "read-only (ReadOnly = true)" : "all capabilities enabled";
 
     // The same warning the studio's own layout draws, on the page that links to it: somebody who lands
@@ -239,7 +239,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Marten Studio sample</title>
+          <title>Data Studio Marten sample</title>
           <link rel="icon" href="data:," />
           <style>
             body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
@@ -249,11 +249,11 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
           </style>
         </head>
         <body>
-          <h1>Marten Studio sample</h1>
+          <h1>Data Studio Marten sample</h1>
           {{anonymousBanner}}
           <p>{{who}}</p>
           <ul>
-            <li><a href="{{WebUtility.HtmlEncode(studioPath)}}">Open Marten Studio</a> &mdash; mounted at <code>{{WebUtility.HtmlEncode(studioPath)}}</code>, {{mode}}, {{capabilities}}</li>
+            <li><a href="{{WebUtility.HtmlEncode(studioPath)}}">Open Data Studio</a> &mdash; mounted at <code>{{WebUtility.HtmlEncode(studioPath)}}</code>, {{mode}}, {{capabilities}}</li>
             <li><a href="/login">Sign in</a> as <code>admin</code>, <code>ops</code> or <code>viewer</code> (the password is the user name)</li>
           </ul>
           <form method="post" action="/logout">

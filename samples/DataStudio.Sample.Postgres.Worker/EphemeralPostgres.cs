@@ -45,7 +45,7 @@ internal static class EphemeralPostgres
         {
             throw new InvalidOperationException(
                 """
-                The Postgres Studio diagnostics worker needs a PostgreSQL server and could not start one.
+                The Data Studio Postgres diagnostics worker needs a PostgreSQL server and could not start one.
 
                 It starts a throwaway `postgres:17-alpine` container through Testcontainers when no
                 connection string is configured, and Docker did not answer. Either:
@@ -67,9 +67,9 @@ internal static class EphemeralPostgres
 
         Console.WriteLine();
         Console.WriteLine("  ┌───────────────────────────────────────────────────────────────────────────┐");
-        Console.WriteLine("  │  Postgres Studio worker: no ConnectionStrings:Postgres was configured,    │");
-        Console.WriteLine("  │  so a throwaway PostgreSQL container was started for this run, with the   │");
-        Console.WriteLine("  │  demo schemas applied to it.                                              │");
+        Console.WriteLine("  │  Data Studio Postgres worker: no ConnectionStrings:Postgres was           │");
+        Console.WriteLine("  │  configured, so a throwaway PostgreSQL container was started for this run,│");
+        Console.WriteLine("  │  with the demo schemas applied to it.                                     │");
         Console.WriteLine($"  │  Container: {container.Id[..Math.Min(12, container.Id.Length)],-61} │");
         Console.WriteLine($"  │  Host port: {container.GetMappedPublicPort(5432),-61} │");
         Console.WriteLine($"  │  Reused:    {(reuse ? "asked for (" + ReuseEnvironmentVariable + ")" : "no - a fresh container"),-61} │");

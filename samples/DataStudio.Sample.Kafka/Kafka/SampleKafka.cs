@@ -45,7 +45,7 @@ internal sealed class SampleKafka : IAsyncDisposable
 
     /// <summary>The sentence the host stops with when it needs a throwaway Kafka and Docker is not there.</summary>
     public const string NoDockerMessage =
-        "KStudio sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set ConnectionStrings:Kafka to a cluster you own (the sample creates and seeds topics there only with --allow-data-generation).";
+        "Data Studio Kafka sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set ConnectionStrings:Kafka to a cluster you own (the sample creates and seeds topics there only with --allow-data-generation).";
 
     private readonly KafkaContainer? container;
     private readonly bool reused;
@@ -162,7 +162,7 @@ internal sealed class SampleKafka : IAsyncDisposable
             ? $"kept for the next run ({ReuseEnvironmentVariable}=true); docker rm -f removes a container when you are done"
             : "deleted when this process stops";
 
-        return $"KStudio sample: started {what} {fate}. {configure}";
+        return $"Data Studio Kafka sample: started {what} {fate}. {configure}";
     }
 
     /// <summary>
@@ -194,20 +194,20 @@ internal sealed class SampleKafka : IAsyncDisposable
 
         if (judgement.Verdict == SampleKafkaVerdict.AlreadySeeded)
         {
-            await output.WriteLineAsync("KStudio sample: this Kafka was seeded by an earlier run; leaving it as it is.".AsMemory(), cancellationToken).ConfigureAwait(false);
+            await output.WriteLineAsync("Data Studio Kafka sample: this Kafka was seeded by an earlier run; leaving it as it is.".AsMemory(), cancellationToken).ConfigureAwait(false);
             return null;
         }
 
         if (!IsThrowaway && !mayConfiguredBeSeeded)
         {
-            await output.WriteLineAsync("KStudio sample: the configured Kafka is not seeded without --allow-data-generation; browsing what is there.".AsMemory(), cancellationToken).ConfigureAwait(false);
+            await output.WriteLineAsync("Data Studio Kafka sample: the configured Kafka is not seeded without --allow-data-generation; browsing what is there.".AsMemory(), cancellationToken).ConfigureAwait(false);
             return null;
         }
 
         KafkaSeedPlan plan = KafkaSeedPlan.Create(DateTimeOffset.UtcNow);
-        await output.WriteLineAsync($"KStudio sample: seeding {plan.Records.Count:N0} records into {plan.Topics.Count} topics...".AsMemory(), cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"Data Studio Kafka sample: seeding {plan.Records.Count:N0} records into {plan.Topics.Count} topics...".AsMemory(), cancellationToken).ConfigureAwait(false);
         await KafkaSeeder.SeedAsync(new ConfluentSeedTarget(config), plan, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync("KStudio sample: seeded.".AsMemory(), cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync("Data Studio Kafka sample: seeded.".AsMemory(), cancellationToken).ConfigureAwait(false);
         return null;
     }
 

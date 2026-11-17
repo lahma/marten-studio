@@ -130,7 +130,7 @@ internal static class LoginEndpoints
             <head>
               <meta charset="utf-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1" />
-              <title>Sign in - Postgres Studio sample</title>
+              <title>Sign in - Data Studio Postgres sample</title>
               <link rel="icon" href="data:," />
               <style>
                 body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 34rem; line-height: 1.5; }
@@ -141,7 +141,7 @@ internal static class LoginEndpoints
               </style>
             </head>
             <body>
-              <h1>Postgres Studio sample</h1>
+              <h1>Data Studio Postgres sample</h1>
               {{errorBanner}}
               <form method="post" action="/login">
                 <input type="hidden" name="{{AntiforgeryFieldName}}" value="{{WebUtility.HtmlEncode(tokens.RequestToken)}}" />

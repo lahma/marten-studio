@@ -16,8 +16,8 @@ internal sealed class SummaryOptions
     public TimeSpan Interval { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>
-    /// Where Postgres Studio is mounted, when a host has one - <c>https://studio.example.com/postgres</c>. Each finding's
-    /// studio path is a string relative to the mount (<c>health?store=default&amp;db=app</c>), which means nothing without a
+    /// Where Data Studio is mounted, when a host has one - <c>https://studio.example.com/studio</c>. Each finding's
+    /// studio path is a string relative to the mount (<c>postgres/health?store=default&amp;db=app</c>), which means nothing without a
     /// UI; with this set the summary prints each line's path joined to this base as its link, and without it no link is printed.
     /// </summary>
     public string? StudioBaseUrl { get; set; }

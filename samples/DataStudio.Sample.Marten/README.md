@@ -1,10 +1,11 @@
-# Marten Studio sample host
+# Data Studio Marten sample host
 
 A small ASP.NET Core host that configures Marten with the demo domain in
-`samples/MartenStudio.SampleDomain`, adds Marten Studio, and mounts it at `/studio`.
+`samples/DataStudio.Sample.Marten.Domain`, adds Data Studio with the Marten module, and mounts it at `/studio` (the Marten
+pages are at `/studio/marten`, the Postgres pages over the store's databases at `/studio/postgres`).
 
 ```powershell
-dotnet run --project samples/MartenStudio.Sample --urls http://localhost:5210
+dotnet run --project samples/DataStudio.Sample.Marten --urls http://localhost:5210
 ```
 
 With no `ConnectionStrings:Marten` configured it starts a throwaway `postgres:17-alpine` through
@@ -16,7 +17,7 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 |---|---|
 | `--anonymous` | Maps the studio with `AllowAnonymous()` and draws a red banner. Never do this anywhere real. |
 | `--readonly` | Sets `DataStudioOptions.ReadOnly`, which turns every mutating capability off. |
-| `--path /ops/marten` | Mounts the studio somewhere other than `/studio`, which exercises the sub-path re-rooting. |
+| `--path /ops` | Mounts the studio somewhere other than `/studio`, which exercises the sub-path re-rooting. |
 | `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. It also lets startup run `drop schema … cascade` on `studio_sample` and `studio_sample_events` when another build seeded them or their rows carry no seed marker, and the cascade drops whatever in other schemas depends on them too. |
 
 ## The studio's own role
@@ -24,7 +25,7 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 The store logs in to the throwaway container as its superuser, so the sample narrows what the studio reads:
 on every start it creates the role `studio_sample_reader` (`NOLOGIN`) if it is missing, makes the store's login
 a member, and the seeding grants it `SELECT` on the demo's four schemas - `studio_sample`, `studio_sample_events`,
-`quartz` and `legacy` - and on the tables created there later. `MartenStudioOptions.SqlConsoleRole` is set to it,
+`quartz` and `legacy` - and on the tables created there later. `MartenOptions.SqlConsoleRole` is set to it,
 so the SQL console, the database browser and the health checks read as that role, and the Health page's K05
 ("SQL console without a narrowed role") shows the remedy applied rather than a Warning.
 
@@ -100,7 +101,7 @@ progress with it.
 
 1. The endpoints are only mapped in `Development` or with `--allow-data-generation`. Outside that they
    are not there at all, so a POST answers 404 rather than 403.
-2. Every one of them requires the `MartenStudioAdmin` policy, which only `admin` satisfies.
+2. Every one of them requires the `DataStudioAdmin` policy, which only `admin` satisfies.
 3. Every POST validates an antiforgery token, exactly as the sign-in form does.
 
 A "generate a million documents" button a cross-site page could press is a denial-of-service gadget, and
@@ -160,13 +161,13 @@ unregistered; no projection reads it.
 
 ## Responsiveness tests
 
-`tests/MartenStudio.Integration.Tests/Generation/` generates `Medium` into a schema of its own and
+`tests/DataStudio.Marten.Integration.Tests/Generation/` generates `Medium` into a schema of its own and
 asserts that every screen's data call stays inside the budgets in `ResponsivenessBudgets`. The same
 assertions run against `Large` when `MARTENSTUDIO_LARGE=1` is set:
 
 ```powershell
 $env:MARTENSTUDIO_PG_REUSE='false'; $env:MARTENSTUDIO_LARGE='1'
-dotnet test tests/MartenStudio.Integration.Tests --filter FullyQualifiedName~Generation
+dotnet test tests/DataStudio.Marten.Integration.Tests --filter FullyQualifiedName~Generation
 ```
 
 A budget that is over for a reason already written down lives in

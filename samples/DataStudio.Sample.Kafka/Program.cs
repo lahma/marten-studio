@@ -46,7 +46,7 @@ if (inspected.NeedsReseed)
     if (!EphemeralPostgres.IsThrowaway(postgres) && !allowDataGeneration)
     {
         await Console.Error.WriteLineAsync(
-            "KStudio sample: the database in ConnectionStrings:Postgres was seeded by another build of the demo, or has rows in the demo's schemas "
+            "Data Studio Kafka sample: the database in ConnectionStrings:Postgres was seeded by another build of the demo, or has rows in the demo's schemas "
             + "that the demo did not seed. Start once with --allow-data-generation to have it drop and seed "
             + string.Join(" and ", SampleDatabase.Schemas) + " again, or drop them yourself.");
         return 1;
@@ -172,7 +172,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>KStudio sample</title>
+          <title>Data Studio Kafka sample</title>
           <link rel="icon" href="data:," />
           <style>
             body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
@@ -180,11 +180,11 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           </style>
         </head>
         <body>
-          <h1>KStudio sample</h1>
+          <h1>Data Studio Kafka sample</h1>
           <p>{{who}}</p>
           <ul>
-            <li><a href="/studio/kafka">Open KStudio</a> &mdash; the Kafka pages of Data Studio, mounted at <code>/studio</code></li>
-            <li><a href="/studio">Open Marten Studio</a></li>
+            <li><a href="/studio/kafka">Open the Kafka pages</a> &mdash; the Kafka module of Data Studio, mounted at <code>/studio</code></li>
+            <li><a href="/studio">Open Data Studio</a> &mdash; the front page, with the Marten and Kafka modules</li>
             <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> and <code>checkout.*</code> only); the password is the user name</li>
           </ul>
           <p>Try, as <code>support</code>, in Search over the last 24 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>

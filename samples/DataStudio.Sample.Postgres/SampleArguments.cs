@@ -35,7 +35,7 @@ internal sealed record SampleArguments(bool AllowDataGeneration, IReadOnlyList<s
 
     /// <summary>The one line the sample prints when it starts on a configured database without the switch.</summary>
     public const string ReadOnlyNotice =
-        "Postgres Studio sample: read-only - ConnectionStrings:Postgres names a database this sample did not start, so it "
+        "Data Studio Postgres sample: read-only - ConnectionStrings:Postgres names a database this sample did not start, so it "
         + "creates no tenant databases and no demo schemas there; start it with " + AllowDataGenerationSwitch + " to write them.";
 
     /// <summary>Reads the switch out of <paramref name="args" />, and rewrites it for the host builder.</summary>

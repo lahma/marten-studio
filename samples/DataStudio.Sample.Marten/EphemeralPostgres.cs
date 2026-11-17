@@ -29,7 +29,7 @@ internal static class EphemeralPostgres
         {
             throw new InvalidOperationException(
                 """
-                The Marten Studio sample needs a PostgreSQL database and could not start one.
+                The Data Studio Marten sample needs a PostgreSQL database and could not start one.
 
                 It starts a throwaway `postgres:17-alpine` container through Testcontainers when no
                 connection string is configured, and Docker did not answer. Either:
@@ -50,8 +50,8 @@ internal static class EphemeralPostgres
 
         Console.WriteLine();
         Console.WriteLine("  ┌───────────────────────────────────────────────────────────────────────────┐");
-        Console.WriteLine("  │  Marten Studio sample: no ConnectionStrings:Marten was configured, so     │");
-        Console.WriteLine("  │  a throwaway PostgreSQL container was started for this run.               │");
+        Console.WriteLine("  │  Data Studio Marten sample: no ConnectionStrings:Marten was configured,   │");
+        Console.WriteLine("  │  so a throwaway PostgreSQL container was started for this run.            │");
         Console.WriteLine($"  │  Container: {container.Id[..Math.Min(12, container.Id.Length)],-61} │");
         Console.WriteLine($"  │  Host port: {container.GetMappedPublicPort(5432),-61} │");
         Console.WriteLine("  │  Nothing in it survives `docker rm`. Configure a connection string to     │");

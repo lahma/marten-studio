@@ -52,7 +52,7 @@ internal static class DemoDataPanel
             return """
                 <h2 id="demo-data">Demo data</h2>
                 <p>
-                  Demo-data generation is enabled on this host but needs the <code>MartenStudioAdmin</code>
+                  Demo-data generation is enabled on this host but needs the <code>DataStudioAdmin</code>
                   policy. Sign in as <code>admin</code> to see the panel.
                 </p>
                 """;

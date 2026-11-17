@@ -17,7 +17,7 @@ namespace DataStudio.Sample.Marten.Generation;
 /// <para>
 /// <b>Three gates, all of them real.</b> The endpoints are only mapped at all when the host is in
 /// Development or was started with <c>--allow-data-generation</c>; every one of them requires the
-/// <c>MartenStudioAdmin</c> policy, which only the <c>admin</c> demo user satisfies; and every POST
+/// <c>DataStudioAdmin</c> policy, which only the <c>admin</c> demo user satisfies; and every POST
 /// validates an antiforgery token, exactly as the sign-in form does. A "generate a million documents"
 /// button that a cross-site page could press is a denial-of-service gadget, and the fact that it lives
 /// in a sample is not a defence - samples are what people copy.

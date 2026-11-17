@@ -51,7 +51,7 @@ internal static class EphemeralPostgres
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             throw new InvalidOperationException(
-                "KStudio sample: no ConnectionStrings:Postgres is configured and Docker is not available to start a throwaway Postgres. "
+                "Data Studio Kafka sample: no ConnectionStrings:Postgres is configured and Docker is not available to start a throwaway Postgres. "
                 + "Start Docker, or set ConnectionStrings:Postgres to a database you own.",
                 exception);
         }

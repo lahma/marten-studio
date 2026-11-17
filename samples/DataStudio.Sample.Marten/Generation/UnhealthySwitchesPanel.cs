@@ -53,7 +53,7 @@ internal static class UnhealthySwitchesPanel
             return heading + """
                 <p>
                   The switches that make this database unhealthy on purpose are enabled on this host but need the
-                  <code>MartenStudioAdmin</code> policy. Sign in as <code>admin</code> to see them.
+                  <code>DataStudioAdmin</code> policy. Sign in as <code>admin</code> to see them.
                 </p>
                 """;
         }

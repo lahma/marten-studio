@@ -356,7 +356,7 @@ public class UnhealthySwitchEndpointTests
 
     [Theory]
     [InlineData(false, true, "--allow-data-generation")]
-    [InlineData(true, false, "MartenStudioAdmin")]
+    [InlineData(true, false, "DataStudioAdmin")]
     public void Anybody_else_is_told_why_there_are_no_switches(bool enabled, bool isAdmin, string why)
     {
         using UnhealthySwitchBoard board = TestApp.NewBoard(out _);

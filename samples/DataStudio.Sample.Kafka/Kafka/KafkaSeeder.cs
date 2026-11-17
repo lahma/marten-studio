@@ -92,7 +92,7 @@ internal sealed class ConfluentSeedTarget(ClientConfig config) : IKafkaSeedTarge
 
             if (DateTime.UtcNow > deadline)
             {
-                throw new InvalidOperationException("KStudio sample: the topics it created are not visible in the cluster's metadata after 60 seconds.");
+                throw new InvalidOperationException("Data Studio Kafka sample: the topics it created are not visible in the cluster's metadata after 60 seconds.");
             }
 
             await Task.Yield();
@@ -157,12 +157,12 @@ internal sealed class ConfluentSeedTarget(ClientConfig config) : IKafkaSeedTarge
 
         if (Volatile.Read(ref failure) is { } error)
         {
-            throw new InvalidOperationException("KStudio sample: producing the seed failed: " + error.Reason);
+            throw new InvalidOperationException("Data Studio Kafka sample: producing the seed failed: " + error.Reason);
         }
 
         if (Volatile.Read(ref pending) != 0)
         {
-            throw new InvalidOperationException("KStudio sample: the seed was not fully acknowledged.");
+            throw new InvalidOperationException("Data Studio Kafka sample: the seed was not fully acknowledged.");
         }
 
         return Task.CompletedTask;

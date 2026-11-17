@@ -148,7 +148,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Postgres Studio sample</title>
+          <title>Data Studio Postgres sample</title>
           <link rel="icon" href="data:," />
           <style>
             body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
@@ -156,11 +156,11 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           </style>
         </head>
         <body>
-          <h1>Postgres Studio sample</h1>
+          <h1>Data Studio Postgres sample</h1>
           <p>{{who}}</p>
           {{readOnly}}
           <ul>
-            <li><a href="/studio">Open Postgres Studio</a> &mdash; mounted at <code>/studio</code>, with the admin
+            <li><a href="/studio">Open Data Studio</a> &mdash; mounted at <code>/studio</code>, with the admin
               database as the source <code>default</code> and <code>tenant_a</code>, <code>tenant_b</code> and
               <code>tenant_c</code> under the source <code>tenants</code></li>
             <li><a href="/login">Sign in</a> as <code>admin</code>, <code>ops</code> or <code>viewer</code> (the password is the user name)</li>

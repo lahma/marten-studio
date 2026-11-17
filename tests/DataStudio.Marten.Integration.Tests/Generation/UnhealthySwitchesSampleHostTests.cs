@@ -132,7 +132,7 @@ public class UnhealthySwitchesSampleHostTests(PostgresFixture postgres)
         using HttpClient viewer = await SignInAsync(host, "viewer");
 
         string page = await (await viewer.GetAsync(new Uri("/", UriKind.Relative), Token)).Content.ReadAsStringAsync(Token);
-        page.Should().Contain("Make it unhealthy").And.Contain("MartenStudioAdmin");
+        page.Should().Contain("Make it unhealthy").And.Contain("DataStudioAdmin");
         page.Should().NotContain("/sample/unhealthy/", "a viewer is given no switch to press");
 
         using FormUrlEncodedContent form = new(new Dictionary<string, string>(StringComparer.Ordinal)

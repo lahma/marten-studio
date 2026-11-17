@@ -17,10 +17,10 @@ internal static class SamplePolicies
     public const string ScopeClaim = "scope";
 
     /// <summary>Who may open the studio at all.</summary>
-    public const string Studio = "MartenStudio";
+    public const string Studio = "DataStudio";
 
     /// <summary>Who may change anything through it.</summary>
-    public const string StudioWrite = "MartenStudioWrite";
+    public const string StudioWrite = "DataStudioWrite";
 
     /// <summary>
     /// Who may do the host's own irreversible things - generating a million documents, and truncating
@@ -32,7 +32,7 @@ internal static class SamplePolicies
     /// studio's own capability model has nothing to say about it. It maps to
     /// <see cref="DevUsers.DestroyScope" />, which only <c>admin</c> carries.
     /// </remarks>
-    public const string StudioAdmin = "MartenStudioAdmin";
+    public const string StudioAdmin = "DataStudioAdmin";
 
     /// <summary>Registers all three policies.</summary>
     public static void Configure(AuthorizationOptions options)

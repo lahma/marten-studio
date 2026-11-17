@@ -208,7 +208,7 @@ public class SampleSeedTests
 
         foreign.Verdict.Should().Be(SampleKafkaVerdict.Refuse);
         foreign.Message.Should().Be(
-            "KStudio sample: this Kafka already has an orders.v1 topic that the sample did not seed. Point ConnectionStrings:Kafka at an empty cluster, or delete the topic.");
+            "Data Studio Kafka sample: this Kafka already has an orders.v1 topic that the sample did not seed. Point ConnectionStrings:Kafka at an empty cluster, or delete the topic.");
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public class SampleSeedTests
 
         earlier.Verdict.Should().Be(SampleKafkaVerdict.Refuse);
         earlier.Message.Should().Be(
-            "KStudio sample: this Kafka holds an earlier sample's topics. Delete the container (or unset KSTUDIO_SAMPLE_REUSE) so that the sample can seed it again.");
+            "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset KSTUDIO_SAMPLE_REUSE) so that the sample can seed it again.");
         SampleKafkaJudge.Judge(["orders.v1", "kstudio-sample.seed-v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
     }
 
@@ -234,14 +234,14 @@ public class SampleSeedTests
     public void The_refusal_for_a_missing_docker_is_word_for_word()
     {
         SampleKafka.NoDockerMessage.Should().Be(
-            "KStudio sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set ConnectionStrings:Kafka to a cluster you own (the sample creates and seeds topics there only with --allow-data-generation).");
+            "Data Studio Kafka sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set ConnectionStrings:Kafka to a cluster you own (the sample creates and seeds topics there only with --allow-data-generation).");
     }
 
     [Fact]
     public void The_banner_names_the_containers_that_were_started_word_for_word()
     {
         SampleKafka.Banner("localhost:32770", "localhost:32771").Should().Be(
-            "KStudio sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are deleted when this process stops. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
+            "Data Studio Kafka sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are deleted when this process stops. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
 
         SampleKafka.Banner("localhost:32770", null).Should().Contain("a throwaway Kafka at localhost:32770").And.NotContain("Postgres at");
         SampleKafka.Banner(null, "localhost:32771").Should().Contain("a throwaway Postgres at localhost:32771").And.NotContain("Kafka at");
@@ -252,7 +252,7 @@ public class SampleSeedTests
     public void The_banner_never_promises_a_reused_container_is_deleted()
     {
         SampleKafka.Banner("localhost:32770", "localhost:32771", reused: true).Should().Be(
-            "KStudio sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are kept for the next run (KSTUDIO_SAMPLE_REUSE=true); docker rm -f removes a container when you are done. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
+            "Data Studio Kafka sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are kept for the next run (KSTUDIO_SAMPLE_REUSE=true); docker rm -f removes a container when you are done. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
     }
 
     [Fact]

@@ -16,10 +16,10 @@ internal static class SamplePolicies
     public const string ScopeClaim = "scope";
 
     /// <summary>Who may open the studio at all.</summary>
-    public const string Studio = "MartenStudio";
+    public const string Studio = "DataStudio";
 
     /// <summary>Who may change anything through the Marten screens.</summary>
-    public const string StudioWrite = "MartenStudioWrite";
+    public const string StudioWrite = "DataStudioWrite";
 
     /// <summary>Registers every policy the sample uses, KStudio's two included.</summary>
     /// <param name="options">The application's authorization options.</param>

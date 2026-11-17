@@ -12,7 +12,7 @@ namespace DataStudio.Sample.Marten.Generation;
 /// <remarks>
 /// <para>
 /// <b>The same three gates as the demo-data endpoints</b>, and for the same reason (<see cref="DemoDataEndpoints" />):
-/// mapped only in Development or with <c>--allow-data-generation</c>, every one behind the <c>MartenStudioAdmin</c>
+/// mapped only in Development or with <c>--allow-data-generation</c>, every one behind the <c>DataStudioAdmin</c>
 /// policy that only the <c>admin</c> demo user satisfies, and every POST antiforgery-validated. A button that pins a
 /// production event store's projections is not something a cross-site page should be able to press, sample or not.
 /// </para>

@@ -1,22 +1,23 @@
-# KStudio sample host
+# Data Studio Kafka sample host
 
-A small ASP.NET Core host that registers Marten Studio over the demo store in `samples/MartenStudio.SampleDomain`, adds KStudio, the Kafka
-section of the studio, and serves both at `/marten`. The Kafka pages are at `/marten/kafka`.
+A small ASP.NET Core host that registers Data Studio with the Marten module over the demo store in `samples/DataStudio.Sample.Marten.Domain`,
+adds the Kafka module, and serves both at `/studio`: the front page has a tile for each, the Marten pages are at `/studio/marten` and the
+Kafka pages at `/studio/kafka`.
 
 ```powershell
-dotnet run --project samples/KStudio.Sample
+dotnet run --project samples/DataStudio.Sample.Kafka
 ```
 
 With no `ConnectionStrings:Kafka` and no `ConnectionStrings:Postgres` it starts a throwaway `apache/kafka:4.4.0` and a throwaway
 `postgres:17-alpine` through Testcontainers, seeds the Kafka with a small, deterministic set of topics, and logs a banner at Warning that
 names both:
 
-> KStudio sample: started a throwaway Kafka at {bootstrap} and a throwaway Postgres at {host}; both are deleted when this process stops.
+> Data Studio Kafka sample: started a throwaway Kafka at {bootstrap} and a throwaway Postgres at {host}; both are deleted when this process stops.
 > Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.
 
 It never falls back to `localhost:9092`. With Docker absent and nothing configured it stops with:
 
-> KStudio sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set
+> Data Studio Kafka sample: no ConnectionStrings:Kafka is configured and Docker is not available to start a throwaway Kafka. Start Docker, or set
 > ConnectionStrings:Kafka to a cluster you own (the sample creates and seeds topics there only with --allow-data-generation).
 
 Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the password is the user name).
@@ -30,7 +31,7 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 
 ## The two users
 
-| User | Studio | Kafka |
+| User | Data Studio | Kafka |
 |---|---|---|
 | `admin` | opens it, and may change things in the Marten screens | every topic, Search and record values (`ReadPayloads`) |
 | `support` | opens it, read-only | the cluster and the topics starting `orders.` or `checkout.`, and Search over them by key, header and attribute; **not** record values: they read `The value of this record is not available to you.`, and a search on a value is refused. `payments.v1`, `customers.v1`, `secrets.v1` and Wolverine's dead-letter topic are absent from every list and a search that names one is refused whole |
@@ -49,7 +50,7 @@ Every timestamp is in the past, within the last six hours of when the sample sta
 | `kstudio-sample.seed-v2` | 1 | the marker: the sample seeded this cluster (a cluster with `seed-v1` was seeded by an earlier sample and must be deleted) |
 
 The sample application's own consumer group, `sample-orders-handler`, has committed 800 of the about 1,000 records in each partition of
-`orders.v1`, so the topic page shows a lag. That consumer is the sample's, not KStudio's: KStudio reads and never writes.
+`orders.v1`, so the topic page shows a lag. That consumer is the sample's, not the Kafka module's: the Kafka module reads and never writes.
 
 ## Find a record from a ticket
 
@@ -109,9 +110,9 @@ that Wolverine cascades to `checkout.confirmed.v1`. Command `chk-0007` is delive
 included - so the topic holds 26 commands, the store 25 documents and `checkout.confirmed.v1` 26 confirmations.
 
 `WolverineFx.RuntimeCompilation` is a reference of this host alone: Wolverine 6.61 no longer ships its runtime compiler, and a host with a
-handler needs it (or pre-generated code) to start. KStudio and KStudio.Wolverine do not use it.
+handler needs it (or pre-generated code) to start. `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` do not use it.
 
-KStudio is told about all of this with one line, `UseWolverineKafka()`, which reads Wolverine's configuration and starts nothing:
+The Kafka module is told about all of this with one line, `UseWolverineKafka()`, which reads Wolverine's configuration and starts nothing:
 
 ```csharp
 k.UseWolverineKafka(w => w.Cluster((broker, c) => c.DisplayName("Sample Kafka (Wolverine)").Profile(KafkaProfile.Production)));
@@ -121,7 +122,7 @@ k.Topic("checkout.v1", t => t.Correlation(c => c.Key().Document("CheckoutOrder")
 The Settings page lists **both** clusters: `Sample Kafka`, which the host declared with `AddCluster` and which keeps the seed's topics, and
 `Sample Kafka (Wolverine)`, which Wolverine's configuration declared. Both point at the same broker; that is a demo's shortcut, and a real host
 declares its cluster once, either way. `Correlation(c => c.Key().Document("CheckoutOrder"))` says that the key of both topics is the id of a
-`CheckoutOrder` in the Marten store, which is what lets the two studios link to one another.
+`CheckoutOrder` in the Marten store, which is what lets the Marten and Kafka modules link to one another.
 
 The two clusters carry different **profiles** on purpose: `Sample Kafka` is `Profile(KafkaProfile.Test)` and `Sample Kafka (Wolverine)` is
 `Profile(KafkaProfile.Production)`. Select each and compare: the cluster selector's chip, the **Profile** section of Cluster settings, the allowance line
@@ -135,7 +136,7 @@ is a disabled button on the Production one, with the sentence that names `KafkaC
 2. **Search**, `checkout.v1`, the last hour, no predicate: 26 records. Open `chk-0007`.
 3. **Related records**: the timeline shows the command on `checkout.v1` and its `CheckoutConfirmed` on `checkout.confirmed.v1` on one screen, matched by
    `correlation` and `message`. Nothing runs until you press **Search related records**.
-4. In the record detail, **Document CheckoutOrder chk-0007 →** opens Marten Studio's document, in tenant `acme`.
+4. In the record detail, **Document CheckoutOrder chk-0007 →** opens the Marten module's document, in tenant `acme`.
 5. On the document page, **Find in Kafka** returns to the timeline over both checkout topics.
 6. Back in the search results of `checkout.v1`: **Possible duplicates: 1 group**, the two copies of `chk-0007`.
 

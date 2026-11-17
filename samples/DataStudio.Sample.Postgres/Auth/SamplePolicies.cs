@@ -24,10 +24,10 @@ internal static class SamplePolicies
     public const string ScopeClaim = "scope";
 
     /// <summary>Who may open the studio at all.</summary>
-    public const string Studio = "PostgresStudio";
+    public const string Studio = "DataStudio";
 
     /// <summary>Who may use which capability, asked per capability with the resource attached.</summary>
-    public const string StudioCapability = "PostgresStudioCapability";
+    public const string StudioCapability = "DataStudioCapability";
 
     /// <summary>The scope each of Postgres Studio's capabilities needs, by the name the studio puts on the resource.</summary>
     private static readonly Dictionary<string, string> ScopeByCapability = new(StringComparer.Ordinal)

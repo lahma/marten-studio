@@ -43,7 +43,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
 
         Regex.IsMatch(
                 log,
-                @"warn: [^\r\n]*\r?\n\s*KStudio sample: started a throwaway Kafka at \S+ and a throwaway Postgres at \S+; both are deleted when this process stops\. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own\.",
+                @"warn: [^\r\n]*\r?\n\s*Data Studio Kafka sample: started a throwaway Kafka at \S+ and a throwaway Postgres at \S+; both are deleted when this process stops\. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own\.",
                 RegexOptions.None,
                 TimeSpan.FromSeconds(5))
             .Should().BeTrue("the banner is a Warning, once, on start. Log: " + log);

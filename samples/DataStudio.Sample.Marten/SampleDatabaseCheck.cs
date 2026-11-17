@@ -64,13 +64,13 @@ internal static class SampleDatabaseCheck
 
     /// <summary>The line the host stops with on a configured database it will not drop anything in.</summary>
     internal static string RefusalLine(SampleDatabaseInspection found) =>
-        "The Marten Studio sample did not start: the database in ConnectionStrings:Marten " + What(found)
+        "The Data Studio Marten sample did not start: the database in ConnectionStrings:Marten " + What(found)
         + ", which this build cannot seed over. Start it once with --allow-data-generation to have it drop and seed "
         + Schemas + " again, or drop them yourself.";
 
     /// <summary>The line the host prints when it dropped the demo's schemas and is about to seed them again.</summary>
     internal static string ReseededLine(SampleDatabaseInspection found) =>
-        "Marten Studio sample: the database " + What(found) + ", so " + Schemas + " were dropped and are being seeded again.";
+        "Data Studio Marten sample: the database " + What(found) + ", so " + Schemas + " were dropped and are being seeded again.";
 
     private static string Schemas => string.Join(" and ", SampleDatabase.Schemas);
 
