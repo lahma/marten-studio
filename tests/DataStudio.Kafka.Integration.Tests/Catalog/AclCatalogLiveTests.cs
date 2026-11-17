@@ -166,7 +166,7 @@ public abstract class AclCatalogLiveTests(KafkaFixture fixture)
 
         topics.IsAvailable.Should().BeFalse();
         topics.Error.Should().BeOfType<WireError.AuthenticationFailed>();
-        KafkaAccessText.Describe(topics.Error!).Should().Contain("refused KStudio's credentials");
+        KafkaAccessText.Describe(topics.Error!).Should().Contain("refused Data Studio's credentials");
     }
 }
 
