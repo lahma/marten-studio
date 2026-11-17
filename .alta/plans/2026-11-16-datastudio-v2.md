@@ -160,7 +160,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       model's page paths stay relative to the mount and start with `postgres/`. The shell's front page (a tile per
       module, or a redirect when there is one) and `/studio/activity`. The tiles carry a name, a sentence and a link:
       headline numbers need a gated read per module and are a follow-up.
-- [ ] 6. **One wording.** Remove `StudioProduct`, merge `StudioLog` and `PostgresStudioLog` (same event ids, one
+- [x] 6. **One wording.** Remove `StudioProduct`, merge `StudioLog` and `PostgresStudioLog` (same event ids, one
       template each), move module-specific sentences to their module, retire `StudioTextPinTests`. Shortcuts move to
       the Postgres module; the chip and the banner get their single templates.
 - [ ] 7. **Golden files and browser suites.** Re-accept the shell's golden files once, after steps 4 to 6, reading the
