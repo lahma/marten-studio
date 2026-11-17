@@ -203,6 +203,6 @@ public class KafkaRecordSearchLinksTests
 
         CapturedLogEntry entry = logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9678, "said once").Subject;
         entry.Level.Should().Be(LogLevel.Debug);
-        entry.Message.Should().Be("KStudio's Find in Kafka link could not read the clusters: InvalidOperationException").And.NotContain("S3NT1NEL");
+        entry.Message.Should().Be("Data Studio's Find in Kafka link could not read the clusters: InvalidOperationException").And.NotContain("S3NT1NEL");
     }
 }

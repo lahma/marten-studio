@@ -47,7 +47,7 @@ public class RelationshipLogLevelsTests
         logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning, "a refused or unknown scope is no anomaly");
         logs.Entries.Should().ContainSingle(static x => x.Message.Contains("read no relationships", StringComparison.Ordinal))
             .Which.Should().Match<CapturedLogEntry>(x => x.Level == LogLevel.Debug
-                && x.Message == "Postgres Studio read no relationships for source " + source + ", database " + database
+                && x.Message == "Data Studio read no relationships for source " + source + ", database " + database
                     + ": the scope is refused or names nothing");
     }
 
@@ -65,7 +65,7 @@ public class RelationshipLogLevelsTests
         logs.Entries.Should().NotContain(static x => x.Message.Contains("read no relationships", StringComparison.Ordinal));
         logs.Entries.Should().ContainSingle(static x => x.Message.Contains("could not read the relationships", StringComparison.Ordinal))
             .Which.Should().Match<CapturedLogEntry>(static x => x.Level == LogLevel.Warning
-                && x.Message == "Postgres Studio could not read the relationships of tenants");
+                && x.Message == "Data Studio could not read the relationships of tenants");
     }
 
     /// <summary>

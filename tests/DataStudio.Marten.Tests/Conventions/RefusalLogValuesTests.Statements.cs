@@ -5,7 +5,6 @@ using DataStudio.Marten.Tests.Support;
 
 using Microsoft.Extensions.Logging;
 using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Conventions;
 
@@ -23,20 +22,17 @@ public partial class RefusalLogValuesTests
     /// The review's case: 4,000 characters of comment in front of the statement once pushed the statement itself past a text's
     /// bound, out of the only record that it ran. Below the circuit's receive bound, the whole statement is there.
     /// </summary>
-    [Theory]
-    [InlineData(nameof(StudioProduct.MartenStudio))]
-    [InlineData(nameof(StudioProduct.PostgresStudio))]
-    public void A_padded_statement_that_ran_is_in_9204_to_its_end(string productName)
+    [Fact]
+    public void A_padded_statement_that_ran_is_in_9204_to_its_end()
     {
-        StudioProduct product = Enum.Parse<StudioProduct>(productName);
         const string Real = "select salary from payroll where name = 'ceo'";
         string padded = "/*" + new string(' ', 6_000) + "*/\n" + Real;
 
         CapturingLoggerProvider captured = new();
         ILogger logger = captured.CreateFactory().CreateLogger("statements");
 
-        logger.SqlExecuted(product, "ops", "default", "default", 3, 1, padded);
-        logger.SqlRejected(product, "ops", "default", "default", "refused", padded);
+        logger.SqlExecuted("ops", "default", "default", 3, 1, padded);
+        logger.SqlRejected("ops", "default", "default", "refused", padded);
 
         captured.Entries.Single(static x => x.EventId.Id == 9204).Message.Should().Contain(Real, "the statement that ran is in the record, however it was padded");
         captured.Entries.Single(static x => x.EventId.Id == 9205).Message.Should().NotContain(Real,

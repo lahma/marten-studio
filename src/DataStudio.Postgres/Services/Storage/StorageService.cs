@@ -404,14 +404,7 @@ internal sealed class StorageService : IStorageService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio could not read the schema gate to name the tables of {DatabaseId}", resolved.Target.Identity);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio could not read the schema gate to name the tables of {DatabaseId}", resolved.Target.Identity);
-                }
+                logger.LogDebug(exception, "Data Studio could not read the schema gate to name the tables of {DatabaseId}", resolved.Target.Identity);
             }
 
             return null;
@@ -440,28 +433,14 @@ internal sealed class StorageService : IStorageService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio did not read the storage of {DatabaseId}: {Reason}", databaseId, expected);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio did not read the storage of {DatabaseId}: {Reason}", databaseId, expected);
-                }
+                logger.LogDebug(exception, "Data Studio did not read the storage of {DatabaseId}: {Reason}", databaseId, expected);
             }
 
             return expected;
         }
 
         LogLevel level = throttle.WarningOrDebug("Storage.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioStorageReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
-        else
-        {
-            logger.StorageReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
+        logger.StorageReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? PostgresFailure.CouldNotConnect(exception)

@@ -389,7 +389,7 @@ internal sealed class DaemonAccessor
             if (logger.IsEnabled(LogLevel.Debug))
             {
                 logger.LogDebug(
-                    "Marten Studio is not asking the projection coordinator of store {StoreKey}: its AsyncMode is ExternallyManaged",
+                    "Data Studio is not asking the projection coordinator of store {StoreKey}: its AsyncMode is ExternallyManaged",
                     storeKey);
             }
 
@@ -403,7 +403,7 @@ internal sealed class DaemonAccessor
             if (logger.IsEnabled(LogLevel.Debug))
             {
                 logger.LogDebug(
-                    "Marten Studio found no projection coordinator for store {StoreKey} in this process",
+                    "Data Studio found no projection coordinator for store {StoreKey} in this process",
                     storeKey);
             }
 
@@ -594,7 +594,7 @@ internal sealed class DaemonAccessor
             {
                 logger.LogDebug(
                     exception,
-                    "The projection coordinator of store {StoreKey} does not hand out daemons; Marten Studio treats the store as externally managed",
+                    "The projection coordinator of store {StoreKey} does not hand out daemons; Data Studio treats the store as externally managed",
                     storeKey);
             }
 
@@ -810,7 +810,7 @@ internal sealed class DaemonAccessor
                 {
                     logger.LogDebug(
                         exception,
-                        "Marten Studio could not construct the projection coordinator {ServiceType} for store {StoreKey}; it treats the store as having no daemon here",
+                        "Data Studio could not construct the projection coordinator {ServiceType} for store {StoreKey}; it treats the store as having no daemon here",
                         serviceType,
                         registration.Key);
                 }

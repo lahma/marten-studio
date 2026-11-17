@@ -45,7 +45,7 @@ public class LiveLogRegistrationTests
     [Fact]
     public void The_database_module_says_it_in_its_own_words()
     {
-        Said(static services => services.AddDataStudio().AddPostgres()).Should().Be("A Postgres Studio live update failed");
+        Said(static services => services.AddDataStudio().AddPostgres()).Should().Be("A Data Studio live update failed");
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class LiveLogRegistrationTests
         {
             services.AddDataStudio().AddPostgres();
             services.AddDataStudio();
-        }).Should().Be("A Postgres Studio live update failed");
+        }).Should().Be("A Data Studio live update failed");
     }
 
     [Fact]

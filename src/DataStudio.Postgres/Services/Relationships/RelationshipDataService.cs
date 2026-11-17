@@ -1,6 +1,5 @@
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services.Database;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -124,16 +123,8 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (reads.Product == StudioProduct.PostgresStudio)
-            {
-                logger.LogWarning(
-                    exception, "Postgres Studio could not read the relationships of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
-            }
-            else
-            {
-                logger.LogWarning(
-                    exception, "Marten Studio could not read the relationships of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
-            }
+            logger.LogWarning(
+                exception, "Data Studio could not read the relationships of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
 
             return RelationshipGraph.Failed(RelationshipReads.Describe(exception, gate), readAt);
         }
@@ -182,21 +173,10 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             return;
         }
 
-        if (reads.Product == StudioProduct.PostgresStudio)
-        {
-            logger.LogDebug(
-                exception,
-                "Postgres Studio read no relationships for source {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
-                scope.StoreKey,
-                scope.DatabaseId);
-        }
-        else
-        {
-            logger.LogDebug(
-                exception,
-                "Marten Studio read no relationships for store {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
-                scope.StoreKey,
-                scope.DatabaseId);
-        }
+        logger.LogDebug(
+            exception,
+            "Data Studio read no relationships for source {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
+            scope.StoreKey,
+            scope.DatabaseId);
     }
 }

@@ -239,7 +239,7 @@ internal sealed partial class ProjectionDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the Explain's statements for {DatabaseId}", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Data Studio could not read the schema gate to mask the Explain's statements for {DatabaseId}", resolved.Database.Id.Identity);
             }
 
             return StatementScreen.Unchecked(hidesDocumentTypes);

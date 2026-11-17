@@ -1450,7 +1450,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask a LINQ query's error");
+            logger.LogDebug(exception, "Data Studio could not read the schema gate to mask a LINQ query's error");
             return null;
         }
     }

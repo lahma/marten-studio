@@ -10,6 +10,8 @@
     <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props, as DataStudio.Postgres.csproj does, so
          this project restores the Npgsql PostgresStudio is pinned to and nothing else decides it. -->
     <DataStudioPostgresPinsNpgsql>true</DataStudioPostgresPinsNpgsql>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the Marten suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
   </PropertyGroup>
 
   <!-- Global usings, as in DataStudio.Marten.Tests: `Xunit` comes from Verify.XunitV3's build props. -->
@@ -52,6 +54,8 @@
     <Compile Include="../DataStudio.Marten.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
     <Compile Include="../../samples/DataStudio.Sample.Postgres.Worker/DiagnosticsSummaryService.cs" Link="Support/Linked/DiagnosticsSummaryService.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/HostHubOptionsScenarios.cs" Link="Support/Linked/HostHubOptionsScenarios.cs" />
   </ItemGroup>

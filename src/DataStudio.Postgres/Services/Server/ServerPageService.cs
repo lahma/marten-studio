@@ -433,14 +433,7 @@ internal sealed class ServerPageService : IServerPageService
         {
             LogLevel level = throttle.WarningOrDebug("Server.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
 
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioServerFactsReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
-            }
-            else
-            {
-                logger.ServerFactsReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
-            }
+            logger.ServerFactsReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
         }
 
         return PostgresFailure.IsConnectionFailure(exception)

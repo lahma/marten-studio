@@ -184,7 +184,7 @@ internal sealed class HealthActionService : IHealthActionService
             catch (StudioCapabilityDeniedException denial)
             {
                 audit.RecordCapabilityDenied(denial, action.AuditAction, action.AuditTarget);
-                logger.HealthActionRefused(settings.Text.Product, action.Id, scope.StoreKey, scope.DatabaseId, denial.Message);
+                logger.HealthActionRefused(action.Id, scope.StoreKey, scope.DatabaseId, denial.Message);
                 return HealthActionResult.Refused(denial.Message, now);
             }
         }
@@ -206,7 +206,7 @@ internal sealed class HealthActionService : IHealthActionService
             catch (StudioNotAuthorizedException exception)
             {
                 audit.RecordScopeDenied(scope, DatabaseAccess.StorePolicyName(settings), action.AuditAction, action.AuditTarget);
-                logger.HealthActionRefused(settings.Text.Product, action.Id, scope.StoreKey, scope.DatabaseId, exception.Message);
+                logger.HealthActionRefused(action.Id, scope.StoreKey, scope.DatabaseId, exception.Message);
                 return HealthActionResult.Refused(exception.Message, now);
             }
             catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -255,7 +255,7 @@ internal sealed class HealthActionService : IHealthActionService
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            logger.HealthActionFailed(settings.Text.Product, exception, action.Id, scope.StoreKey, scope.DatabaseId, (exception as PostgresException)?.SqlState);
+            logger.HealthActionFailed(exception, action.Id, scope.StoreKey, scope.DatabaseId, (exception as PostgresException)?.SqlState);
 
             return Audited(scope, action, capability: null, HealthActionResult.Failed(
                 "The action failed (" + exception.GetType().Name + "); the server log has the details.", now));
@@ -296,7 +296,6 @@ internal sealed class HealthActionService : IHealthActionService
         catch (Exception exception)
         {
             logger.HealthActionFailed(
-                settings.Text.Product,
                 exception,
                 action.Id,
                 whole.StoreKey,
@@ -331,7 +330,7 @@ internal sealed class HealthActionService : IHealthActionService
     /// <summary>A refusal that is not audited: logged at Debug, and returned in words.</summary>
     private HealthActionResult Unaudited(StudioScope scope, string actionId, string reason)
     {
-        logger.HealthActionRefused(settings.Text.Product, actionId, scope.StoreKey, scope.DatabaseId, reason);
+        logger.HealthActionRefused(actionId, scope.StoreKey, scope.DatabaseId, reason);
         return HealthActionResult.Refused(reason, time.GetUtcNow());
     }
 
@@ -352,7 +351,7 @@ internal sealed class HealthActionService : IHealthActionService
 
         if (result.Outcome == HealthActionOutcome.Refused)
         {
-            logger.HealthActionRefused(settings.Text.Product, action.Id, scope.StoreKey, scope.DatabaseId, result.Reason ?? "refused");
+            logger.HealthActionRefused(action.Id, scope.StoreKey, scope.DatabaseId, result.Reason ?? "refused");
         }
 
         return result;

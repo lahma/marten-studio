@@ -107,12 +107,10 @@ internal static class StudioCoreRegistration
         // The database's half of what a visitor may read of the ring: its entries are judged here, as every module's are by its own gate.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, DatabaseAuditGate>());
 
-        // The words the shell's live-update loop logs in are this module's: its own log methods, chosen by its product, in place of the
-        // shell's default - Replace, so that the answer does not depend on which of the two registered first. The shell's loop names no throttle:
+        // The words the shell's live-update loop logs in are this module's: its own log methods, in place of the shell's default -
+        // Replace, so that the answer does not depend on which of the two registered first. The shell's loop names no throttle:
         // the database side closes over the container's, so event 9220 takes its level where it is logged.
-        services.Replace(ServiceDescriptor.Singleton(static provider => DatabaseLiveLogs.For(
-            provider.GetRequiredService<IStudioSettings>().Text.Product,
-            provider.GetService<StudioLogThrottle>())));
+        services.Replace(ServiceDescriptor.Singleton(static provider => DatabaseLiveLogs.For(provider.GetService<StudioLogThrottle>())));
 
         // The sidebar's badges. Scoped like the pages they point at, and reading through the same
         // services, so a badge is subject to the same source, database and tenant policies as the screen.

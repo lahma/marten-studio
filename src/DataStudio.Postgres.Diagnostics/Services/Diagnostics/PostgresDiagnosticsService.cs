@@ -159,7 +159,6 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         if (logger.IsEnabled(LogLevel.Debug))
         {
             logger.DiagnosticsSnapshotRead(
-                settings.Text.Product,
                 snapshot.Database.Source,
                 snapshot.Database.Database,
                 DiagnosticsJson.Name(snapshot.Outcome),
@@ -721,14 +720,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
         LogLevel level = throttle.WarningOrDebug("Diagnostics." + section, database.Source, database.Database, StudioLogThrottle.KindOf(exception));
 
-        if (services.GetService<IDiagnosticsSettings>()?.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioDiagnosticsSectionFailed(level, exception, section, database.Source, database.Database, postgres?.SqlState);
-        }
-        else
-        {
-            logger.DiagnosticsSectionFailed(level, exception, section, database.Source, database.Database, postgres?.SqlState);
-        }
+        logger.DiagnosticsSectionFailed(level, exception, section, database.Source, database.Database, postgres?.SqlState);
     }
 
     /// <summary>The sections a request asked for, by name, for event 9250.</summary>

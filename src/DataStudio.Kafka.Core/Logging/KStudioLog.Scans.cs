@@ -15,7 +15,7 @@ internal static partial class KStudioLog
     public static partial void ScanStopped(
         ILogger logger, Guid scanId, string cluster, string reason, long records, long bytes, long matches, long undecidable, long elapsedMilliseconds);
 
-    [LoggerMessage(EventId = 9667, Level = LogLevel.Debug, Message = "KStudio refused a scan on {Cluster}: {Refusal}")]
+    [LoggerMessage(EventId = 9667, Level = LogLevel.Debug, Message = "Data Studio refused a scan on {Cluster}: {Refusal}")]
     public static partial void ScanRefused(ILogger logger, string cluster, string refusal);
 
     [LoggerMessage(EventId = 9668, Level = LogLevel.Warning, Message = "Scan {ScanId} on {Cluster} failed: {ExceptionKind}")]
@@ -36,16 +36,16 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9673, Level = LogLevel.Debug, Message = "Scan {ScanId}'s consumer took {ElapsedMilliseconds} ms to close")]
     public static partial void ConsumerCloseSlow(ILogger logger, Guid scanId, long elapsedMilliseconds);
 
-    [LoggerMessage(EventId = 9674, Level = LogLevel.Debug, Message = "KStudio could not sample record sizes of {Topic} on {Cluster}: {Kind}")]
+    [LoggerMessage(EventId = 9674, Level = LogLevel.Debug, Message = "Data Studio could not sample record sizes of {Topic} on {Cluster}: {Kind}")]
     public static partial void SampleFailed(ILogger logger, string topic, string cluster, string kind);
 
-    [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "KStudio could not apply a {Kind} redaction rule to a value of {Topic} on {Cluster}: {Reason}, {ExceptionKind}")]
+    [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "Data Studio could not apply a {Kind} redaction rule to a value of {Topic} on {Cluster}: {Reason}, {ExceptionKind}")]
     public static partial void PayloadRuleNotApplied(ILogger logger, string kind, string topic, string cluster, string reason, string exceptionKind);
 
-    [LoggerMessage(EventId = 9676, Level = LogLevel.Debug, Message = "KStudio could not read a partitioner verification sample of {Topic} on {Cluster}: {Kind}")]
+    [LoggerMessage(EventId = 9676, Level = LogLevel.Debug, Message = "Data Studio could not read a partitioner verification sample of {Topic} on {Cluster}: {Kind}")]
     public static partial void PartitionerSampleFailed(ILogger logger, string topic, string cluster, string kind);
 
     /// <summary>9679: the host's record index (AGENTS.md D48) threw, timed out or could not be created, so the search read its whole window. The index's type, the cluster and the failure's type only: never the query, the literal or the message. Once per cluster per ten minutes.</summary>
-    [LoggerMessage(EventId = 9679, Level = LogLevel.Debug, Message = "KStudio's record index {Index} did not answer for cluster {Cluster}: {Kind}")]
+    [LoggerMessage(EventId = 9679, Level = LogLevel.Debug, Message = "Data Studio's record index {Index} did not answer for cluster {Cluster}: {Kind}")]
     public static partial void RecordIndexNotAnswered(ILogger logger, string index, string cluster, string kind);
 }

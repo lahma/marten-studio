@@ -187,7 +187,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
             // Never the exception's message or the exception: a Postgres error can quote a value (an id the cast refused).
             string reason = exception is PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name;
 
-            logger.LogWarning("Marten Studio could not check the shapes of '{Subject}': {Reason}", StudioLogValue.Cap(subject), reason);
+            logger.LogWarning("Data Studio could not check the shapes of '{Subject}': {Reason}", StudioLogValue.Cap(subject), reason);
             result = Failed(subject, state, "PostgreSQL or the reader refused a step (" + reason + ").", started);
         }
 

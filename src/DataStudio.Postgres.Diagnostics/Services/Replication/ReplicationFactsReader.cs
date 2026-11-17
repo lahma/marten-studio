@@ -347,14 +347,7 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
 
         LogLevel level = throttle.WarningOrDebug("Replication.Read", context.StoreKey, context.DatabaseId, StudioLogThrottle.KindOf(exception));
 
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioReplicationReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
-        }
-        else
-        {
-            logger.ReplicationReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
-        }
+        logger.ReplicationReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? PostgresFailure.CouldNotConnect(exception)

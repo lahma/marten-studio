@@ -19,6 +19,6 @@ internal static partial class MartenLog
     /// sees, is where Marten's words are kept.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9320, Level = LogLevel.Warning, Message = "Marten refused Marten Studio's rewind of subscription {Projection} (tenant {TenantId}) in store {StoreKey}, database {DatabaseId} as an unknown subscription; the page and the audit were told without Marten's words, which are attached here")]
+    [LoggerMessage(EventId = 9320, Level = LogLevel.Warning, Message = "Marten refused Data Studio's rewind of subscription {Projection} (tenant {TenantId}) in store {StoreKey}, database {DatabaseId} as an unknown subscription; the page and the audit were told without Marten's words, which are attached here")]
     public static partial void SubscriptionRewindRefused(this ILogger logger, Exception exception, string projection, string tenantId, string storeKey, string databaseId);
 }

@@ -36,8 +36,13 @@ internal static partial class ShellLiveLog
         };
     }
 
+    /// <remarks>
+    /// A page's own failure handler threw while a refresh was already failing - a bug in the studio, and on a polling loop, which is why
+    /// it is throttled rather than written once per tick. Internal, so that the database module writes the very same event with the level
+    /// its own throttle chose: the one declaration of 9220.
+    /// </remarks>
     [LoggerMessage(EventId = 9220, Message = "A Data Studio page failed to handle a live update failure")]
-    private static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
+    internal static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
 
     /// <summary>One Warning per kind of failure per <see cref="Window" />, and Debug for the repeats.</summary>
     private sealed class Throttle(TimeProvider clock)

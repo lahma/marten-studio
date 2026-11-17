@@ -97,7 +97,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not read document '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
+            logger.LogWarning(exception, "Data Studio could not read document '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
             return DocumentDetailResult.Missing(Describe(exception));
         }
     }
@@ -195,7 +195,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not read the related documents of '{Alias}'", StudioLogValue.Cap(alias));
+            logger.LogWarning(exception, "Data Studio could not read the related documents of '{Alias}'", StudioLogValue.Cap(alias));
             return new RelatedDocuments([], Describe(exception));
         }
     }
@@ -265,7 +265,7 @@ internal sealed partial class DocumentDataService
             // honest rendering of that: the link is simply not offered.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not check whether a stream '{Id}' exists", id);
+                logger.LogDebug(exception, "Data Studio could not check whether a stream '{Id}' exists", id);
             }
 
             return false;
@@ -316,7 +316,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not probe the collections for id '{Id}'", StudioLogValue.Cap(id));
+            logger.LogWarning(exception, "Data Studio could not probe the collections for id '{Id}'", StudioLogValue.Cap(id));
         }
 
         return probes;
@@ -411,7 +411,7 @@ internal sealed partial class DocumentDataService
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "Marten Studio could not probe '{Alias}' for an id", table.Alias);
+                    logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", table.Alias);
                 }
 
                 continue;
@@ -510,7 +510,7 @@ internal sealed partial class DocumentDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not probe '{Alias}' for an id", table.Alias);
+                logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", table.Alias);
             }
 
             return false;

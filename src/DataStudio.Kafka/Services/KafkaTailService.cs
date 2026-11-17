@@ -118,7 +118,7 @@ internal sealed class KafkaTailService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not plan a live tail");
+            logger.LogWarning(e, "Data Studio could not plan a live tail");
             await NotRunAsync(input, session, KafkaStudioText.TailFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
             return new KafkaTailPlanResult.Refused(KafkaStudioText.TailFailed);
         }
@@ -184,7 +184,7 @@ internal sealed class KafkaTailService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not start a live tail");
+            logger.LogWarning(e, "Data Studio could not start a live tail");
             await NotRunAsync(input, session, KafkaStudioText.TailFailed, plan.AuditText).ConfigureAwait(false);
             return new KafkaTailStartResult.Refused(KafkaStudioText.TailFailed);
         }

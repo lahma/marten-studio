@@ -12,10 +12,10 @@ internal static partial class KStudioLog
     /// 9677: a cluster, a tenant or a topic a source found was not listed. Logged at Warning the first time within ten minutes for the same
     /// source, item and reason and at Debug afterwards (<c>KafkaLogOnce.WarningOrDebug</c>).
     /// </summary>
-    [LoggerMessage(EventId = 9677, Message = "KStudio did not list {What} from {Source}: {Reason}")]
+    [LoggerMessage(EventId = 9677, Message = "Data Studio did not list {What} from {Source}: {Reason}")]
     public static partial void ClusterSourceItemNotListed(ILogger logger, LogLevel level, string what, string source, string reason);
 
     /// <summary>9678: the link from a studio's record to a search for it could not read the clusters, so no link was drawn.</summary>
-    [LoggerMessage(EventId = 9678, Level = LogLevel.Debug, Message = "KStudio's Find in Kafka link could not read the clusters: {ExceptionKind}")]
+    [LoggerMessage(EventId = 9678, Level = LogLevel.Debug, Message = "Data Studio's Find in Kafka link could not read the clusters: {ExceptionKind}")]
     public static partial void FindLinkClustersUnreadable(ILogger logger, string exceptionKind);
 }

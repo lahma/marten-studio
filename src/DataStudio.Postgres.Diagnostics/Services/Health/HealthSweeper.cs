@@ -715,14 +715,7 @@ internal sealed class HealthSweeper
             {
                 LogLevel level = throttle.WarningOrDebug("Aurora.Read", context.StoreKey, context.DatabaseId, StudioLogThrottle.KindOf(exception));
 
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.PostgresStudioAuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
-                }
-                else
-                {
-                    logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
-                }
+                logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
             }
 
             return null;
@@ -762,14 +755,7 @@ internal sealed class HealthSweeper
             // a cancellation of the whole sweep, at its next turn - nothing here may escape the sweep.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
-                }
+                logger.LogDebug(exception, "Data Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
             }
 
             return problem;
@@ -888,14 +874,7 @@ internal sealed class HealthSweeper
             // An expected state: the page says so, and the log only for whoever turned Debug on.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
-                }
+                logger.LogDebug(exception, "Data Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
             }
 
             return;
@@ -905,14 +884,7 @@ internal sealed class HealthSweeper
         string site = PostgresFailure.IsConnectionFailure(exception) ? "Health.Connection" : "Health.Check." + info.Code;
         LogLevel level = throttle.WarningOrDebug(site, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
 
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioHealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
-        }
-        else
-        {
-            logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
-        }
+        logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
     }
 
     /// <summary>What one gatherer left for the evaluation phase.</summary>

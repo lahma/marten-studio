@@ -43,6 +43,7 @@
   <ItemGroup>
     <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Support/ManualTimeProvider.cs" Link="Support/Linked/ManualTimeProvider.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
   </ItemGroup>

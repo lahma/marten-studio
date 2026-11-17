@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace DataStudio.Postgres.Services;
 
 // 1.1's event, 9490: options validation met an AcceptedChecks entry for a retired check. In a file of its own; the class's own
-// documentation is StudioLog.cs's. The line names no product, so there is no Postgres Studio wording of it.
+// documentation is StudioLog.cs's.
 internal static partial class StudioLog
 {
     /// <remarks>

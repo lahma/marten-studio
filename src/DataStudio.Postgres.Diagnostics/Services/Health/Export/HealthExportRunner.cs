@@ -259,14 +259,7 @@ internal sealed class HealthExportRunner
     {
         LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "Health.Export", null, null, StudioLogThrottle.KindOf(exception));
 
-        if (Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioHealthExportFailed(level, exception);
-        }
-        else
-        {
-            logger.HealthExportFailed(level, exception);
-        }
+        logger.HealthExportFailed(level, exception);
     }
 
     /// <summary>
@@ -373,17 +366,10 @@ internal sealed class HealthExportRunner
                 case StudioSweepTargetOutcome.SourceNotEnumerated:
                     // An expected state, and the host's own: its tenancy holds no database in this process yet, or is one
                     // the studio cannot ask without making it build.
-                    if (logger.IsEnabled(LogLevel.Debug) && Text.Product == StudioProduct.PostgresStudio)
+                    if (logger.IsEnabled(LogLevel.Debug))
                     {
                         logger.LogDebug(
-                            "Postgres Studio's health export left data source {StoreKey} out: it holds no database it can name ({Shape})",
-                            entry.Source.Key,
-                            entry.Detail);
-                    }
-                    else if (logger.IsEnabled(LogLevel.Debug))
-                    {
-                        logger.LogDebug(
-                            "Marten Studio's health export left store {StoreKey} out: its tenancy holds no database it can name without building one ({Shape})",
+                            "Data Studio's health export left source {StoreKey} out: it holds no database it can name without building one ({Shape})",
                             entry.Source.Key,
                             entry.Detail);
                     }

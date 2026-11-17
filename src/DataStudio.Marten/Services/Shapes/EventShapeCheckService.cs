@@ -307,7 +307,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // Not read is a value: the caller says the unregistered types were not checked.
-            logger.LogDebug(exception, "Marten Studio could not read the statistics of mt_events for the shape check's list of event types");
+            logger.LogDebug(exception, "Data Studio could not read the statistics of mt_events for the shape check's list of event types");
             return null;
         }
     }
@@ -393,7 +393,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             // Never the exception's message or the exception: a Postgres error can quote a value.
             string reason = exception is PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name;
 
-            logger.LogWarning("Marten Studio could not check the shapes of events '{Subject}': {Reason}", StudioLogValue.Cap(eventType), reason);
+            logger.LogWarning("Data Studio could not check the shapes of events '{Subject}': {Reason}", StudioLogValue.Cap(eventType), reason);
             result = Failed(eventType, state, "PostgreSQL or the reader refused a step (" + reason + ").", started);
         }
 

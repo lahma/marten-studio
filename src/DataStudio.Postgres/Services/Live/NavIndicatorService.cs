@@ -1,6 +1,5 @@
 using DataStudio.Services.Settings;
 using DataStudio.Postgres.Services.Health;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -121,15 +120,14 @@ internal sealed class NavIndicatorService : INavIndicatorService
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<NavIndicatorService> logger;
     private readonly IHealthService? health;
-    private readonly StudioProduct product;
     private readonly TimeProvider time;
 
     /// <summary>The last spelling this circuit resolved, and the registered names it stands for.</summary>
     private Naming? naming;
 
     /// <remarks>
-    /// <paramref name="health" />, <paramref name="settings" /> and <paramref name="timeProvider" /> are optional so that a
-    /// test of the contributed badges can build this by hand; the container always supplies the first two.
+    /// <paramref name="health" /> and <paramref name="timeProvider" /> are optional so that a
+    /// test of the contributed badges can build this by hand; the container always supplies the first.
     /// <paramref name="resolver" /> must be over <paramref name="sources" />, as the container's circuit-scoped ones are.
     /// </remarks>
     public NavIndicatorService(
@@ -141,10 +139,8 @@ internal sealed class NavIndicatorService : INavIndicatorService
         StudioSnapshotCache cache,
         ILogger<NavIndicatorService> logger,
         IHealthService? health = null,
-        IStudioSettings? settings = null,
         TimeProvider? timeProvider = null)
     {
-        product = StudioText.Of(settings).Product;
         ArgumentNullException.ThrowIfNull(contributors);
 
         this.state = state;
@@ -194,14 +190,7 @@ internal sealed class NavIndicatorService : INavIndicatorService
         }
         catch (Exception exception)
         {
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.LogDebug(exception, "Postgres Studio could not read the navigation indicators");
-            }
-            else
-            {
-                logger.LogDebug(exception, "Marten Studio could not read the navigation indicators");
-            }
+            logger.LogDebug(exception, "Data Studio could not read the navigation indicators");
 
             return NavIndicators.None;
         }
@@ -216,14 +205,7 @@ internal sealed class NavIndicatorService : INavIndicatorService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.LogDebug(exception, "Postgres Studio could not read the health badge");
-            }
-            else
-            {
-                logger.LogDebug(exception, "Marten Studio could not read the health badge");
-            }
+            logger.LogDebug(exception, "Data Studio could not read the health badge");
 
             return null;
         }

@@ -15,8 +15,8 @@ namespace DataStudio.Postgres.Services;
 /// address's, and a refusal (9203, 9205, the 9201 that records it) logs them before anything has resolved them. Uncapped,
 /// one request writes a log line of any length; with a line break in it, it writes a second line that reads as the
 /// application's own (log forging); with a bidirectional override, a line that does not read as it is. So the audit and
-/// refusal events - 9200 to 9205, 9235, 9236, 9245 and 9452 through the per-product dispatchers every call goes through
-/// (<c>StudioLog.PostgresStudio.cs</c>, <c>StudioLog.StatementsPage.cs</c>), 9206, 9207 and 9209 through MartenLog's
+/// refusal events - 9200 to 9205, 9235, 9236, 9245 and 9452 through the dispatchers every call goes through
+/// (<c>StudioLog.Dispatchers.cs</c>, <c>StudioLog.HealthActions.cs</c>, <c>StudioLog.StatementsPage.cs</c>), 9206, 9207 and 9209 through MartenLog's
 /// wrappers, and LINQ mode's 9260 to 9263 through its run's <c>Logged*</c> values - take each value a visitor could have
 /// shaped through here, and so does every Warning that names a value from the address: a document id, a collection alias,
 /// the scope's store, database or tenant (<c>RefusalLogValuesTests</c>).

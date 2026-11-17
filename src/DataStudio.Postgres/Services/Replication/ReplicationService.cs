@@ -378,14 +378,7 @@ internal sealed class ReplicationService : IReplicationService
                 return new TablespaceSize(tablespace, null, "Measuring it ran out of time; try again.");
             }
 
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioTablespaceSizeFailed(exception, resolved.Source.Key, resolved.Target.Identity, postgres?.SqlState);
-            }
-            else
-            {
-                logger.TablespaceSizeFailed(exception, resolved.Source.Key, resolved.Target.Identity, postgres?.SqlState);
-            }
+            logger.TablespaceSizeFailed(exception, resolved.Source.Key, resolved.Target.Identity, postgres?.SqlState);
 
             return new TablespaceSize(tablespace, null, "It could not be measured" + (postgres is null ? "." : " (SQLSTATE " + postgres.SqlState + ")."));
         }
@@ -690,14 +683,7 @@ internal sealed class ReplicationService : IReplicationService
         {
             LogLevel level = throttle.WarningOrDebug("Replication.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
 
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioReplicationReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
-            }
-            else
-            {
-                logger.ReplicationReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
-            }
+            logger.ReplicationReadFailed(level, exception, "server", storeKey, databaseId, postgres?.SqlState);
         }
 
         return PostgresFailure.IsConnectionFailure(exception)

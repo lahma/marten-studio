@@ -11,10 +11,10 @@ internal static partial class KStudioLog
     public static partial void ApiUnsupported(ILogger logger, string cluster, string api);
 
     /// <summary>9654: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningOrDebug</c>).</summary>
-    [LoggerMessage(EventId = 9654, Message = "KStudio could not reach Kafka cluster {Cluster} for {Call}: {Code}")]
+    [LoggerMessage(EventId = 9654, Message = "Data Studio could not reach Kafka cluster {Cluster} for {Call}: {Code}")]
     public static partial void ClusterUnavailable(ILogger logger, LogLevel level, string cluster, string call, string code);
 
-    [LoggerMessage(EventId = 9659, Level = LogLevel.Debug, Message = "KStudio could not read {Call} of cluster {Cluster}: {ExceptionKind}")]
+    [LoggerMessage(EventId = 9659, Level = LogLevel.Debug, Message = "Data Studio could not read {Call} of cluster {Cluster}: {ExceptionKind}")]
     public static partial void CatalogReadFailed(ILogger logger, string call, string cluster, string exceptionKind);
 
     [LoggerMessage(EventId = 9660, Level = LogLevel.Debug, Message = "Partition {Partition} of {Topic} on {Cluster} starts at offset {LogStart}: earlier records are gone")]

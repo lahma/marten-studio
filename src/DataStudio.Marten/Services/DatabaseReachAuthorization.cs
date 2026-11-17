@@ -184,7 +184,7 @@ internal sealed class DatabaseReachAuthorization
         {
             logger.LogWarning(
                 exception,
-                "Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it",
+                "Data Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it",
                 resolved.Registration.Key,
                 action);
 

@@ -1,5 +1,4 @@
 using DataStudio.Services;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -35,7 +34,6 @@ internal sealed class StudioState
 
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
-    private readonly StudioProduct product;
 
     private bool initialized;
     private StudioScope? applyingScope;
@@ -48,21 +46,15 @@ internal sealed class StudioState
     /// The circuit's preferences, whose change this state relays to every page that listens to <see cref="ScopeChanged" />. Never
     /// unsubscribed: both are scoped to the same circuit.
     /// </param>
-    /// <param name="settings">
-    /// The studio's settings, whose words that line is logged in - optional so that a test can build the state by hand;
-    /// the container always supplies them (<see cref="StudioText.Of" />).
-    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
         ILogger<StudioState> logger,
-        StudioPreferences preferences,
-        IStudioSettings? settings = null)
+        StudioPreferences preferences)
     {
         ArgumentNullException.ThrowIfNull(preferences);
 
         this.catalog = catalog;
         this.logger = logger;
-        product = StudioText.Of(settings).Product;
         preferences.Changed += NotifyAsync;
     }
 
@@ -553,14 +545,7 @@ internal sealed class StudioState
         if (hit is null && bounded)
         {
             // The tenant is named nowhere in the first databases, and the rest are not asked: the address is applied as if it were found nowhere.
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioTenantDatabaseSearchBounded(others.Count, storeKey);
-            }
-            else
-            {
-                logger.TenantDatabaseSearchBounded(others.Count, storeKey);
-            }
+            logger.TenantDatabaseSearchBounded(others.Count, storeKey);
         }
 
         return (hit, others.Count);
@@ -597,14 +582,7 @@ internal sealed class StudioState
             }
             catch (Exception exception)
             {
-                if (product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogError(exception, "A Postgres Studio page failed to handle a change of the scope its links carry");
-                }
-                else
-                {
-                    logger.LogError(exception, "A Marten Studio page failed to handle a change of the scope its links carry");
-                }
+                logger.LogError(exception, "A Data Studio page failed to handle a change of the scope its links carry");
             }
         }
     }
@@ -636,14 +614,7 @@ internal sealed class StudioState
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                if (product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogError(exception, "A Postgres Studio page failed to handle a scope change");
-                }
-                else
-                {
-                    logger.LogError(exception, "A Marten Studio page failed to handle a scope change");
-                }
+                logger.LogError(exception, "A Data Studio page failed to handle a scope change");
             }
         }
     }

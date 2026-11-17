@@ -91,11 +91,11 @@ internal sealed class StudioActionLog
 
         if (succeeded)
         {
-            logger.ActionPerformed(text.Product, user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message ?? "done");
+            logger.ActionPerformed(user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message ?? "done");
         }
         else
         {
-            logger.ActionFailed(text.Product, user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message);
+            logger.ActionFailed(user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message);
         }
     }
 
@@ -108,7 +108,7 @@ internal sealed class StudioActionLog
         ArgumentNullException.ThrowIfNull(denial);
 
         Record(action, target, succeeded: false, denial.Message, denial.Capability);
-        logger.CapabilityDenied(text.Product, UserName(), denial.Capability.ToString(), denial.CapabilityOption);
+        logger.CapabilityDenied(UserName(), denial.Capability.ToString(), denial.CapabilityOption);
     }
 
     /// <summary>
@@ -138,7 +138,7 @@ internal sealed class StudioActionLog
         ArgumentNullException.ThrowIfNull(scope);
 
         Record(action, target, succeeded: false, text.ScopeDeniedEntry, capability, scope);
-        logger.ScopeAuthorizationDenied(text.Product, UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
+        logger.ScopeAuthorizationDenied(UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
     }
 
     /// <inheritdoc cref="StudioActionLogService.GetLatest" />

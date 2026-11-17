@@ -574,7 +574,7 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            logger.LogDebug(exception, "Marten Studio could not read the highest event sequence");
+            logger.LogDebug(exception, "Data Studio could not read the highest event sequence");
             return null;
         }
     }
@@ -863,7 +863,7 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            logger.LogDebug(exception, "Marten Studio could not list the aggregate types of a store");
+            logger.LogDebug(exception, "Data Studio could not list the aggregate types of a store");
             return [];
         }
     }
@@ -1508,7 +1508,7 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            logger.LogDebug(exception, "Marten Studio could not count the dead letters");
+            logger.LogDebug(exception, "Data Studio could not count the dead letters");
             return null;
         }
     }
@@ -1548,7 +1548,7 @@ internal sealed partial class EventDataService : IEventDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not read event {Sequence}", sequence);
+                logger.LogDebug(exception, "Data Studio could not read event {Sequence}", sequence);
             }
 
             return null;

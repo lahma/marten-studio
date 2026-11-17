@@ -15,8 +15,8 @@ internal static partial class StudioLog
     /// readable by more people than the page.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9245, Level = LogLevel.Information, Message = "Marten Studio user {User} read the session details of store {StoreKey}, database {DatabaseId}: {Sessions} sessions, {Locks} locks, {Prepared} prepared transactions")]
-    public static partial void SessionDetailsRead(this ILogger logger, string user, string storeKey, string databaseId, int sessions, int locks, int prepared);
+    [LoggerMessage(EventId = 9245, Level = LogLevel.Information, Message = "Data Studio user {User} read the session details of source {StoreKey}, database {DatabaseId}: {Sessions} sessions, {Locks} locks, {Prepared} prepared transactions")]
+    private static partial void SessionDetailsReadRaw(this ILogger logger, string user, string storeKey, string databaseId, int sessions, int locks, int prepared);
 
     /// <remarks>
     /// <para>
@@ -28,6 +28,6 @@ internal static partial class StudioLog
     /// words, and are logged at Debug without coming here.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9246, Message = "Marten Studio could not read the sessions of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9246, Message = "Data Studio could not read the sessions of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void SessionActivityReadFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId, string? sqlState);
 }

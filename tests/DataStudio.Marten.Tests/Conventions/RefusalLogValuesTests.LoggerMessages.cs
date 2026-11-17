@@ -26,7 +26,7 @@ public partial class RefusalLogValuesTests
     /// <summary>
     /// Every call of a <c>[LoggerMessage]</c> template passes nothing from the address bare: no document id, collection alias,
     /// or scope's store, database or tenant, except through <see cref="StudioLogValue.Cap" /> or as the resolved source's own
-    /// name. A per-product dispatcher (first argument a <c>StudioProduct</c>) caps inside, and is held to that above.
+    /// name. A dispatcher caps inside, and is held to that above; the templates behind the audit and refusal events are its <c>…Raw</c> ones.
     /// </summary>
     [Fact]
     public void Every_LoggerMessage_template_is_fed_route_values_capped()
@@ -62,11 +62,6 @@ public partial class RefusalLogValuesTests
             {
                 List<string> arguments = Arguments(code, site.Index + site.Length);
 
-                if (arguments.Count > 0 && arguments[0].Contains("Product", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
                 calls++;
                 uncapped.AddRange(arguments
                     .SelectMany(RouteValuesIn)
@@ -76,6 +71,10 @@ public partial class RefusalLogValuesTests
         }
 
         calls.Should().BeGreaterThan(60, "src/ calls its templates from many sites, and a scan that finds none has stopped working");
+
+        // 9450 (the Statements page refused by its gate, Debug) has never capped the scope it names: its 1.x dispatcher only chose a
+        // template, and the scan skipped every call that had one. Held as it was by this packet; capping it is a decision (hard rule 5).
+        uncapped.RemoveAll(static x => x.StartsWith("src/DataStudio.Postgres/Services/Statements/StatementsService.cs: StatementsPageRefused(", StringComparison.Ordinal));
         uncapped.Should().BeEmpty("a value from the address reaches a log template only escaped and bounded");
     }
 

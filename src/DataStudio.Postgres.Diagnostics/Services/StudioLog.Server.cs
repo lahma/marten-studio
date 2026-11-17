@@ -14,6 +14,6 @@ internal static partial class StudioLog
     /// asks for at <c>HealthInterval</c>, so anything above Debug would be a line a minute about nothing.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9290, Level = LogLevel.Debug, Message = "Marten Studio took the Postgres server of store {StoreKey}, database {DatabaseId} to be {Platform}: {Marker}")]
+    [LoggerMessage(EventId = 9290, Level = LogLevel.Debug, Message = "Data Studio took the Postgres server of source {StoreKey}, database {DatabaseId} to be {Platform}: {Marker}")]
     public static partial void PostgresPlatformDetected(this ILogger logger, string platform, string marker, string storeKey, string databaseId);
 }

@@ -3,8 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace DataStudio.Postgres.Services;
 
 // W5-AUR's events, 9500-9509: the host's capacity source and Aurora's own reads. In a file of their own so that the wave-5
-// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's, and Postgres Studio's
-// wording of each is in PostgresStudioLog.Aurora.cs, under the same id.
+// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's.
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -15,7 +14,7 @@ internal static partial class StudioLog
     /// interval and nothing else fails. A source that answers null or takes longer than five seconds is a value, at Debug.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9500, Message = "Marten Studio's capacity source failed for store {StoreKey}, database {DatabaseId}; the capacity is unknown until the next interval")]
+    [LoggerMessage(EventId = 9500, Message = "Data Studio's capacity source failed for source {StoreKey}, database {DatabaseId}; the capacity is unknown until the next interval")]
     public static partial void CapacitySourceFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
 
     /// <remarks>
@@ -27,6 +26,6 @@ internal static partial class StudioLog
     /// read is.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9501, Message = "Marten Studio could not read Aurora's {Section} of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9501, Message = "Data Studio could not read Aurora's {Section} of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void AuroraReadFailed(this ILogger logger, LogLevel level, Exception exception, string section, string storeKey, string databaseId, string? sqlState);
 }

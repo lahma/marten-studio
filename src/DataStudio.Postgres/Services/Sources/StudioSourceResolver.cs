@@ -56,22 +56,19 @@ internal sealed class StudioSourceResolver
     private readonly StudioDescriptor descriptor;
     private readonly ILogger logger;
     private readonly StudioLogThrottle? throttle;
-    private readonly StudioProduct product;
 
     public StudioSourceResolver(
         IStudioSourceProvider provider,
         StudioAuthorization authorization,
         StudioDescriptor descriptor,
         ILogger<StudioSourceResolver>? logger = null,
-        StudioLogThrottle? throttle = null,
-        IStudioSettings? settings = null)
+        StudioLogThrottle? throttle = null)
     {
         this.provider = provider;
         this.authorization = authorization;
         this.descriptor = descriptor;
         this.logger = logger ?? NullLogger<StudioSourceResolver>.Instance;
         this.throttle = throttle;
-        product = StudioText.Of(settings).Product;
     }
 
     /// <summary>
@@ -152,14 +149,7 @@ internal sealed class StudioSourceResolver
             LogLevel level = StudioLogThrottle.LevelOrWarning(
                 throttle, "Store.Databases", registration.Key, null, StudioLogThrottle.KindOf(exception));
 
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioStoreDatabasesUnreadable(level, exception, registration.Key);
-            }
-            else
-            {
-                logger.StoreDatabasesUnreadable(level, exception, registration.Key);
-            }
+            logger.StoreDatabasesUnreadable(level, exception, registration.Key);
 
             throw new StudioStoreUnavailableException(
                 registration.Key,
@@ -210,14 +200,7 @@ internal sealed class StudioSourceResolver
         LogLevel level = StudioLogThrottle.LevelOrWarning(
             throttle, "Store.Tenants", registration.Key, null, StudioLogThrottle.KindOf(exception));
 
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioTenantDiscoveryFailed(level, exception, registration.Key);
-        }
-        else
-        {
-            logger.TenantDiscoveryFailed(level, exception, registration.Key);
-        }
+        logger.TenantDiscoveryFailed(level, exception, registration.Key);
     }
 
     /// <summary>Whether <paramref name="exception" /> is the caller's own token being cancelled: the one thing that is not the host's failure.</summary>

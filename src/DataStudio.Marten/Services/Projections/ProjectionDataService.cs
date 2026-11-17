@@ -338,7 +338,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             {
                 logger.LogDebug(
                     exception,
-                    "Marten Studio has no projection summary for store {StoreKey}, database {DatabaseId}",
+                    "Data Studio has no projection summary for store {StoreKey}, database {DatabaseId}",
                     storeKey,
                     databaseId);
             }

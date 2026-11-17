@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 
 using DataStudio.Postgres.Services.Live;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Tests.Support;
 
 namespace DataStudio.Postgres.Tests.Components;
@@ -150,7 +149,7 @@ public class StudioLiveUpdatesVisibilityTests
     public async Task A_handler_that_throws_is_logged_at_Debug_as_well_as_handed_to_Failed()
     {
         ListLogger<StudioLiveUpdates> log = new();
-        await using StudioLiveUpdates updates = new(new WatchAnswers(false), log, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        await using StudioLiveUpdates updates = new(new WatchAnswers(false), log, DatabaseLiveLogs.For());
         await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
         TaskCompletionSource failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         updates.Failed += _ =>
@@ -170,7 +169,7 @@ public class StudioLiveUpdatesVisibilityTests
     public async Task Asking_the_browser_takes_its_answer_as_the_state_and_raises_a_change_only_if_it_differs()
     {
         AskedAnswers js = new(startsHidden: false, asked: true);
-        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For());
         await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
         ConcurrentQueue<bool> heard = new();
         updates.VisibilityChanged += hidden =>
@@ -192,7 +191,7 @@ public class StudioLiveUpdatesVisibilityTests
     public async Task A_browser_that_cannot_be_asked_counts_as_hidden()
     {
         AskedAnswers js = new(startsHidden: false, asked: false) { Fails = true };
-        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For());
         await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
 
         (await updates.ReadIsHiddenAsync(Xunit.TestContext.Current.CancellationToken)).Should().BeTrue();
@@ -244,7 +243,7 @@ public class StudioLiveUpdatesVisibilityTests
 
     private static async Task<StudioLiveUpdates> StartedAsync(bool startsHidden)
     {
-        StudioLiveUpdates updates = new(new WatchAnswers(startsHidden), NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        StudioLiveUpdates updates = new(new WatchAnswers(startsHidden), NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For());
         await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
         return updates;
     }

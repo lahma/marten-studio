@@ -103,7 +103,7 @@ public class ScanLifecycleTests
         await first.Fixture.DisposeAsync();
 
         (await first.Handle.Result.Bounded()).StopReason.Should().Be(KafkaScanStopReason.Shutdown);
-        first.Fixture.Logs.Entries.Where(static x => x.EventId.Id == 9662).Should().ContainSingle().Which.Message.Should().Be("KStudio is stopping 1 scans");
+        first.Fixture.Logs.Entries.Where(static x => x.EventId.Id == 9662).Should().ContainSingle().Which.Message.Should().Be("Data Studio is stopping 1 scans");
         first.Fixture.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9663);
     }
 
@@ -130,7 +130,7 @@ public class ScanLifecycleTests
 
         CapturedLogEntry warning = scan.Fixture.Logs.Entries.Where(static x => x.EventId.Id == 9663).Should().ContainSingle().Subject;
         warning.Level.Should().Be(LogLevel.Error);
-        warning.Message.Should().Be("1 KStudio scans did not stop within 10 s of shutdown");
+        warning.Message.Should().Be("1 Data Studio scans did not stop within 10 s of shutdown");
 
         scan.Reader.Unblock();
         (await scan.Handle.Result.Bounded()).StopReason.Should().Be(KafkaScanStopReason.Shutdown);

@@ -184,12 +184,12 @@ internal sealed partial class SchemaDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's migration notes ({What}) for database {DatabaseId} gave up on a lock", what, databaseId);
+                logger.LogDebug(exception, "Data Studio's migration notes ({What}) for database {DatabaseId} gave up on a lock", what, databaseId);
             }
 
             return;
         }
 
-        logger.LogWarning(exception, "Marten Studio could not read {What} for a migration preview of database {DatabaseId}", what, databaseId);
+        logger.LogWarning(exception, "Data Studio could not read {What} for a migration preview of database {DatabaseId}", what, databaseId);
     }
 }

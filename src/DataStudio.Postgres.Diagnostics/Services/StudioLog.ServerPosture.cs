@@ -3,8 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace DataStudio.Postgres.Services;
 
 // W5-S2's events, 9440-9449: the Server page's reads. In a file of their own so that the wave-5 packets' event blocks never
-// meet in one file; the class's own documentation is StudioLog.cs's, and Postgres Studio's wording of each is in
-// PostgresStudioLog.ServerPosture.cs, under the same id.
+// meet in one file; the class's own documentation is StudioLog.cs's.
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -17,6 +16,6 @@ internal static partial class StudioLog
     /// it read is.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9440, Message = "Marten Studio could not read the server {Section} of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9440, Message = "Data Studio could not read the server {Section} of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void ServerFactsReadFailed(this ILogger logger, LogLevel level, Exception exception, string section, string storeKey, string databaseId, string? sqlState);
 }

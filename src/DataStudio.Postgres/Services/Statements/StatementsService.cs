@@ -1807,7 +1807,7 @@ internal sealed class StatementsService : IStatementsService
     {
         if (logger.IsEnabled(LogLevel.Debug))
         {
-            logger.StatementsPageRefused(settings.Text.Product, scope.StoreKey, scope.DatabaseId, refusal.ToString());
+            logger.StatementsPageRefused(scope.StoreKey, scope.DatabaseId, refusal.ToString());
         }
 
         return StatementsView.Refused(refusal, reason);
@@ -1829,14 +1829,7 @@ internal sealed class StatementsService : IStatementsService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
-                }
+                logger.LogDebug(exception, "Data Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
             }
 
             return null;
@@ -1862,7 +1855,6 @@ internal sealed class StatementsService : IStatementsService
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.StatementsRead(
-                settings.Text.Product,
                 await authorization.UserNameAsync().ConfigureAwait(false),
                 whole.StoreKey,
                 whole.DatabaseId,
@@ -1890,14 +1882,7 @@ internal sealed class StatementsService : IStatementsService
         // Each studio's own template, called with the throttle's level right here, as every other throttled event's caller
         // does: LogLevelsTests follows a level back to where it was computed, and cannot through a dispatcher's parameter.
         LogLevel level = throttle.WarningOrDebug("Statements.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioStatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
-        else
-        {
-            logger.StatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
+        logger.StatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? PostgresFailure.CouldNotConnect(exception)

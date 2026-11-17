@@ -208,15 +208,16 @@ public class StudioActionLogTest
     /// anomalies DB-0 added, each logged at the level <c>StudioLogThrottle</c> chose.
     /// </summary>
     /// <remarks>
-    /// One id space, two declaring classes since 0.5's split (PS-1a): the shared <c>StudioLog</c> and MartenStudio's
-    /// <c>MartenLog</c>. The ids are checked across both, so an event moved from one to the other keeps its number and a
-    /// number is never declared twice.
+    /// One id space, three declaring classes: the shared <c>StudioLog</c>, the Marten module's <c>MartenLog</c> and the shell's
+    /// <c>ShellLiveLog</c> (9220, the one event the shell logs). The ids are checked across all three, so an event moved from one
+    /// to another keeps its number and a number is never declared twice. The audit templates are private, so the scan reads
+    /// non-public methods too.
     /// </remarks>
     [Fact]
     public void Every_reserved_event_id_exists_exactly_once()
     {
-        var declared = new[] { typeof(StudioLog), typeof(MartenLog) }
-            .SelectMany(static type => type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+        var declared = new[] { typeof(StudioLog), typeof(MartenLog), typeof(DataStudio.Services.ShellLiveLog) }
+            .SelectMany(static type => type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static))
             .Select(x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
             .OfType<LoggerMessageAttribute>()
             .Select(x => x.EventId)
@@ -269,7 +270,7 @@ public class StudioActionLogTest
         static int[] Ids(Type type) =>
         [
             .. type
-                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
                 .Select(static x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
                 .OfType<LoggerMessageAttribute>()
                 .Select(static x => x.EventId)
@@ -277,7 +278,7 @@ public class StudioActionLogTest
         ];
 
         Ids(typeof(StudioLog)).Should().Equal(
-            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9223, 9224, 9229, 9230, 9235, 9236, 9237,
+            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9221, 9222, 9223, 9224, 9229, 9230, 9235, 9236, 9237,
             9245, 9246, 9250, 9251, 9270, 9280, 9281, 9290, 9410, 9420, 9421, 9430, 9431, 9440, 9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464,
             9490, 9500, 9501);
 

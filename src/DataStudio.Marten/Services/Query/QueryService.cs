@@ -15,7 +15,6 @@ using Npgsql;
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Query;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 namespace DataStudio.Marten.Services.Query;
@@ -175,7 +174,7 @@ internal sealed class QueryService : IQueryService
         catch (StudioNotAuthorizedException)
         {
             audit.RecordScopeDenied(scope, ReadPolicyName(value), MartenQueryAction, target);
-            logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, "not authorized for this scope", clause);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, "not authorized for this scope", clause);
             throw;
         }
 
@@ -189,7 +188,7 @@ internal sealed class QueryService : IQueryService
                 $"Marten store '{StudioLogValue.Cap(scope.StoreKey)}' has no visible document type with alias '{StudioLogValue.Cap(request.Alias)}'.";
 
             audit.Record(MartenQueryAction, target, succeeded: false, missing, null, scope);
-            logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, missing, clause);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, missing, clause);
 
             throw new KeyNotFoundException(missing);
         }
@@ -217,7 +216,7 @@ internal sealed class QueryService : IQueryService
                 table, request.WhereClause, limit, tenantId, request.IncludeDeleted);
 
             audit.Record(MartenQueryAction, target, succeeded: false, rejected.Message, null, scope);
-            logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, rejected.Message, clause);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, rejected.Message, clause);
 
             return new MartenQueryResult(
                 documentType.Alias, [], refusedShape.Statement, refusedShape.DescribeParameters(), TimeSpan.Zero,
@@ -309,7 +308,7 @@ internal sealed class QueryService : IQueryService
             string reason = QuerySqlErrors.Summarize(ToSqlError(postgres));
 
             audit.Record(MartenQueryAction, target, succeeded: false, reason, null, scope);
-            logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, reason, statement);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, statement);
 
             return new MartenQueryResult(
                 documentType.Alias,
@@ -339,7 +338,7 @@ internal sealed class QueryService : IQueryService
         audit.Record(
             MartenQueryAction, target, succeeded: true, Outcome(rows.Count, stopwatch.Elapsed), null, scope);
         logger.SqlExecuted(
-            StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, elapsedMilliseconds, rows.Count, statement);
+            user, scope.StoreKey, scope.DatabaseId, elapsedMilliseconds, rows.Count, statement);
 
         return new MartenQueryResult(
             documentType.Alias,

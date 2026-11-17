@@ -8,11 +8,11 @@ namespace DataStudio.Kafka.Core.Logging;
 internal sealed class KStudioLoggers(ILoggerFactory factory)
 {
     /// <summary>Admin clients, scan consumers and librdkafka's own lines: <c>DataStudio.Kafka.Core.Clients</c>.</summary>
-    public ILogger Clients { get; } = factory.CreateLogger("KStudio.Core.Clients");
+    public ILogger Clients { get; } = factory.CreateLogger("DataStudio.Kafka.Core.Clients");
 
     /// <summary>Catalog and window reads: <c>DataStudio.Kafka.Core.Catalog</c>.</summary>
-    public ILogger Catalog { get; } = factory.CreateLogger("KStudio.Core.Catalog");
+    public ILogger Catalog { get; } = factory.CreateLogger("DataStudio.Kafka.Core.Catalog");
 
     /// <summary>Scans: <c>DataStudio.Kafka.Core.Scans</c>.</summary>
-    public ILogger Scans { get; } = factory.CreateLogger("KStudio.Core.Scans");
+    public ILogger Scans { get; } = factory.CreateLogger("DataStudio.Kafka.Core.Scans");
 }

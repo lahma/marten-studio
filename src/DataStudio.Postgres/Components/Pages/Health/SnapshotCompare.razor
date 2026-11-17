@@ -147,14 +147,14 @@
         catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception) || exception is IOException or TimeoutException)
         {
             // An expected state, not a bug: the browser went away or stopped sending the file. Quiet, and the visitor chooses it again.
-            Logger.LogDebug(exception, "The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} lost its file from the browser", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
+            Logger.LogDebug(exception, "The Health page's snapshot compare for source {StoreKey}, database {DatabaseId} lost its file from the browser", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
             message = "The file did not arrive from the browser; choose it again.";
         }
         catch (Exception exception)
         {
             // The services answer a refusal as a value; what escapes is a bug or a browser that stopped sending, and its words are
             // not the visitor's to read. Nothing of the file is in them: the server log has it once.
-            Logger.LogWarning(exception, "The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} failed", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
+            Logger.LogWarning(exception, "The Health page's snapshot compare for source {StoreKey}, database {DatabaseId} failed", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
             message = "The file could not be compared; the server log has why.";
         }
         finally

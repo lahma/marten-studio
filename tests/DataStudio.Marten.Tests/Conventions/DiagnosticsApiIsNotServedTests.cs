@@ -129,9 +129,9 @@ public partial class DiagnosticsApiIsNotServedTests
         Type[] logs =
         [
             .. postgres.GetTypes().Concat(marten.GetTypes())
-                .Where(static x => x.IsAbstract && x.IsSealed && x.Name is "StudioLog" or "PostgresStudioLog" or "MartenLog"),
+                .Where(static x => x.IsAbstract && x.IsSealed && x.Name is "StudioLog" or "MartenLog"),
         ];
-        logs.Should().HaveCountGreaterThanOrEqualTo(3);
+        logs.Should().HaveCountGreaterThanOrEqualTo(2);
 
         foreach (MethodInfo method in logs.SelectMany(static x => x.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)))
         {

@@ -135,7 +135,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
             return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
         }
 
@@ -150,7 +150,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioNotAuthorizedException denied)
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
             return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, SqlRefusedMessage);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -169,7 +169,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         if (refused is not null)
         {
             audit.Record(action, target, succeeded: false, refused, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
             return WhatIfResult.NotCompared(index, refused);
         }
 
@@ -227,11 +227,11 @@ internal sealed class SqlConsoleService : ISqlConsoleService
 
         if (compared)
         {
-            logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, 0, 0, sent);
+            logger.SqlExecuted(user, sqlScope.StoreKey, sqlScope.DatabaseId, 0, 0, sent);
         }
         else
         {
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, result.Outcome(), sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, result.Outcome(), sent);
         }
 
         return result;
@@ -276,7 +276,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
             return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
         }
 
@@ -291,7 +291,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioNotAuthorizedException denied)
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
             return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, SqlRefusedMessage);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -311,7 +311,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         if (refused is not null)
         {
             audit.Record(action, target, succeeded: false, refused, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
             return WhatIfResult.NotCompared(index, refused);
         }
 
@@ -498,7 +498,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
             throw;
         }
 
@@ -519,7 +519,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
             logger.SqlRejected(
-                settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+                user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
             throw;
         }
 
@@ -535,7 +535,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         if (refused is { } rejection)
         {
             audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, sent);
         }
 
         return new Admission(resolved, sqlScope, refused);
@@ -572,7 +572,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         if (PlanRequests.Refusal(request, placeholders) is { } refused)
         {
             audit.Record(RunSqlAction, target, succeeded: false, refused.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused.Reason, sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, refused.Reason, sent);
 
             return PlanRunResult.Refused(refused, placeholders);
         }
@@ -633,12 +633,12 @@ internal sealed class SqlConsoleService : ISqlConsoleService
                 string summary = QuerySqlErrors.Summarize(error);
 
                 audit.Record(RunSqlAction, target, succeeded: false, summary + changes, StudioCapability.RunSql, sqlScope);
-                logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, summary + changesForLog, recorded);
+                logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, summary + changesForLog, recorded);
             }
             else
             {
                 audit.Record(RunSqlAction, target, succeeded: true, PlanRunner.Outcome(request.Mode, result.Duration, request, overridden), StudioCapability.RunSql, sqlScope);
-                logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, (long) result.Duration.TotalMilliseconds, 1, recorded);
+                logger.SqlExecuted(user, sqlScope.StoreKey, sqlScope.DatabaseId, (long) result.Duration.TotalMilliseconds, 1, recorded);
             }
 
             return result;
@@ -648,7 +648,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
             // The connection itself, rather than the statement: nothing ran, and the page says so with the same shape it uses
             // for a SQLSTATE.
             audit.Record(RunSqlAction, target, succeeded: false, exception.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, exception.Message, sent);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, exception.Message, sent);
 
             return new PlanRunResult
             {
@@ -723,14 +723,14 @@ internal sealed class SqlConsoleService : ISqlConsoleService
                 string reason = QuerySqlErrors.Summarize(error);
 
                 audit.Record(action, target, succeeded: false, reason, StudioCapability.RunSql, scope);
-                logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, reason, statement);
+                logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, statement);
             }
             else
             {
                 string outcome = Outcome(result.Rows.Count, result.Duration);
 
                 audit.Record(action, target, succeeded: true, outcome, StudioCapability.RunSql, scope);
-                logger.SqlExecuted(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, elapsed, result.Rows.Count, statement);
+                logger.SqlExecuted(user, scope.StoreKey, scope.DatabaseId, elapsed, result.Rows.Count, statement);
             }
 
             return new SqlConsoleResult(
@@ -753,7 +753,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
             // it uses for a SQLSTATE. A host name that does not resolve reaches here as the SocketException itself -
             // Npgsql 9.0.4 does not wrap it - and used to escape unaudited.
             audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, scope);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, exception.Message, statement);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, exception.Message, statement);
 
             return new SqlConsoleResult(
                 [],

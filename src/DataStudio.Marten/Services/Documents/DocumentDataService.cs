@@ -267,7 +267,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the document collections of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
+            logger.LogWarning(exception, "Data Studio could not list the document collections of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             return CollectionRail.Failed(Describe(exception));
         }
     }
@@ -358,14 +358,14 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // is the one the host configured (QueryTimeout) doing its job.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's exact count of '{Alias}' timed out", alias);
+                logger.LogDebug(exception, "Data Studio's exact count of '{Alias}' timed out", alias);
             }
 
             return DocumentCount.Unknown;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}' exactly", StudioLogValue.Cap(alias));
+            logger.LogWarning(exception, "Data Studio could not count '{Alias}' exactly", StudioLogValue.Cap(alias));
             return DocumentCount.Unavailable;
         }
     }
@@ -429,7 +429,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // in time - Npgsql's own client-side timeout, which is the same budget expiring.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+                logger.LogDebug(exception, "Data Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
             }
 
             return RecentDocuments.TooLarge();
@@ -438,7 +438,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         {
             // The _recent pseudo-collection is one region of a page. A store where one table of fifty has
             // drifted must lose that region, not the documents browser.
-            logger.LogWarning(exception, "Marten Studio could not read the recent documents of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
+            logger.LogWarning(exception, "Data Studio could not read the recent documents of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             return RecentDocuments.Failed(Describe(exception));
         }
     }
@@ -554,7 +554,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list '{Alias}'", StudioLogValue.Cap(alias));
+            logger.LogWarning(exception, "Data Studio could not list '{Alias}'", StudioLogValue.Cap(alias));
             return DocumentPage.Failed(Describe(exception));
         }
     }
@@ -1117,14 +1117,14 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // that is the whole of it: a large table, and a header that says "?" about it.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's count of '{Alias}' timed out", table.Alias);
+                logger.LogDebug(exception, "Data Studio's count of '{Alias}' timed out", table.Alias);
             }
 
             return DocumentCount.Unknown;
         }
         catch (PostgresException exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
+            logger.LogWarning(exception, "Data Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
             return DocumentCount.Unavailable;
         }
     }
@@ -1646,7 +1646,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the document tables of the database");
+            logger.LogWarning(exception, "Data Studio could not list the document tables of the database");
             return discovered;
         }
 
@@ -1797,14 +1797,14 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // of a two-second budget is the budget working, so it is Debug.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's rail count of '{Alias}' timed out", table.Alias);
+                logger.LogDebug(exception, "Data Studio's rail count of '{Alias}' timed out", table.Alias);
             }
 
             return DocumentCount.Unknown;
         }
         catch (PostgresException exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
+            logger.LogWarning(exception, "Data Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
             return DocumentCount.Unavailable;
         }
     }

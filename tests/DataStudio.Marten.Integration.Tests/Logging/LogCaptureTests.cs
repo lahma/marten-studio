@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Integration.Tests.Logging;
 
 /// <summary>
-/// The capture's filter, which needs no container of its own: it keeps both studios' categories and nobody else's.
+/// The capture's filter, which needs no container of its own: it keeps the family's categories - the shell's, the Postgres module's and the Marten module's - and nobody else's.
 /// </summary>
 /// <remarks>
 /// Worth a test because the failure is silence. After the 0.5 move every shared service logs under
@@ -26,6 +26,7 @@ public class LogCaptureTests
         typeof(HealthSweeper).FullName!,
         typeof(SqlConsoleService).FullName!,
         typeof(MartenStoreRegistry).FullName!,
+        typeof(DataStudio.Services.StudioLiveUpdates).FullName!,
     ];
 
     public static TheoryData<string> StudioCategories() => new(Categories);

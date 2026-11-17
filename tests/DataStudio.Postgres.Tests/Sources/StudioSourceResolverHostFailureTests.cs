@@ -95,8 +95,7 @@ public class StudioSourceResolverHostFailureTests
             authorization,
             PostgresStudioDescriptor.Instance,
             factory?.CreateLogger<StudioSourceResolver>(),
-            new StudioLogThrottle(),
-            settings);
+            new StudioLogThrottle());
     }
 
     private sealed class ThrowingProvider(ThrowingSource source) : IStudioSourceProvider

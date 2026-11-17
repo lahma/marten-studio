@@ -80,7 +80,7 @@ internal sealed class MartenConnectionInsightContributor : IConnectionInsightCon
         if (logger.IsEnabled(LogLevel.Trace))
         {
             logger.LogTrace(
-                "Marten Studio's connection section for {StoreKey}/{DatabaseId}: origin {Origin}, daemon {Daemon}, average size {Average}",
+                "Data Studio's connection section for {StoreKey}/{DatabaseId}: origin {Origin}, daemon {Daemon}, average size {Average}",
                 storeKey,
                 databaseId,
                 origin.Kind,

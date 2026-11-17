@@ -217,7 +217,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                logger.LogDebug(exception, "Marten Studio could not read one database for the Tenants page");
+                logger.LogDebug(exception, "Data Studio could not read one database for the Tenants page");
 
                 foreach (RowDraft draft in group)
                 {
@@ -1070,7 +1070,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not estimate the single-tenanted collections for the Tenants page");
+            logger.LogDebug(exception, "Data Studio could not estimate the single-tenanted collections for the Tenants page");
             return null;
         }
     }

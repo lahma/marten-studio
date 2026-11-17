@@ -382,7 +382,7 @@ public class ClusterSourceTests
         CapturedLogEntry[] entries = [.. logs.Entries.Where(static x => x.EventId.Id == 9677)];
 
         entries.Select(static x => x.Level).Should().Equal(LogLevel.Warning, LogLevel.Debug);
-        entries.Should().OnlyContain(static x => x.Message == "KStudio did not list a tenant cluster from Fake: Wolverine had not connected it yet");
+        entries.Should().OnlyContain(static x => x.Message == "Data Studio did not list a tenant cluster from Fake: Wolverine had not connected it yet");
         logs.Entries.Should().NotContain(static x => x.Message.Contains("SECRET-TENANT", StringComparison.Ordinal));
     }
 

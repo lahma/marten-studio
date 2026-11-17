@@ -121,7 +121,7 @@ public class PayloadRedactionScanTests
         string[] logged = [.. fixture.Logs.Entries.Where(static x => x.EventId.Id == 9675).Select(static x => x.Message)];
 
         logged.Should().ContainSingle("the same rule on the same topic is logged once per window");
-        logged[0].Should().Be($"KStudio could not apply a JsonPath redaction rule to a value of {topic} on {EngineHarness.ClusterKey}: NotApplicable, none");
+        logged[0].Should().Be($"Data Studio could not apply a JsonPath redaction rule to a value of {topic} on {EngineHarness.ClusterKey}: NotApplicable, none");
         fixture.Logs.Entries.Where(static x => x.EventId.Id == 9675).Should().OnlyContain(static x => x.Level == Microsoft.Extensions.Logging.LogLevel.Debug);
         fixture.Logs.Entries.Select(static x => x.Message).Should().NotContain(static x => x.Contains("555 0199", StringComparison.Ordinal));
     }

@@ -216,7 +216,7 @@ internal sealed class AcceptedChecksValidator<TOptions>(
 
         if (first && loggerFactory is not null)
         {
-            loggerFactory.CreateLogger("PostgresStudio.Services.Settings.AcceptedChecks").AcceptedCheckRetired(code, release);
+            loggerFactory.CreateLogger("DataStudio.Postgres.Services.Settings.AcceptedChecks").AcceptedCheckRetired(code, release);
         }
     }
 }

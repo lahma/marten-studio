@@ -539,7 +539,7 @@ public class PostgresStudioSourceProviderTests
         listed.Select(static x => x.Identity).Should().Equal(["acme", "globex"]);
         logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9301)
             .Which.Message.Should().Be(
-                "Postgres Studio left 3 of the databases source tenants listed out: they do not match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+                "Data Studio left 3 of the databases source tenants listed out: they do not match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
     }
 
     [Fact]
@@ -788,7 +788,7 @@ public class PostgresStudioSourceProviderTests
     {
         IStudioSettings settings = PostgresStudioSettings.Of(options);
         StudioAuthorization authorization = new(settings, PostgresStudioDescriptor.Instance, policy, new TestAuthenticationStateProvider());
-        return new StudioSourceResolver(harness.Provider, authorization, PostgresStudioDescriptor.Instance, logger, throttle, settings);
+        return new StudioSourceResolver(harness.Provider, authorization, PostgresStudioDescriptor.Instance, logger, throttle);
     }
 
     // 1.0-HARD, item 1: a host's source code never reaches a page raw

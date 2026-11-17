@@ -1,12 +1,9 @@
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres.Services;
 
 // 1.2-H-C's events, 9223 and 9224: a finding's on-demand action on the Health page. In a file of their own so that the 1.2
-// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's. Postgres Studio's spellings
-// are PostgresStudioLog's (PostgresStudioLog.HealthActions.cs), chosen here by the studio's product. Every value a visitor
+// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's. Every value a visitor
 // could have shaped (the scope's names, the reason a refusal gives) goes through StudioLogValue inside the dispatcher.
 internal static partial class StudioLog
 {
@@ -17,8 +14,8 @@ internal static partial class StudioLog
     /// audit entry records it.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9223, Level = LogLevel.Warning, Message = "Marten Studio could not run the health action {ActionId} in store {StoreKey}, database {DatabaseId}: {SqlState}")]
-    public static partial void HealthActionFailed(this ILogger logger, Exception exception, string actionId, string storeKey, string databaseId, string? sqlState);
+    [LoggerMessage(EventId = 9223, Level = LogLevel.Warning, Message = "Data Studio could not run the health action {ActionId} in source {StoreKey}, database {DatabaseId}: {SqlState}")]
+    private static partial void HealthActionFailedRaw(this ILogger logger, Exception exception, string actionId, string storeKey, string databaseId, string? sqlState);
 
     /// <remarks>
     /// <para>
@@ -27,41 +24,27 @@ internal static partial class StudioLog
     /// who turns Debug on to ask why.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9224, Level = LogLevel.Debug, Message = "Marten Studio did not run the health action {ActionId} in store {StoreKey}, database {DatabaseId}: {Reason}")]
-    public static partial void HealthActionRefused(this ILogger logger, string actionId, string storeKey, string databaseId, string reason);
+    [LoggerMessage(EventId = 9224, Level = LogLevel.Debug, Message = "Data Studio did not run the health action {ActionId} in source {StoreKey}, database {DatabaseId}: {Reason}")]
+    private static partial void HealthActionRefusedRaw(this ILogger logger, string actionId, string storeKey, string databaseId, string reason);
 
-    /// <summary>9223, in the studio's words.</summary>
-    public static void HealthActionFailed(this ILogger logger, StudioProduct product, Exception exception, string actionId, string storeKey, string databaseId, string? sqlState)
+    /// <summary>9223.</summary>
+    public static void HealthActionFailed(this ILogger logger, Exception exception, string actionId, string storeKey, string databaseId, string? sqlState)
     {
         string action = StudioLogValue.Cap(actionId);
         string store = StudioLogValue.Cap(storeKey);
         string database = StudioLogValue.Cap(databaseId);
 
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioHealthActionFailed(exception, action, store, database, sqlState);
-        }
-        else
-        {
-            logger.HealthActionFailed(exception, action, store, database, sqlState);
-        }
+        logger.HealthActionFailedRaw(exception, action, store, database, sqlState);
     }
 
-    /// <summary>9224, in the studio's words.</summary>
-    public static void HealthActionRefused(this ILogger logger, StudioProduct product, string actionId, string storeKey, string databaseId, string reason)
+    /// <summary>9224.</summary>
+    public static void HealthActionRefused(this ILogger logger, string actionId, string storeKey, string databaseId, string reason)
     {
         string action = StudioLogValue.Cap(actionId);
         string store = StudioLogValue.Cap(storeKey);
         string database = StudioLogValue.Cap(databaseId);
         string why = StudioLogValue.CapText(reason);
 
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioHealthActionRefused(action, store, database, why);
-        }
-        else
-        {
-            logger.HealthActionRefused(action, store, database, why);
-        }
+        logger.HealthActionRefusedRaw(action, store, database, why);
     }
 }

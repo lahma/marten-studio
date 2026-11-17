@@ -341,7 +341,7 @@ internal sealed class KafkaCorrelationService(
             if (!plan.IsValid)
             {
                 // The builder writes only texts that parse and compile: this is a guard, and it records nothing a visitor typed.
-                logger.LogWarning("KStudio's related-records search was not valid for the engine ({Errors} errors)", plan.Errors.Count);
+                logger.LogWarning("Data Studio's related-records search was not valid for the engine ({Errors} errors)", plan.Errors.Count);
                 await NotRunAsync(input, KafkaStudioText.SearchFailed, NothingRecorded).ConfigureAwait(false);
                 return new KafkaRelatedPlanResult.Refused(KafkaStudioText.SearchFailed);
             }
@@ -350,7 +350,7 @@ internal sealed class KafkaCorrelationService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not plan a related-records search");
+            logger.LogWarning(e, "Data Studio could not plan a related-records search");
             await NotRunAsync(input, KafkaStudioText.SearchFailed, NothingRecorded).ConfigureAwait(false);
             return new KafkaRelatedPlanResult.Refused(KafkaStudioText.SearchFailed);
         }
@@ -400,7 +400,7 @@ internal sealed class KafkaCorrelationService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not start a related-records search");
+            logger.LogWarning(e, "Data Studio could not start a related-records search");
             await NotRunAsync(input, KafkaStudioText.SearchFailed, plan.AuditText).ConfigureAwait(false);
             return new KafkaRelatedStartResult.Refused(KafkaStudioText.SearchFailed);
         }

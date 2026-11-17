@@ -224,14 +224,7 @@ internal sealed class AuroraFactsReader : IAuroraFactsReader
 
         LogLevel level = throttle.WarningOrDebug("Aurora.Read", context.StoreKey, context.DatabaseId, StudioLogThrottle.KindOf(exception));
 
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioAuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
-        }
-        else
-        {
-            logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
-        }
+        logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, postgres?.SqlState);
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? PostgresFailure.CouldNotConnect(exception)

@@ -15,7 +15,7 @@ internal static partial class StudioLog
     /// page that masks it. Its <c>queryid</c> finds it in <c>pg_stat_statements</c>.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9280, Level = LogLevel.Debug, Message = "Marten Studio's health check T02 could not plan statement {QueryId} of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9280, Level = LogLevel.Debug, Message = "Data Studio's health check T02 could not plan statement {QueryId} of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void StatementPlanFailed(this ILogger logger, Exception exception, long queryId, string storeKey, string databaseId, string? sqlState);
 
     /// <remarks>
@@ -28,6 +28,6 @@ internal static partial class StudioLog
     /// why.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9281, Level = LogLevel.Debug, Message = "Marten Studio's health check T02 could not take back the prepared statement {PreparedName} of its plan of statement {QueryId} (store {StoreKey}, database {DatabaseId}); that session keeps the name until it is reset or planned on again")]
+    [LoggerMessage(EventId = 9281, Level = LogLevel.Debug, Message = "Data Studio's health check T02 could not take back the prepared statement {PreparedName} of its plan of statement {QueryId} (source {StoreKey}, database {DatabaseId}); that session keeps the name until it is reset or planned on again")]
     public static partial void StatementPlanNotTakenBack(this ILogger logger, Exception exception, long queryId, string storeKey, string databaseId, string preparedName);
 }

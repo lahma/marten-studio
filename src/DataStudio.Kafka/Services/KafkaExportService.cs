@@ -357,7 +357,7 @@ internal sealed class KafkaExportService(
     {
         if (failure is not null)
         {
-            logger.LogWarning(failure, "KStudio could not export records");
+            logger.LogWarning(failure, "Data Studio could not export records");
         }
 
         if (audited.IsRecorded)
@@ -379,7 +379,7 @@ internal sealed class KafkaExportService(
         }
         catch (Exception e)
         {
-            logger.LogWarning(e, "KStudio could not record an export that ended early");
+            logger.LogWarning(e, "Data Studio could not record an export that ended early");
         }
     }
 

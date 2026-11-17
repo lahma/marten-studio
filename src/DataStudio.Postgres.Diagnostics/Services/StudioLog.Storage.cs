@@ -16,6 +16,6 @@ internal static partial class StudioLog
     /// coming here.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9410, Message = "Marten Studio could not read the storage of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9410, Message = "Data Studio could not read the storage of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void StorageReadFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId, string? sqlState);
 }

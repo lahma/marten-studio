@@ -283,7 +283,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
     internal void ListFailed(string key, Exception exception)
     {
         LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "Store.Databases", key, null, StudioLogThrottle.KindOf(exception));
-        logger.PostgresStudioStoreDatabasesUnreadable(level, exception, key);
+        logger.StoreDatabasesUnreadable(level, exception, key);
     }
 
     /// <summary>Logs a host-listed database that could not be opened during a sweep, at Debug: the sweep counts it.</summary>
@@ -291,7 +291,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
     {
         if (logger.IsEnabled(LogLevel.Debug))
         {
-            logger.LogDebug(exception, "Postgres Studio could not open a database of source {SourceKey} for a sweep", key);
+            logger.LogDebug(exception, "Data Studio could not open a database of source {SourceKey} for a sweep", key);
         }
     }
 }

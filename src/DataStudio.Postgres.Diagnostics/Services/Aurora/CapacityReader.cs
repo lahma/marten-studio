@@ -177,14 +177,7 @@ internal sealed class CapacityReader
         {
             LogLevel level = throttle.WarningOrDebug("Aurora.Capacity", database.Source, database.Database, StudioLogThrottle.KindOf(exception));
 
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioCapacitySourceFailed(level, exception, database.Source, database.Database);
-            }
-            else
-            {
-                logger.CapacitySourceFailed(level, exception, database.Source, database.Database);
-            }
+            logger.CapacitySourceFailed(level, exception, database.Source, database.Database);
 
             return new CapacityReading(null, askedAt, "the capacity source failed (" + exception.GetType().Name + ")", true);
         }
@@ -203,14 +196,7 @@ internal sealed class CapacityReader
             // the capacity fails for it (W5-AUR-fix F4).
             LogLevel level = throttle.WarningOrDebug("Aurora.Capacity", null, null, StudioLogThrottle.KindOf(exception));
 
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioCapacitySourceFailed(level, exception, "(registration)", "(registration)");
-            }
-            else
-            {
-                logger.CapacitySourceFailed(level, exception, "(registration)", "(registration)");
-            }
+            logger.CapacitySourceFailed(level, exception, "(registration)", "(registration)");
 
             return null;
         }

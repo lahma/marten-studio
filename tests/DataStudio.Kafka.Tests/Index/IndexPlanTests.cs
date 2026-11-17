@@ -337,7 +337,7 @@ public class IndexPlanTests
         result.Records.Should().Be(PerPartition * 2, "the whole window was read");
         CapturedLogEntry entry = IndexLogs(fixture).Should().ContainSingle("once per cluster per ten minutes").Subject;
         entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Debug);
-        entry.Message.Should().Be($"KStudio's record index {nameof(FakeRecordIndex)} did not answer for cluster {EngineHarness.ClusterKey}: InvalidOperationException");
+        entry.Message.Should().Be($"Data Studio's record index {nameof(FakeRecordIndex)} did not answer for cluster {EngineHarness.ClusterKey}: InvalidOperationException");
         fixture.Logs.Entries.Should().OnlyContain(x => !x.Message.Contains(Sentinel, StringComparison.Ordinal), "neither the literal nor the exception's message is ever logged");
     }
 

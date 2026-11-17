@@ -127,14 +127,7 @@ internal sealed class RelationshipReads
             // catalog read reports, and it is not a studio fault worth a Warning of its own.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
-                }
+                logger.LogDebug(exception, "Data Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
             }
 
             return (null, DatabaseAccess.CatalogFailure(exception, known));
@@ -211,14 +204,7 @@ internal sealed class RelationshipReads
                 // on the screen.
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    if (Product == StudioProduct.PostgresStudio)
-                    {
-                        logger.LogDebug(exception, "Postgres Studio read the relationships of the browsable schemas only");
-                    }
-                    else
-                    {
-                        logger.LogDebug(exception, "Marten Studio read the relationships of the store's own schemas only");
-                    }
+                    logger.LogDebug(exception, "Data Studio read the relationships of the source's own and its browsable schemas only");
                 }
             }
         }

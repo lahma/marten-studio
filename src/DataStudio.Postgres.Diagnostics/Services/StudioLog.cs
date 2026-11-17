@@ -7,15 +7,16 @@ namespace DataStudio.Postgres.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The split (0.5, PS-1a).</b> Event ids <c>9200-9299</c> belong to the studio, and one id space is shared by the
-/// events every studio logs - here, in <c>StudioLog</c> and its partial files - and the events only MartenStudio logs,
-/// in MartenStudio's <c>MartenLog</c>: the schema apply (9206), projection rebuilds and daemon control (9207-9209), the
-/// document round trip (9211), the daemon, tracker, projection and event-store anomalies (9212, 9215-9218) and LINQ
-/// mode (9260-9264). No id moved and no message changed; what changed is only which class declares an event, which no
-/// host can see. A shared event is here, and a Marten one is in <c>MartenLog</c>; a later feature adds its events in a
-/// partial file of its own (<c>StudioLog.Storage.cs</c>, <c>MartenLog.Query.cs</c>), never by renumbering. Postgres
-/// Studio logs every shared event under the same id, level and properties in its own words (<c>PostgresStudioLog</c>), so
-/// an id names one event whichever studio logged it.
+/// <b>One class, one template per event (2.0).</b> Event ids <c>9200-9299</c> belong to the shell's studio, and one id
+/// space is shared by the events every host logs - here, in <c>StudioLog</c> and its partial files - and the events only
+/// the Marten module logs, in its <c>MartenLog</c>: the schema apply (9206), projection rebuilds and daemon control
+/// (9207-9209), the document round trip (9211), the daemon, tracker, projection and event-store anomalies (9212,
+/// 9215-9218) and LINQ mode (9260-9264). A shared event is here, and a Marten one is in <c>MartenLog</c>; a later feature
+/// adds its events in a partial file of its own (<c>StudioLog.Storage.cs</c>, <c>MartenLog.Query.cs</c>), never by
+/// renumbering. Every shared template says <b>Data Studio</b> and calls a Marten store or a plain data source a
+/// <b>source</b>; 1.x kept a second class in Postgres Studio's words, so that an id named two
+/// templates. An id, a level and a property's name are promises (<c>docs/stability.md</c>); a template's words are not. An
+/// event that names an option takes its name as a property from <c>OptionName(...)</c>, as 9202 and 9230 do.
 /// </para>
 /// <para>
 /// Here: 9200-9205 (audit, the SQL console), 9210 (a source that will not build), 9213, 9214, 9219-9222 (listing,
@@ -23,18 +24,17 @@ namespace DataStudio.Postgres.Services;
 /// configuration notice), 9235-9237 (row reads), 9245-9246 (Sessions), 9250-9251 (the diagnostics API: one call, at
 /// Debug, and a snapshot section it could not read; 9252-9254 are held for it), 9270 (the health export), 9280-9281
 /// (the statement checks) and 9290 (platform detection), and, since 1.2, 9223-9224 (a finding's on-demand action on the
-/// Health page: failed at Warning, one line per press, and refused at Debug; <c>StudioLog.HealthActions.cs</c>). Outside this class: 9300-9301 are Postgres Studio's own
+/// Health page: failed at Warning, one line per press, and refused at Debug; <c>StudioLog.HealthActions.cs</c>). Outside this class: 9300-9301 are the Postgres module's own
 /// (<c>PostgresLog</c>: an unkeyed data source not listed, and database names a host source listed that were left out),
-/// and 9320-9329 MartenStudio's (<c>MartenLog.Deps.cs</c>: 9320, a subscription rewind Marten refused).
+/// and 9320-9329 the Marten module's (<c>MartenLog.Deps.cs</c>: 9320, a subscription rewind Marten refused).
 /// </para>
 /// <para>
 /// <b>9400-9519 are 0.5's pages and checks</b> (issue #8), in blocks of ten, each declared in its feature's own partial
-/// file, in both studios' words:
+/// file:
 /// </para>
 /// <list type="bullet">
 /// <item>9400-9409 (the PostgreSQL version facts) are reserved and unused.</item>
-/// <item>9410 is the Storage page's throttled read failure (9410-9419, <c>StudioLog.Storage.cs</c>,
-/// <c>PostgresStudioLog.Storage.cs</c>).</item>
+/// <item>9410 is the Storage page's throttled read failure (9410-9419, <c>StudioLog.Storage.cs</c>).</item>
 /// <item>9420 (Warning) is a bloat measure a visitor pressed that failed for an unexpected reason, and 9421 (Debug) one
 /// refused for an expected one (9420-9429, Maintenance; 9422-9429 are free).</item>
 /// <item>9430-9431 are the Replication page's: a facts section that failed, at the throttle's level, and a tablespace
@@ -53,6 +53,10 @@ namespace DataStudio.Postgres.Services;
 /// </list>
 /// <para>
 /// A value a visitor could shape reaches any of these only through <see cref="StudioLogValue" /> (AGENTS.md hard rule 5).
+/// The audit and refusal events (9200-9205, 9223, 9224, 9235, 9236, 9245 and 9452) are <c>private</c> <c>…Raw</c>
+/// templates that only the public dispatchers of <c>StudioLog.Dispatchers.cs</c>, <c>StudioLog.HealthActions.cs</c> and
+/// <c>StudioLog.StatementsPage.cs</c> write, each escaping and bounding every value a visitor could shape; the compiler
+/// keeps a site from calling a template uncapped, and <c>RefusalLogValuesTests</c> holds the dispatchers to the caps.
 /// </para>
 /// <para>
 /// The first twelve ids (9200-9211) are the audit events
@@ -84,27 +88,27 @@ namespace DataStudio.Postgres.Services;
 /// </remarks>
 internal static partial class StudioLog
 {
-    [LoggerMessage(EventId = 9200, Level = LogLevel.Information, Message = "Marten Studio user {User} performed {Action} on {Target} in store {StoreKey}, database {DatabaseId}, tenant {TenantId}: {Outcome}")]
-    public static partial void ActionPerformed(this ILogger logger, string user, string action, string target, string storeKey, string databaseId, string tenantId, string outcome);
+    [LoggerMessage(EventId = 9200, Level = LogLevel.Information, Message = "Data Studio user {User} performed {Action} on {Target} in source {StoreKey}, database {DatabaseId}, tenant {TenantId}: {Outcome}")]
+    private static partial void ActionPerformedRaw(this ILogger logger, string user, string action, string target, string storeKey, string databaseId, string tenantId, string outcome);
 
-    [LoggerMessage(EventId = 9201, Level = LogLevel.Information, Message = "Marten Studio user {User} attempted {Action} on {Target} in store {StoreKey}, database {DatabaseId}, tenant {TenantId} and it failed: {Reason}")]
-    public static partial void ActionFailed(this ILogger logger, string user, string action, string target, string storeKey, string databaseId, string tenantId, string? reason);
+    [LoggerMessage(EventId = 9201, Level = LogLevel.Information, Message = "Data Studio user {User} attempted {Action} on {Target} in source {StoreKey}, database {DatabaseId}, tenant {TenantId} and it failed: {Reason}")]
+    private static partial void ActionFailedRaw(this ILogger logger, string user, string action, string target, string storeKey, string databaseId, string tenantId, string? reason);
 
     /// <remarks>
     /// Warning, and it names the option: a capability refusal is a configuration answer rather than a
     /// fault, but it is also what an operator sees when a colleague reports that a button does nothing.
     /// </remarks>
-    [LoggerMessage(EventId = 9202, Level = LogLevel.Warning, Message = "Marten Studio user {User} was refused capability {Capability}: {Option} would have to be set")]
-    public static partial void CapabilityDenied(this ILogger logger, string user, string capability, string option);
+    [LoggerMessage(EventId = 9202, Level = LogLevel.Warning, Message = "Data Studio user {User} was refused capability {Capability}: {Option} would have to be set")]
+    private static partial void CapabilityDeniedRaw(this ILogger logger, string user, string capability, string option);
 
-    [LoggerMessage(EventId = 9203, Level = LogLevel.Warning, Message = "Marten Studio user {User} was refused store {StoreKey}, database {DatabaseId}, tenant {TenantId} by policy {Policy}")]
-    public static partial void ScopeAuthorizationDenied(this ILogger logger, string user, string storeKey, string databaseId, string tenantId, string policy);
+    [LoggerMessage(EventId = 9203, Level = LogLevel.Warning, Message = "Data Studio user {User} was refused source {StoreKey}, database {DatabaseId}, tenant {TenantId} by policy {Policy}")]
+    private static partial void ScopeAuthorizationDeniedRaw(this ILogger logger, string user, string storeKey, string databaseId, string tenantId, string policy);
 
-    [LoggerMessage(EventId = 9204, Level = LogLevel.Information, Message = "Marten Studio user {User} ran SQL against store {StoreKey}, database {DatabaseId} in {ElapsedMilliseconds} ms returning {RowCount} rows: {Sql}")]
-    public static partial void SqlExecuted(this ILogger logger, string user, string storeKey, string databaseId, long elapsedMilliseconds, int rowCount, string sql);
+    [LoggerMessage(EventId = 9204, Level = LogLevel.Information, Message = "Data Studio user {User} ran SQL against source {StoreKey}, database {DatabaseId} in {ElapsedMilliseconds} ms returning {RowCount} rows: {Sql}")]
+    private static partial void SqlExecutedRaw(this ILogger logger, string user, string storeKey, string databaseId, long elapsedMilliseconds, int rowCount, string sql);
 
-    [LoggerMessage(EventId = 9205, Level = LogLevel.Information, Message = "Marten Studio refused SQL from user {User} against store {StoreKey}, database {DatabaseId}: {Reason}. Statement: {Sql}")]
-    public static partial void SqlRejected(this ILogger logger, string user, string storeKey, string databaseId, string reason, string sql);
+    [LoggerMessage(EventId = 9205, Level = LogLevel.Information, Message = "Data Studio refused SQL from user {User} against source {StoreKey}, database {DatabaseId}: {Reason}. Statement: {Sql}")]
+    private static partial void SqlRejectedRaw(this ILogger logger, string user, string storeKey, string databaseId, string reason, string sql);
 
     /// <remarks>
     /// Warning rather than Error: a store that will not build is the application's own configuration
@@ -114,7 +118,7 @@ internal static partial class StudioLog
     /// the same broken store is a Warning once per <see cref="StudioLogThrottle.Window" /> and Debug in
     /// between.
     /// </remarks>
-    [LoggerMessage(EventId = 9210, Message = "Marten Studio could not resolve store {StoreKey} ({ServiceType}): {Reason}")]
+    [LoggerMessage(EventId = 9210, Message = "Data Studio could not resolve source {StoreKey} ({ServiceType}): {Reason}")]
     public static partial void StoreUnavailable(this ILogger logger, LogLevel level, string storeKey, string serviceType, string reason);
 
     // --------------------------------------------------------------------------------------------------
@@ -122,30 +126,26 @@ internal static partial class StudioLog
     // --------------------------------------------------------------------------------------------------
 
     /// <remarks>Logged by the Overview's store cards and by the scope selector's database listing.</remarks>
-    [LoggerMessage(EventId = 9213, Message = "Marten Studio could not list the databases of store {StoreKey}")]
+    [LoggerMessage(EventId = 9213, Message = "Data Studio could not list the databases of source {StoreKey}")]
     public static partial void StoreDatabasesUnreadable(this ILogger logger, LogLevel level, Exception exception, string storeKey);
 
     /// <remarks>Logged by the Overview's store cards and by the configuration screen.</remarks>
-    [LoggerMessage(EventId = 9214, Message = "Marten Studio could not read the Postgres version of store {StoreKey}")]
+    [LoggerMessage(EventId = 9214, Message = "Data Studio could not read the Postgres version of source {StoreKey}")]
     public static partial void PostgresVersionUnreadable(this ILogger logger, LogLevel level, Exception? exception, string storeKey);
 
     /// <remarks>Asked whenever the header describes a scope, which is every scope change in every circuit.</remarks>
-    [LoggerMessage(EventId = 9219, Message = "Marten Studio could not discover the tenants of store {StoreKey}")]
+    [LoggerMessage(EventId = 9219, Message = "Data Studio could not discover the tenants of source {StoreKey}")]
     public static partial void TenantDiscoveryFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey);
 
     /// <remarks>
     /// 9229: Debug, like 9227, on a path a visitor started (a link that names a tenant and no database) and nothing polls. The search for the
     /// tenant stopped at its bound of databases; the line names the store and the count, never the tenant.
     /// </remarks>
-    [LoggerMessage(EventId = 9229, Level = LogLevel.Debug, Message = "Marten Studio looked for a tenant in {Count} databases of store {StoreKey} and stopped at that bound")]
+    [LoggerMessage(EventId = 9229, Level = LogLevel.Debug, Message = "Data Studio looked for a tenant in {Count} databases of source {StoreKey} and stopped at that bound")]
     public static partial void TenantDatabaseSearchBounded(this ILogger logger, int count, string storeKey);
 
-    /// <remarks>
-    /// A page's own failure handler threw while a refresh was already failing - a bug in the studio, and
-    /// on a polling loop, which is why it is throttled rather than written once per tick.
-    /// </remarks>
-    [LoggerMessage(EventId = 9220, Message = "A Marten Studio page failed to handle a live update failure")]
-    public static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
+    // 9220, a page's own failure handler that threw while a refresh was already failing, is the shell's: ShellLiveLog.cs declares it
+    // once, and the database module's live-update log (DatabaseLiveLogs) writes it with the container's throttle's level.
 
     /// <remarks>
     /// Tenant discovery answered, and the host's <c>StoreAuthorizationPolicy</c> threw while it was asked
@@ -153,7 +153,7 @@ internal static partial class StudioLog
     /// which is why it is not 9219 - and asked on every scope change in every circuit, which is why it is
     /// throttled. The selector lists no tenant: a policy that could not answer has allowed nothing.
     /// </remarks>
-    [LoggerMessage(EventId = 9221, Message = "Marten Studio could not ask the store policy which tenants of store {StoreKey}, database {DatabaseId} to list")]
+    [LoggerMessage(EventId = 9221, Message = "Data Studio could not ask the source policy which tenants of source {StoreKey}, database {DatabaseId} to list")]
     public static partial void TenantPolicyFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
 
     /// <remarks>
@@ -164,7 +164,7 @@ internal static partial class StudioLog
     /// of failure. Expected states - a missing extension, a privilege the role lacks, a statement that ran out
     /// of its timeout - are rows the page draws and Debug lines, and never come here.
     /// </remarks>
-    [LoggerMessage(EventId = 9222, Message = "Marten Studio's health check {Code} could not check store {StoreKey}, database {DatabaseId}")]
+    [LoggerMessage(EventId = 9222, Message = "Data Studio's health check {Code} could not check source {StoreKey}, database {DatabaseId}")]
     public static partial void HealthCheckFailed(this ILogger logger, LogLevel level, Exception exception, string code, string storeKey, string databaseId);
 
     /// <remarks>
@@ -180,8 +180,8 @@ internal static partial class StudioLog
     /// Event ids <c>9230-9234</c> belong to the database browser; <c>9231-9234</c> are unassigned.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Marten Studio's database browser may show every schema (MartenOptions.BrowsableSchemas contains \"*\") and MartenOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the store's own Postgres role: every table that role can select from is browsable by anyone granted MartenOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
-    public static partial void DatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger);
+    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Data Studio's database browser may show every schema ({BrowsableSchemasOption} contains \"*\") and {SqlConsoleRoleOption} is not set, so it reads the catalog and rows as the source's own Postgres role: every table that role can select from is browsable by anyone granted {BrowseDatabaseOption}. Set SqlConsoleRole to a role that can read only what the browser should show.")]
+    public static partial void DatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger, string browsableSchemasOption, string sqlConsoleRoleOption, string browseDatabaseOption);
 
     // --------------------------------------------------------------------------------------------------
     // 9235-9239: the database browser's row reads (DB-3)
@@ -196,15 +196,15 @@ internal static partial class StudioLog
     /// is the record an operator reconstructs "who looked for what" from. Information, never above: a
     /// visitor reading rows they were granted is not an anomaly.
     /// </remarks>
-    [LoggerMessage(EventId = 9235, Level = LogLevel.Information, Message = "Marten Studio user {User} performed {Action} on {Relation} in store {StoreKey}, database {DatabaseId} with filter {Filter} and sort {Sort}")]
-    public static partial void TableRowsRead(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string filter, string sort);
+    [LoggerMessage(EventId = 9235, Level = LogLevel.Information, Message = "Data Studio user {User} performed {Action} on {Relation} in source {StoreKey}, database {DatabaseId} with filter {Filter} and sort {Sort}")]
+    private static partial void TableRowsReadRaw(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string filter, string sort);
 
     /// <remarks>
     /// The key values of a row the visitor opened, expanded a cell of, or followed the references of -
     /// values the ring never holds, for the same reason as 9235.
     /// </remarks>
-    [LoggerMessage(EventId = 9236, Level = LogLevel.Information, Message = "Marten Studio user {User} performed {Action} on {Relation} in store {StoreKey}, database {DatabaseId} for the row with key {Key}")]
-    public static partial void TableRowOpened(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string key);
+    [LoggerMessage(EventId = 9236, Level = LogLevel.Information, Message = "Data Studio user {User} performed {Action} on {Relation} in source {StoreKey}, database {DatabaseId} for the row with key {Key}")]
+    private static partial void TableRowOpenedRaw(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string key);
 
     /// <remarks>
     /// A row read Postgres or the connection refused. The visitor's own statement timeout, an unrefreshed
@@ -213,6 +213,6 @@ internal static partial class StudioLog
     /// - a connection failure, an unexpected SQLSTATE - is an anomaly, and a visitor who pages on through it
     /// repeats it, so the level comes from <see cref="StudioLogThrottle" />.
     /// </remarks>
-    [LoggerMessage(EventId = 9237, Message = "Marten Studio's {Action} on {Relation} in store {StoreKey}, database {DatabaseId} failed: {SqlState}")]
+    [LoggerMessage(EventId = 9237, Message = "Data Studio's {Action} on {Relation} in source {StoreKey}, database {DatabaseId} failed: {SqlState}")]
     public static partial void TableRowReadFailed(this ILogger logger, LogLevel level, Exception exception, string action, string relation, string storeKey, string databaseId, string? sqlState);
 }

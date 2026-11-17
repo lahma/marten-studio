@@ -1,14 +1,11 @@
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres.Services;
 
 // W5-Q1's events, 9450-9459: the Statements page. In a file of their own so that the wave-5 packets' event blocks never
-// meet in one file; the class's own documentation is StudioLog.cs's. Postgres Studio's spellings are PostgresStudioLog's
-// (PostgresStudioLog.StatementsPage.cs), chosen here by the studio's product - except 9451's, which is throttled: its
-// caller picks the spelling itself, as every throttled event's caller does, so that the level it passes is visibly the
-// throttle's (LogLevelsTests.Every_call_of_a_throttled_event_takes_its_level_from_the_throttle, wave 6).
+// meet in one file; the class's own documentation is StudioLog.cs's. 9451's caller passes the level itself, as every throttled
+// event's caller does, so that the level it passes is visibly the throttle's
+// (LogLevelsTests.Every_call_of_a_throttled_event_takes_its_level_from_the_throttle, wave 6).
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -19,7 +16,7 @@ internal static partial class StudioLog
     /// and a page whose gate is closed refuses nothing a person did.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9450, Level = LogLevel.Debug, Message = "Marten Studio did not show the statements of store {StoreKey}, database {DatabaseId}: {Reason}")]
+    [LoggerMessage(EventId = 9450, Level = LogLevel.Debug, Message = "Data Studio did not show the statements of source {StoreKey}, database {DatabaseId}: {Reason}")]
     public static partial void StatementsPageRefused(this ILogger logger, string storeKey, string databaseId, string reason);
 
     /// <remarks>
@@ -31,7 +28,7 @@ internal static partial class StudioLog
     /// in words, and never comes here; a statement check that failed inside the sweep is the sweep's own event 9222.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9451, Message = "Marten Studio could not read the statements of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9451, Message = "Data Studio could not read the statements of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void StatementsReadFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId, string? sqlState);
 
     /// <remarks>
@@ -42,35 +39,15 @@ internal static partial class StudioLog
     /// log line is readable by more people than the page.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9452, Level = LogLevel.Information, Message = "Marten Studio user {User} read the statements of store {StoreKey}, database {DatabaseId}: {Statements} statements")]
-    public static partial void StatementsRead(this ILogger logger, string user, string storeKey, string databaseId, int statements);
+    [LoggerMessage(EventId = 9452, Level = LogLevel.Information, Message = "Data Studio user {User} read the statements of source {StoreKey}, database {DatabaseId}: {Statements} statements")]
+    private static partial void StatementsReadRaw(this ILogger logger, string user, string storeKey, string databaseId, int statements);
 
-    /// <summary>9450, in the studio's words.</summary>
-    public static void StatementsPageRefused(this ILogger logger, StudioProduct product, string storeKey, string databaseId, string reason)
-    {
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioStatementsPageRefused(storeKey, databaseId, reason);
-        }
-        else
-        {
-            logger.StatementsPageRefused(storeKey, databaseId, reason);
-        }
-    }
-
-    /// <summary>9452, in the studio's words.</summary>
-    public static void StatementsRead(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, int statements)
+    /// <summary>9452.</summary>
+    public static void StatementsRead(this ILogger logger, string user, string storeKey, string databaseId, int statements)
     {
         // Wave 6: the reader's name is the host's identity's, which a visitor can shape, and is escaped and bounded as 9245's is.
         (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
 
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioStatementsRead(user, storeKey, databaseId, statements);
-        }
-        else
-        {
-            logger.StatementsRead(user, storeKey, databaseId, statements);
-        }
+        logger.StatementsReadRaw(user, storeKey, databaseId, statements);
     }
 }

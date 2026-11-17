@@ -54,10 +54,17 @@ internal sealed class LogCapture : ILoggerProvider
             ? new Capturing(this, categoryName)
             : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
-    /// <summary>Whether a logger category is one of the studio's: MartenStudio's own, or the shared studio's.</summary>
+    /// <summary>
+    /// Whether a logger category is one of the studio's: the Marten module's, the Postgres module's and the engine's, the shell's
+    /// (<c>DataStudio.Services</c>, which writes 9220 and the live-update loop's lines) and the sample's. v2 step 6: the shell's
+    /// categories were outside the two prefixes this list had since the shell became an assembly of its own, so what it logged
+    /// was not captured.
+    /// </summary>
     internal static bool IsStudioCategory(string categoryName) =>
         categoryName.StartsWith("DataStudio.Marten", StringComparison.Ordinal)
         || categoryName.StartsWith("DataStudio.Postgres", StringComparison.Ordinal)
+        || categoryName.StartsWith("DataStudio.Services", StringComparison.Ordinal)
+        || categoryName.StartsWith("DataStudio.Components", StringComparison.Ordinal)
         || categoryName.StartsWith("DataStudio.Sample.Marten", StringComparison.Ordinal);
 
     public void Dispose()

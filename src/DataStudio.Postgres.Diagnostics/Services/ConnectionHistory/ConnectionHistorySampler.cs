@@ -315,14 +315,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
                 {
                     LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Sample", server, null, StudioLogThrottle.KindOf(exception));
 
-                    if (settings.Text.Product == StudioProduct.PostgresStudio)
-                    {
-                        logger.PostgresStudioConnectionHistorySampleFailed(level, exception, server);
-                    }
-                    else
-                    {
-                        logger.ConnectionHistorySampleFailed(level, exception, server);
-                    }
+                    logger.ConnectionHistorySampleFailed(level, exception, server);
 
                     await ForgetAsync(server).ConfigureAwait(false);
                 }
@@ -417,14 +410,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
 
         LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Backlog", server, null, null);
 
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioConnectionHistoryBacklogDropped(level, dropped, server, since);
-        }
-        else
-        {
-            logger.ConnectionHistoryBacklogDropped(level, dropped, server, since);
-        }
+        logger.ConnectionHistoryBacklogDropped(level, dropped, server, since);
     }
 
     /// <summary>
@@ -492,14 +478,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
 
         if (drained is not null)
         {
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioConnectionHistoryBacklogStored(drained.Flushed, server, drained.Since);
-            }
-            else
-            {
-                logger.ConnectionHistoryBacklogStored(drained.Flushed, server, drained.Since);
-            }
+            logger.ConnectionHistoryBacklogStored(drained.Flushed, server, drained.Since);
         }
 
         LogDropped(server, dropped, since);
@@ -614,14 +593,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.PostgresStudioConnectionHistorySourceUnreadable(exception, registration.Key);
-                }
-                else
-                {
-                    logger.ConnectionHistorySourceUnreadable(exception, registration.Key);
-                }
+                logger.ConnectionHistorySourceUnreadable(exception, registration.Key);
 
                 continue;
             }
@@ -744,14 +716,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
     {
         LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Round", null, null, StudioLogThrottle.KindOf(exception));
 
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioConnectionHistoryRoundFailed(level, exception);
-        }
-        else
-        {
-            logger.ConnectionHistoryRoundFailed(level, exception);
-        }
+        logger.ConnectionHistoryRoundFailed(level, exception);
     }
 
     /// <summary>

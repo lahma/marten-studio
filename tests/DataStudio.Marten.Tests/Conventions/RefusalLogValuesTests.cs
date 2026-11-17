@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Conventions;
 
@@ -92,29 +91,28 @@ public partial class RefusalLogValuesTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Every dispatcher, in both studios' words.
+    // Every dispatcher.
 
-    [Theory]
-    [InlineData(nameof(StudioProduct.MartenStudio))]
-    [InlineData(nameof(StudioProduct.PostgresStudio))]
-    public void Every_audit_and_refusal_dispatcher_writes_its_values_escaped_and_bounded(string productName)
+    [Fact]
+    public void Every_audit_and_refusal_dispatcher_writes_its_values_escaped_and_bounded()
     {
-        StudioProduct product = Enum.Parse<StudioProduct>(productName);
         CapturingLoggerProvider captured = new();
         ILogger logger = captured.CreateFactory().CreateLogger("refusals");
 
-        logger.ActionPerformed(product, HostileStoreKey, "Run SQL", HostileStatement, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, HostileStatement);
-        logger.ActionFailed(product, HostileStoreKey, "Run SQL", HostileStatement, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, HostileStatement);
-        logger.CapabilityDenied(product, HostileStoreKey, "RunSql", "Capabilities.RunSql");
-        logger.ScopeAuthorizationDenied(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, "studio-store");
-        logger.SqlExecuted(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, 12, 3, HostileStatement);
-        logger.SqlRejected(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement, HostileStatement);
-        logger.TableRowsRead(product, HostileStoreKey, "Read rows", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement, HostileStatement);
-        logger.TableRowOpened(product, HostileStoreKey, "Open row", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement);
-        logger.SessionDetailsRead(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, 1, 2, 3);
-        logger.StatementsRead(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, 4);
+        logger.ActionPerformed(HostileStoreKey, "Run SQL", HostileStatement, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, HostileStatement);
+        logger.ActionFailed(HostileStoreKey, "Run SQL", HostileStatement, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, HostileStatement);
+        logger.CapabilityDenied(HostileStoreKey, "RunSql", "Capabilities.RunSql");
+        logger.ScopeAuthorizationDenied(HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileDatabaseId, "studio-store");
+        logger.SqlExecuted(HostileStoreKey, HostileStoreKey, HostileDatabaseId, 12, 3, HostileStatement);
+        logger.SqlRejected(HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement, HostileStatement);
+        logger.TableRowsRead(HostileStoreKey, "Read rows", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement, HostileStatement);
+        logger.TableRowOpened(HostileStoreKey, "Open row", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement);
+        logger.SessionDetailsRead(HostileStoreKey, HostileStoreKey, HostileDatabaseId, 1, 2, 3);
+        logger.StatementsRead(HostileStoreKey, HostileStoreKey, HostileDatabaseId, 4);
+        logger.HealthActionFailed(new InvalidOperationException("boom"), HostileStoreKey, HostileStoreKey, HostileDatabaseId, "XX000");
+        logger.HealthActionRefused(HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement);
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9200, 9201, 9202, 9203, 9204, 9205, 9235, 9236, 9245, 9452);
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9200, 9201, 9202, 9203, 9204, 9205, 9235, 9236, 9245, 9452, 9223, 9224);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
@@ -179,14 +177,17 @@ public partial class RefusalLogValuesTests
 
     /// <summary>The audit and refusal events whose values a visitor shapes, by the name a site calls them by.</summary>
     private static readonly string[] Dispatched =
-        ["ActionPerformed", "ActionFailed", "CapabilityDenied", "ScopeAuthorizationDenied", "SqlExecuted", "SqlRejected", "TableRowsRead", "TableRowOpened", "SessionDetailsRead", "StatementsRead"];
+    [
+        "ActionPerformed", "ActionFailed", "CapabilityDenied", "ScopeAuthorizationDenied", "SqlExecuted", "SqlRejected", "TableRowsRead", "TableRowOpened",
+        "SessionDetailsRead", "StatementsRead", "HealthActionFailed", "HealthActionRefused",
+    ];
 
-    /// <summary>The files that hold the per-product dispatchers, which alone call the generated templates.</summary>
-    private static readonly string[] DispatcherFiles = ["StudioLog.PostgresStudio.cs", "StudioLog.StatementsPage.cs"];
+    /// <summary>The files that hold the dispatchers, which alone call the templates behind them.</summary>
+    private static readonly string[] DispatcherFiles = ["StudioLog.Dispatchers.cs", "StudioLog.HealthActions.cs", "StudioLog.StatementsPage.cs"];
 
     /// <summary>
-    /// Every site that writes 9200-9205, 9235, 9236 or 9245 does it through the per-product dispatcher - whose first argument
-    /// is a <see cref="StudioProduct" /> - which caps; only the dispatchers themselves call the generated templates.
+    /// Every site that writes 9200-9205, 9223, 9224, 9235, 9236, 9245 or 9452 does it through the dispatcher, which caps; the
+    /// templates behind them are <c>private</c> <c>…Raw</c> methods that only the dispatchers call, and each dispatcher caps.
     /// </summary>
     [Fact]
     public void Every_audit_and_refusal_event_is_written_through_a_capping_dispatcher()
@@ -200,23 +201,22 @@ public partial class RefusalLogValuesTests
         {
             string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(file));
 
-            foreach (Match call in LogCall().Matches(code))
-            {
-                if (Dispatched.Contains(call.Groups["name"].Value, StringComparer.Ordinal)
-                    && !call.Groups["first"].Value.Contains("Product", StringComparison.Ordinal))
-                {
-                    direct.Add(SourceScanner.Relative(file) + ": " + call.Value.Trim());
-                }
-            }
+            direct.AddRange(RawCall().Matches(code).Where(static x => Dispatched.Contains(x.Groups["name"].Value, StringComparer.Ordinal))
+                .Select(x => SourceScanner.Relative(file) + ": " + x.Value.Trim()));
         }
 
-        direct.Should().BeEmpty("a site that calls an event's generated template writes the visitor's values uncapped");
+        direct.Should().BeEmpty("a site that calls an event's template writes the visitor's values uncapped");
 
         string dispatchers = string.Concat(DispatcherFiles.Select(static x =>
             SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres.Diagnostics", "Services", x)))));
+        string templates = string.Concat(Directory.EnumerateFiles(RepositoryRoot.Combine("src", "DataStudio.Postgres.Diagnostics", "Services"), "StudioLog*.cs", SearchOption.TopDirectoryOnly)
+            .Select(static x => SourceScanner.StripCommentsAndStrings(File.ReadAllText(x))));
+
         foreach (string name in Dispatched)
         {
-            Regex.IsMatch(dispatchers, @"public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*\([^;]*StudioLogValue\.Cap|public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*user = StudioLogValue\.Cap")
+            Regex.IsMatch(templates, @"private static partial void " + name + @"Raw\(this ILogger logger")
+                .Should().BeTrue("the template behind " + name + " is private, so the compiler keeps a site from calling it");
+            Regex.IsMatch(dispatchers, @"public static void " + name + @"\(this ILogger logger[^{]*\{[^}]*StudioLogValue\.Cap")
                 .Should().BeTrue("the " + name + " dispatcher caps before it writes");
         }
     }
@@ -248,16 +248,13 @@ public partial class RefusalLogValuesTests
 
     /// <summary>The scans' anti-vacuity half: each catches a planted uncapped call and passes a capped one.</summary>
     [Theory]
-    [InlineData("logger.ScopeAuthorizationDenied(user, scope.StoreKey, scope.DatabaseId, tenant, policy);", true)]
-    [InlineData("logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, clause);", true)]
-    [InlineData("logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, reason, clause);", false)]
-    [InlineData("logger.ScopeAuthorizationDenied(text.Product, UserName(), scope.StoreKey, scope.DatabaseId, tenant, policyName);", false)]
+    [InlineData("logger.ScopeAuthorizationDeniedRaw(user, scope.StoreKey, scope.DatabaseId, tenant, policy);", true)]
+    [InlineData("logger.SqlRejectedRaw(user, scope.StoreKey, scope.DatabaseId, reason, clause);", true)]
+    [InlineData("logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, clause);", false)]
+    [InlineData("logger.ScopeAuthorizationDenied(UserName(), scope.StoreKey, scope.DatabaseId, tenant, policyName);", false)]
     public void The_dispatcher_scan_catches_a_direct_call(string source, bool caught)
     {
-        Match call = LogCall().Match(source);
-
-        call.Success.Should().BeTrue();
-        (!call.Groups["first"].Value.Contains("Product", StringComparison.Ordinal)).Should().Be(caught);
+        RawCall().Matches(source).Any(static x => Dispatched.Contains(x.Groups["name"].Value, StringComparer.Ordinal)).Should().Be(caught);
     }
 
     [Theory]
@@ -273,9 +270,9 @@ public partial class RefusalLogValuesTests
         (Shaped().Count(call.Value) > 0).Should().Be(caught);
     }
 
-    /// <summary>A call of a logging extension: its name and its first argument.</summary>
-    [GeneratedRegex(@"\blogger\s*\.\s*(?<name>[A-Z][A-Za-z]+)\s*\(\s*(?<first>[^,()]*(\([^()]*\))?[^,()]*),", RegexOptions.CultureInvariant)]
-    private static partial Regex LogCall();
+    /// <summary>A call of an event's template behind a dispatcher: <c>logger.SqlRejectedRaw(</c>.</summary>
+    [GeneratedRegex(@"\.\s*(?<name>[A-Z][A-Za-z]+)Raw\s*\(", RegexOptions.CultureInvariant)]
+    private static partial Regex RawCall();
 
     /// <summary>A call of one of LINQ mode's own events, to its closing semicolon.</summary>
     [GeneratedRegex(@"\blogger\s*\.\s*LinqQuery[A-Za-z]+\s*\([^;]*;", RegexOptions.CultureInvariant)]

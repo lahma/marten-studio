@@ -75,7 +75,7 @@
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            Logger.LogDebug(e, "KStudio could not list the clusters this visitor may see");
+            Logger.LogDebug(e, "Data Studio could not list the clusters this visitor may see");
         }
         finally
         {
@@ -110,7 +110,7 @@
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            Logger.LogDebug(e, "KStudio could not move to the cluster the visitor picked");
+            Logger.LogDebug(e, "Data Studio could not move to the cluster the visitor picked");
         }
     }
 

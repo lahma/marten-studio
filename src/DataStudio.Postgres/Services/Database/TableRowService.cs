@@ -1796,7 +1796,6 @@ internal sealed class TableRowService : ITableRowService
         }
 
         logger.TableRowsRead(
-            settings.Text.Product,
             UserName(),
             action,
             target,
@@ -1834,7 +1833,6 @@ internal sealed class TableRowService : ITableRowService
         }
 
         logger.TableRowsRead(
-            settings.Text.Product,
             UserName(),
             CountAction,
             target,
@@ -1865,7 +1863,6 @@ internal sealed class TableRowService : ITableRowService
             : string.Join(", ", key.Columns.Select((column, i) => column + "=" + key.Values[i]));
 
         logger.TableRowOpened(
-            settings.Text.Product,
             UserName(),
             action,
             Target(grant.Relation.Relation),
@@ -1894,18 +1891,7 @@ internal sealed class TableRowService : ITableRowService
                 grant.Resolved.Target.Identity,
                 StudioLogThrottle.KindOf(exception));
 
-        if (logger.IsEnabled(level) && settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioTableRowReadFailed(
-                level,
-                exception,
-                action,
-                Target(grant.Relation.Relation),
-                grant.Resolved.Source.Key,
-                grant.Resolved.Target.Identity,
-                error.SqlState.Length > 0 ? error.SqlState : null);
-        }
-        else if (logger.IsEnabled(level))
+        if (logger.IsEnabled(level))
         {
             logger.TableRowReadFailed(
                 level,

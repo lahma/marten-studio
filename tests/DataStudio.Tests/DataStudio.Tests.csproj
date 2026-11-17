@@ -8,6 +8,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the Marten suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
   </PropertyGroup>
 
   <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
@@ -34,6 +36,8 @@
   <ItemGroup>
     <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
   </ItemGroup>
 
 </Project>

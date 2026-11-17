@@ -1,9 +1,7 @@
 using System.Reflection;
 
-using Microsoft.Extensions.Logging;
 
 using DataStudio.Postgres.Internal.Sql;
-using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Health.Checks;
 using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
@@ -139,27 +137,4 @@ public partial class PostgresStudioWordsTests
         settings.Text.ProductName.Should().Be(settings.ProductName);
         settings.Text.OwnSchemaFlag.Should().BeNull("an own schema is just a browsable one; there is no store to flag it as");
     }
-
-    [Fact]
-    public void Every_log_template_is_Postgres_Studios_and_keeps_MartenStudios_id()
-    {
-        LoggerMessageAttribute[] postgres = Templates(typeof(PostgresStudioLog));
-        Dictionary<int, LoggerMessageAttribute> marten = Templates(typeof(StudioLog)).ToDictionary(static x => x.EventId);
-
-        postgres.Should().NotBeEmpty();
-
-        foreach (LoggerMessageAttribute template in postgres)
-        {
-            template.Message.Should().Contain("Postgres Studio").And.NotContain("Marten").And.NotContain(" store ");
-            marten.Should().ContainKey(template.EventId, "each is a shared event, in other words");
-            template.Level.Should().Be(marten[template.EventId].Level, "the same event is the same severity in either studio");
-        }
-    }
-
-    private static LoggerMessageAttribute[] Templates(Type type) =>
-    [
-        .. type.GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .Select(static x => x.GetCustomAttribute<LoggerMessageAttribute>())
-            .OfType<LoggerMessageAttribute>(),
-    ];
 }

@@ -242,6 +242,8 @@ internal sealed class LogCapture : ILoggerProvider
 
     public ILogger CreateLogger(string categoryName) =>
         categoryName.StartsWith("DataStudio.Postgres", StringComparison.Ordinal)
+        || categoryName.StartsWith("DataStudio.Services", StringComparison.Ordinal)
+        || categoryName.StartsWith("DataStudio.Components", StringComparison.Ordinal)
         || categoryName.StartsWith("DataStudio.Sample.Postgres", StringComparison.Ordinal)
             ? new Capturing(this, categoryName)
             : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;

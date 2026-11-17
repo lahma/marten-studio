@@ -1,12 +1,9 @@
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres.Services;
 
 // W5-API's events, 9250-9254: the public diagnostics API (D31). In a file of their own so that no other packet's event block
-// meets this one; the class's own documentation is StudioLog.cs's, and Postgres Studio's wording of each is in
-// PostgresStudioLog.Diagnostics.cs, under the same id. 9252-9254 are unused and held for this API.
+// meets this one; the class's own documentation is StudioLog.cs's. 9252-9254 are unused and held for this API.
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -18,29 +15,8 @@ internal static partial class StudioLog
     /// the studio, and the host's code is not a visitor.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9250, Level = LogLevel.Debug, Message = "Marten Studio's diagnostics API read store {StoreKey}, database {DatabaseId}: {Outcome}, {Findings} findings, {Withheld} withheld, sections {Sections}")]
+    [LoggerMessage(EventId = 9250, Level = LogLevel.Debug, Message = "Data Studio's diagnostics API read source {StoreKey}, database {DatabaseId}: {Outcome}, {Findings} findings, {Withheld} withheld, sections {Sections}")]
     public static partial void DiagnosticsSnapshotRead(this ILogger logger, string storeKey, string databaseId, string outcome, int findings, int withheld, string sections);
-
-    /// <summary>9250 in the studio's own words.</summary>
-    public static void DiagnosticsSnapshotRead(
-        this ILogger logger,
-        StudioProduct product,
-        string storeKey,
-        string databaseId,
-        string outcome,
-        int findings,
-        int withheld,
-        string sections)
-    {
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioDiagnosticsSnapshotRead(storeKey, databaseId, outcome, findings, withheld, sections);
-        }
-        else
-        {
-            logger.DiagnosticsSnapshotRead(storeKey, databaseId, outcome, findings, withheld, sections);
-        }
-    }
 
     /// <remarks>
     /// <para>
@@ -52,6 +28,6 @@ internal static partial class StudioLog
     /// (57014) or its lock wait (55P03) - is the section's own outcome, at Debug.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9251, Message = "Marten Studio's diagnostics API could not read the {Section} of store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9251, Message = "Data Studio's diagnostics API could not read the {Section} of source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void DiagnosticsSectionFailed(this ILogger logger, LogLevel level, Exception exception, string section, string storeKey, string databaseId, string? sqlState);
 }

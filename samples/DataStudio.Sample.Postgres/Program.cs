@@ -107,7 +107,7 @@ WebApplication app = builder.Build();
 // starting again writes nothing, and neither writes into a database or schema it did not create.
 if (writeDemoData)
 {
-    ILogger seeding = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PostgresStudio.Sample.Seeding");
+    ILogger seeding = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DataStudio.Sample.Postgres.Seeding");
     await TenantDemo.ApplyAsync(connectionString, seeding);
     await using NpgsqlConnection adminConnection = await app.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
     await RelationalDemoSchema.ApplyAsync(adminConnection, seeding);

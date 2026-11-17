@@ -1,4 +1,3 @@
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -178,26 +177,22 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
     private readonly StudioAuthorization authorization;
     private readonly ILogger<StudioScopeCatalog> logger;
     private readonly StudioLogThrottle? throttle;
-    private readonly StudioProduct product;
 
     /// <remarks>
     /// <paramref name="throttle" /> is optional so that a test can build a catalog by hand; the container
     /// always supplies it, and without one every failure is simply a Warning
-    /// (<see cref="StudioLogThrottle.LevelOrWarning" />). <paramref name="settings" /> likewise: they choose which
-    /// studio's words the events are logged in (<see cref="StudioText.Of" />).
+    /// (<see cref="StudioLogThrottle.LevelOrWarning" />).
     /// </remarks>
     public StudioScopeCatalog(
         IStudioSourceProvider sources,
         StudioAuthorization authorization,
         ILogger<StudioScopeCatalog> logger,
-        StudioLogThrottle? throttle = null,
-        IStudioSettings? settings = null)
+        StudioLogThrottle? throttle = null)
     {
         this.sources = sources;
         this.authorization = authorization;
         this.logger = logger;
         this.throttle = throttle;
-        product = StudioText.Of(settings).Product;
     }
 
     /// <inheritdoc />
@@ -449,14 +444,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         LogLevel level = StudioLogThrottle.LevelOrWarning(
             throttle, "Store.Tenants", storeKey, null, StudioLogThrottle.KindOf(exception));
 
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioTenantDiscoveryFailed(level, exception, storeKey);
-        }
-        else
-        {
-            logger.TenantDiscoveryFailed(level, exception, storeKey);
-        }
+        logger.TenantDiscoveryFailed(level, exception, storeKey);
     }
 
     /// <summary>
@@ -536,14 +524,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
             LogLevel level = StudioLogThrottle.LevelOrWarning(
                 throttle, "Store.TenantPolicy", storeKey, identity, StudioLogThrottle.KindOf(exception));
 
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioTenantPolicyFailed(level, exception, storeKey, identity);
-            }
-            else
-            {
-                logger.TenantPolicyFailed(level, exception, storeKey, identity);
-            }
+            logger.TenantPolicyFailed(level, exception, storeKey, identity);
 
             return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
         }
@@ -642,14 +623,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
             LogLevel level = StudioLogThrottle.LevelOrWarning(
                 throttle, "Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
 
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioStoreDatabasesUnreadable(level, exception, storeKey);
-            }
-            else
-            {
-                logger.StoreDatabasesUnreadable(level, exception, storeKey);
-            }
+            logger.StoreDatabasesUnreadable(level, exception, storeKey);
 
             return ([], true);
         }

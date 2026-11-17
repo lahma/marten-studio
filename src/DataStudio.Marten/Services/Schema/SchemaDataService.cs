@@ -192,7 +192,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not preview a schema migration for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not preview a schema migration for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
             preview = MigrationPreview.None with
             {
                 Notice = await MaskAsync(scope, grant.Resolved, exception.Message, cancellationToken).ConfigureAwait(false),
@@ -362,7 +362,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
             audit.Record(ApplyAction, target, succeeded: false, cancelled + ringSql, StudioCapability.ApplySchemaChanges, wholeDatabase);
             logger.SchemaChangeApplied(user, scope.StoreKey, identity, "CANCELLED: " + cancelled + auditedSql);
-            logger.LogWarning(exception, "Marten Studio's schema apply on {DatabaseId} was cancelled", identity);
+            logger.LogWarning(exception, "Data Studio's schema apply on {DatabaseId} was cancelled", identity);
 
             throw;
         }
@@ -501,14 +501,14 @@ internal sealed partial class SchemaDataService : ISchemaDataService
             // An expected state - somebody is migrating - that the tab renders, so Debug at most (LogLevelsTests).
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's table statistics for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Data Studio's table statistics for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
             }
 
             return SchemaTables.Locked(LockedSentence("A table"));
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not read table statistics for database {DatabaseId}", resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not read table statistics for database {DatabaseId}", resolved.Database.Id.Identity);
             return SchemaTables.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
@@ -608,14 +608,14 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's index statistics for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Data Studio's index statistics for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
             }
 
             return SchemaIndexes.Locked(LockedSentence("An index"));
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not read index statistics for database {DatabaseId}", resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not read index statistics for database {DatabaseId}", resolved.Database.Id.Identity);
             return SchemaIndexes.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
@@ -757,14 +757,14 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's index definition read for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Data Studio's index definition read for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
             }
 
             return SchemaIndexDefinition.Locked(DefinitionLockedSentence);
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not read an index definition for database {DatabaseId}", resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not read an index definition for database {DatabaseId}", resolved.Database.Id.Identity);
             return SchemaIndexDefinition.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
@@ -952,7 +952,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not read functions for database {DatabaseId}", resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not read functions for database {DatabaseId}", resolved.Database.Id.Identity);
             return SchemaFunctions.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
@@ -982,7 +982,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not produce a database script for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not produce a database script for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
             script = DdlScript.Unavailable(await MaskAsync(scope, grant.Resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
 
@@ -1036,7 +1036,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not create a schema migration for database {DatabaseId}", database.Id.Identity);
+            logger.LogWarning(exception, "Data Studio could not create a schema migration for database {DatabaseId}", database.Id.Identity);
             return SchemaCheck.Unavailable(exception.Message);
         }
     }
@@ -1369,7 +1369,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
             // page shows less of it.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not read the schema list to mask a failure's text for database {DatabaseId}", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Data Studio could not read the schema list to mask a failure's text for database {DatabaseId}", resolved.Database.Id.Identity);
             }
 
             return DetailsWithheld;

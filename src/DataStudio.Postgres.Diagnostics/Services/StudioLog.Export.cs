@@ -18,6 +18,6 @@ internal static partial class StudioLog
     /// failure in ten minutes, Debug in between.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9270, Message = "Marten Studio's health export failed, so its health check reports Degraded")]
+    [LoggerMessage(EventId = 9270, Message = "Data Studio's health export failed, so its health check reports Degraded")]
     public static partial void HealthExportFailed(this ILogger logger, LogLevel level, Exception exception);
 }

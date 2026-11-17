@@ -172,7 +172,7 @@ internal sealed class KafkaSearchService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not plan a search");
+            logger.LogWarning(e, "Data Studio could not plan a search");
             await NotRunAsync(input, KafkaStudioText.SearchFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
             return new KafkaSearchPlanResult.Refused(KafkaStudioText.SearchFailed);
         }
@@ -228,7 +228,7 @@ internal sealed class KafkaSearchService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not start a search");
+            logger.LogWarning(e, "Data Studio could not start a search");
             await NotRunAsync(input, KafkaStudioText.SearchFailed, plan.AuditText).ConfigureAwait(false);
             return new KafkaSearchStartResult.Refused(KafkaStudioText.SearchFailed);
         }

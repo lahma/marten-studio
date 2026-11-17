@@ -276,7 +276,7 @@ public class StudioStateTenantDatabaseSearchTests
 
         CapturedLogEntry entry = logs.Entries.Should().ContainSingle(static x => x.EventId.Id == TenantDatabaseSearchBoundedEvent).Subject;
         entry.Level.Should().Be(LogLevel.Debug);
-        entry.Message.Should().Contain("32").And.Contain("store s").And.NotContain("needle");
+        entry.Message.Should().Contain("32").And.Contain("source s").And.NotContain("needle");
     }
 
     [Fact]

@@ -154,7 +154,7 @@ internal sealed class ConfigurationService : IConfigurationService
         {
             logger.LogWarning(
                 exception,
-                "Marten Studio could not describe the databases of store {StoreKey}",
+                "Data Studio could not describe the databases of store {StoreKey}",
                 resolved.Registration.Key);
 
             return ([], exception.Message);

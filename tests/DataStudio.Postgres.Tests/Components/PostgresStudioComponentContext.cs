@@ -93,7 +93,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton(new DatabaseBrowserState());
         Services.AddSingleton(new SessionPoolObserver("DataStudio.Postgres.Tests." + Guid.NewGuid().ToString("N")));
 
-        Services.AddSingleton(DataStudio.Postgres.Services.Live.DatabaseLiveLogs.For(StudioProduct.PostgresStudio));
+        Services.AddSingleton(DataStudio.Postgres.Services.Live.DatabaseLiveLogs.For());
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
         // 1.2-H-A: Mark on Statements, Storage and Maintenance - the circuit's, so the context's one root is the one circuit.

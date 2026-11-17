@@ -280,7 +280,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(
-                exception, "Marten Studio could not read what references '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
+                exception, "Data Studio could not read what references '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
 
             return ReferencedBy.Failed(RelationshipReads.Describe(exception, gate));
         }
@@ -399,7 +399,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
             // The budget doing its job on a large collection: the row says so, and the panel carries on.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio stopped counting references from '{Alias}' at its timeout", edge.FromAlias);
+                logger.LogDebug(exception, "Data Studio stopped counting references from '{Alias}' at its timeout", edge.FromAlias);
             }
 
             return Entry(notCounted: reads.NotCountedInTime());
@@ -408,7 +408,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not count references from '{Alias}'", edge.FromAlias);
+                logger.LogDebug(exception, "Data Studio could not count references from '{Alias}'", edge.FromAlias);
             }
 
             return Entry(error: RelationshipReads.Describe(exception, gate));
@@ -532,7 +532,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
             if (logger.IsEnabled(LogLevel.Debug))
             {
                 logger.LogDebug(
-                    "Marten Studio did not count the rows of {Table} that reference a {Alias} document: {Reason}",
+                    "Data Studio did not count the rows of {Table} that reference a {Alias} document: {Reason}",
                     qualified,
                     target.Alias,
                     grant.Reason);
@@ -571,7 +571,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
             if (logger.IsEnabled(LogLevel.Debug))
             {
                 logger.LogDebug(
-                    "Marten Studio counted {Count}{Capped} rows of {Table} that reference a {Alias} document",
+                    "Data Studio counted {Count}{Capped} rows of {Table} that reference a {Alias} document",
                     capped ? RelationshipQueries.DefaultInboundCap - 1 : count,
                     capped ? "+" : string.Empty,
                     qualified,
@@ -589,7 +589,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio stopped counting references from '{Table}' at its timeout", qualified);
+                logger.LogDebug(exception, "Data Studio stopped counting references from '{Table}' at its timeout", qualified);
             }
 
             return Entry(notCounted: reads.NotCountedInTime());
@@ -598,7 +598,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not count references from '{Table}'", qualified);
+                logger.LogDebug(exception, "Data Studio could not count references from '{Table}'", qualified);
             }
 
             // The values bound are this document's id and tenant: what the visitor already has on screen.

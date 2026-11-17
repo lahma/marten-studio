@@ -1,12 +1,9 @@
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres.Services;
 
 // W5-V1's events, 9420-9429: the Maintenance page and its bloat measure. In a file of their own so that the wave-5
-// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's. Postgres Studio's
-// spellings are PostgresStudioLog's (PostgresStudioLog.Maintenance.cs), chosen here by the studio's product.
+// packets' event blocks never meet in one file; the class's own documentation is StudioLog.cs's.
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -16,7 +13,7 @@ internal static partial class StudioLog
     /// and the audit entry records it.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9420, Level = LogLevel.Warning, Message = "Marten Studio could not measure the bloat of a table in store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    [LoggerMessage(EventId = 9420, Level = LogLevel.Warning, Message = "Data Studio could not measure the bloat of a table in source {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void BloatMeasureFailed(this ILogger logger, Exception exception, string storeKey, string databaseId, string? sqlState);
 
     /// <remarks>
@@ -26,32 +23,6 @@ internal static partial class StudioLog
     /// <c>statement_timeout</c>. The page says it in words; this is for somebody who turns Debug on to ask why.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9421, Level = LogLevel.Debug, Message = "Marten Studio did not measure the bloat of a table in store {StoreKey}, database {DatabaseId}: {Reason}")]
+    [LoggerMessage(EventId = 9421, Level = LogLevel.Debug, Message = "Data Studio did not measure the bloat of a table in source {StoreKey}, database {DatabaseId}: {Reason}")]
     public static partial void BloatMeasureRefused(this ILogger logger, string storeKey, string databaseId, string reason);
-
-    /// <summary>9420, in the studio's words.</summary>
-    public static void BloatMeasureFailed(this ILogger logger, StudioProduct product, Exception exception, string storeKey, string databaseId, string? sqlState)
-    {
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioBloatMeasureFailed(exception, storeKey, databaseId, sqlState);
-        }
-        else
-        {
-            logger.BloatMeasureFailed(exception, storeKey, databaseId, sqlState);
-        }
-    }
-
-    /// <summary>9421, in the studio's words.</summary>
-    public static void BloatMeasureRefused(this ILogger logger, StudioProduct product, string storeKey, string databaseId, string reason)
-    {
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioBloatMeasureRefused(storeKey, databaseId, reason);
-        }
-        else
-        {
-            logger.BloatMeasureRefused(storeKey, databaseId, reason);
-        }
-    }
 }

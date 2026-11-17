@@ -148,7 +148,7 @@ public class EngineLogEventsTests
 
         KStudioLoggers loggers = new(factory);
 
-        provider.Categories.Should().BeEquivalentTo("KStudio.Core.Clients", "KStudio.Core.Catalog", "KStudio.Core.Scans");
+        provider.Categories.Should().BeEquivalentTo("DataStudio.Kafka.Core.Clients", "DataStudio.Kafka.Core.Catalog", "DataStudio.Kafka.Core.Scans");
         loggers.Clients.Should().NotBeNull();
         loggers.Catalog.Should().NotBeNull();
         loggers.Scans.Should().NotBeNull();

@@ -559,14 +559,7 @@ internal sealed class HealthService : IHealthService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.LogDebug(exception, "Postgres Studio could not place a tenant in a swept database for a health badge or banner");
-            }
-            else
-            {
-                logger.LogDebug(exception, "Marten Studio could not place a tenant in a swept database for a health badge or banner");
-            }
+            logger.LogDebug(exception, "Data Studio could not place a tenant in a swept database for a health badge or banner");
 
             return false;
         }
@@ -850,14 +843,7 @@ internal sealed class HealthService : IHealthService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.LogDebug(exception, "Postgres Studio could not read the database browser's gate for a health report");
-            }
-            else
-            {
-                logger.LogDebug(exception, "Marten Studio could not read the database browser's gate for a health report");
-            }
+            logger.LogDebug(exception, "Data Studio could not read the database browser's gate for a health report");
 
             return null;
         }

@@ -170,7 +170,7 @@ internal static partial class KafkaStudioLog
     [LoggerMessage(
         EventId = 9600,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} searched topics {Topics} of cluster {Cluster}, tenant {TenantId}, from {From} to {To}: {Records} records and {Bytes} bytes read, stopped by {StopReason}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User} searched topics {Topics} of cluster {Cluster}, tenant {TenantId}, from {From} to {To}: {Records} records and {Bytes} bytes read, stopped by {StopReason}. Predicate: {Predicate}")]
     private static partial void SearchRanCore(
         ILogger logger,
         string user,
@@ -187,37 +187,37 @@ internal static partial class KafkaStudioLog
     [LoggerMessage(
         EventId = 9601,
         Level = LogLevel.Information,
-        Message = "KStudio user {User}'s search of topics {Topics} of cluster {Cluster}, tenant {TenantId} did not run: {Reason}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User}'s search of topics {Topics} of cluster {Cluster}, tenant {TenantId} did not run: {Reason}. Predicate: {Predicate}")]
     private static partial void SearchNotRunCore(ILogger logger, string user, string topics, string cluster, string tenantId, string reason, string predicate);
 
     [LoggerMessage(
         EventId = 9602,
         Level = LogLevel.Warning,
-        Message = "KStudio user {User} was refused capability {Capability}: {Option} would have to be set")]
+        Message = "Data Studio user {User} was refused capability {Capability}: {Option} would have to be set")]
     private static partial void CapabilityRefusedCore(ILogger logger, string user, string capability, string option);
 
     [LoggerMessage(
         EventId = 9603,
         Level = LogLevel.Warning,
-        Message = "KStudio user {User} was refused cluster {Cluster}, tenant {TenantId}, topic {Topic} by policy {Policy}")]
+        Message = "Data Studio user {User} was refused cluster {Cluster}, tenant {TenantId}, topic {Topic} by policy {Policy}")]
     private static partial void ClusterRefusedCore(ILogger logger, string user, string cluster, string tenantId, string topic, string policy);
 
     [LoggerMessage(
         EventId = 9604,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} opened record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
+        Message = "Data Studio user {User} opened record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
     private static partial void RecordOpenedCore(ILogger logger, string user, string topic, int partition, long offset, string cluster, string tenantId);
 
     [LoggerMessage(
         EventId = 9605,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} read the value of record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
+        Message = "Data Studio user {User} read the value of record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
     private static partial void RecordValueReadCore(ILogger logger, string user, string topic, int partition, long offset, string cluster, string tenantId);
 
     [LoggerMessage(
         EventId = 9606,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} exported {Records} records of topics {Topics} of cluster {Cluster}, tenant {TenantId} as {Format}: {Bytes} bytes{Values}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User} exported {Records} records of topics {Topics} of cluster {Cluster}, tenant {TenantId} as {Format}: {Bytes} bytes{Values}. Predicate: {Predicate}")]
     private static partial void RecordsExportedCore(
         ILogger logger,
         string user,
@@ -233,13 +233,13 @@ internal static partial class KafkaStudioLog
     [LoggerMessage(
         EventId = 9607,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} started a live tail of topics {Topics} of cluster {Cluster}, tenant {TenantId}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User} started a live tail of topics {Topics} of cluster {Cluster}, tenant {TenantId}. Predicate: {Predicate}")]
     private static partial void TailStartedCore(ILogger logger, string user, string topics, string cluster, string tenantId, string predicate);
 
     [LoggerMessage(
         EventId = 9608,
         Level = LogLevel.Information,
-        Message = "KStudio user {User} tailed topics {Topics} of cluster {Cluster}, tenant {TenantId} for {Elapsed} in {Segments} segments: {Records} records and {Bytes} bytes read, {Matches} matches, ended by {StopReason}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User} tailed topics {Topics} of cluster {Cluster}, tenant {TenantId} for {Elapsed} in {Segments} segments: {Records} records and {Bytes} bytes read, {Matches} matches, ended by {StopReason}. Predicate: {Predicate}")]
     private static partial void TailEndedCore(
         ILogger logger,
         string user,
@@ -257,15 +257,15 @@ internal static partial class KafkaStudioLog
     [LoggerMessage(
         EventId = 9609,
         Level = LogLevel.Information,
-        Message = "KStudio user {User}'s {Action} of topics {Topics} of cluster {Cluster}, tenant {TenantId} did not run: {Reason}. Predicate: {Predicate}")]
+        Message = "Data Studio user {User}'s {Action} of topics {Topics} of cluster {Cluster}, tenant {TenantId} did not run: {Reason}. Predicate: {Predicate}")]
     private static partial void ActionNotRunCore(ILogger logger, string user, string action, string topics, string cluster, string tenantId, string reason, string predicate);
 
     [LoggerMessage(
         EventId = 9610,
         Level = LogLevel.Debug,
-        Message = "KStudio ignored the cluster {Cluster} the address named, and opened {Opened}")]
+        Message = "Data Studio ignored the cluster {Cluster} the address named, and opened {Opened}")]
     private static partial void ClusterAddressIgnoredCore(ILogger logger, string cluster, string opened);
 
-    [LoggerMessage(EventId = 9611, Message = "A KStudio page failed to handle a live update failure")]
+    [LoggerMessage(EventId = 9611, Message = "A Data Studio page failed to handle a live update failure")]
     private static partial void LiveUpdateHandlerFailedCore(ILogger logger, LogLevel level, Exception exception);
 }

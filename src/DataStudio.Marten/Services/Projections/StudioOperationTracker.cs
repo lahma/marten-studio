@@ -330,7 +330,7 @@ internal sealed class StudioOperationTracker : IDisposable
             {
                 state = StudioOperationState.Failed;
                 message = exception.Message;
-                logger.LogError(exception, "Marten Studio operation {Kind} on {Target} failed", kind, target);
+                logger.LogError(exception, "Data Studio operation {Kind} on {Target} failed", kind, target);
             }
 
             stopwatch.Stop();

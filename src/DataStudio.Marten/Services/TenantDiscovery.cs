@@ -170,7 +170,7 @@ internal sealed class TenantDiscovery
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not describe the tenants of one database of a store for the Tenants page");
+            logger.LogDebug(exception, "Data Studio could not describe the tenants of one database of a store for the Tenants page");
             return null;
         }
     }
@@ -221,7 +221,7 @@ internal sealed class TenantDiscovery
         {
             // A tenancy strategy that cannot describe itself is not a fault the selector should render as
             // one; the next tier may still answer.
-            logger.LogDebug(exception, "Marten Studio could not describe the databases of a store while discovering tenants");
+            logger.LogDebug(exception, "Data Studio could not describe the databases of a store while discovering tenants");
         }
 
         // Tier 3: the tenant columns, which are the only place tenant ids exist as data rather than as
@@ -238,7 +238,7 @@ internal sealed class TenantDiscovery
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not query tenant ids from the store's tenanted tables");
+            logger.LogDebug(exception, "Data Studio could not query tenant ids from the store's tenanted tables");
             return TenantList.Unavailable;
         }
     }

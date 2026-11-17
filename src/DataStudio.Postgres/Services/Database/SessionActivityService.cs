@@ -584,14 +584,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
-                }
+                logger.LogDebug(exception, "Data Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
             }
 
             return StatementScreen.Unchecked(hidesDocumentTypes);
@@ -614,14 +607,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
-                }
+                logger.LogDebug(exception, "Data Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
             }
 
             return null;
@@ -669,7 +655,6 @@ internal sealed class SessionActivityService : ISessionActivityService
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.SessionDetailsRead(
-                settings.Text.Product,
                 await authorization.UserNameAsync().ConfigureAwait(false),
                 storeKey,
                 databaseId,
@@ -751,28 +736,14 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.LogDebug(exception, "Postgres Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
-                }
-                else
-                {
-                    logger.LogDebug(exception, "Marten Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
-                }
+                logger.LogDebug(exception, "Data Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
             }
 
             return expected;
         }
 
         LogLevel level = throttle.WarningOrDebug("Sessions.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        if (settings.Text.Product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioSessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
-        else
-        {
-            logger.SessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
-        }
+        logger.SessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? PostgresFailure.CouldNotConnect(exception)

@@ -130,9 +130,9 @@ public class LogLevelsTests
     private static readonly Dictionary<string, (Verdict Verdict, string Why)> Roster = new(StringComparer.Ordinal)
     {
         // ---- StudioLog: the audit events kept at Warning ----------------------------------------------
-        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9202 CapabilityDenied"] = (Verdict.Refusal,
+        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9202 CapabilityDeniedRaw"] = (Verdict.Refusal,
             "A capability refusal reaches the service only when a client drives a control the page disabled or hid."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
+        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9203 ScopeAuthorizationDeniedRaw"] = (Verdict.Refusal,
             "A policy refusal on a write, a query run or a database-browser read (by name, of a store the store policy refuses), including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
         ["src/DataStudio.Marten/Services/MartenLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
@@ -158,10 +158,8 @@ public class LogLevelsTests
             "A hand-migrated mt_streams no Marten schema can have; once is enough, not once per page of streams."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9219 TenantDiscoveryFailed"] = (Verdict.Throttled,
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
-            "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
         ["src/DataStudio/Services/ShellLiveLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
-            "The shell's own words for event 9220, for a host with no database module: a page's refresh-failure handler threw, on a loop that runs every RefreshInterval; the shell's private throttle names its level."),
+            "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval. The one declaration of 9220: the shell's own throttle names its level, or the database module's, which writes the same event."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
             "The host's store policy threw while the header asked which discovered tenants to list; asked on every scope change in every circuit."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9222 HealthCheckFailed"] = (Verdict.Throttled,
@@ -176,106 +174,69 @@ public class LogLevelsTests
             "One server could not be sampled or its sample kept; its connection is opened again at the next round, every Interval."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9464 ConnectionHistoryBacklogDropped"] = (Verdict.Throttled,
             "The sampler's backlog of samples the history's store refused (#46) outgrew its hour and dropped its oldest; every round that drops says so, so once per throttle window a Warning."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9464 PostgresStudioConnectionHistoryBacklogDropped"] = (Verdict.Throttled,
-            "9464 in Postgres Studio's words: the backlog dropped its oldest samples, once per throttle window a Warning."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9460 PostgresStudioConnectionHistoryRoundFailed"] = (Verdict.Throttled,
-            "9460 in Postgres Studio's words: a round of the connection history failed, tried again every Interval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9461 PostgresStudioConnectionHistorySampleFailed"] = (Verdict.Throttled,
-            "9461 in Postgres Studio's words: one server could not be sampled, tried again every Interval."),
         ["src/DataStudio.Postgres.Diagnostics/Services/Postgres/PostgresLog.cs : 9301 DatabaseNamesSkipped"] = (Verdict.Throttled,
             "A host's database source listed names PostgresStudio left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
-        // ---- PostgresStudioLog: the same shared events in Postgres Studio's words, filed as StudioLog's are -----------
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9202 PostgresStudioCapabilityDenied"] = (Verdict.Refusal,
-            "9202 in Postgres Studio's words: a capability refusal reaches the service only when a client drives a control the page disabled or hid."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9203 PostgresStudioScopeAuthorizationDenied"] = (Verdict.Refusal,
-            "9203 in Postgres Studio's words: a policy refusal on a query run or a database-browser read; listings are filtered and log nothing."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9230 PostgresStudioDatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
-            "9230 in Postgres Studio's words: BrowsableSchemas contains \"*\" and SqlConsoleRole is unset. Once per host start."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9210 PostgresStudioStoreUnavailable"] = (Verdict.Throttled,
-            "9210 in Postgres Studio's words: a registered data source will not resolve; the registry's ten-second cache expires under every polling page."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9214 PostgresStudioPostgresVersionUnreadable"] = (Verdict.Throttled,
-            "9214 in Postgres Studio's words: a source's server version could not be read; the Overview asks it in every circuit."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9213 PostgresStudioStoreDatabasesUnreadable"] = (Verdict.Throttled,
-            "9213 in Postgres Studio's words: a source's databases could not be listed, on every scope listing in every circuit."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9219 PostgresStudioTenantDiscoveryFailed"] = (Verdict.Throttled,
-            "9219 in Postgres Studio's words: tenant discovery failed, asked on every scope change in every circuit."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9220 PostgresStudioLiveUpdateHandlerFailed"] = (Verdict.Throttled,
-            "9220 in Postgres Studio's words: a page's refresh-failure handler threw, on a loop that runs every RefreshInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9221 PostgresStudioTenantPolicyFailed"] = (Verdict.Throttled,
-            "9221 in Postgres Studio's words: the source policy threw while the header asked which tenants to list, on every scope change."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9222 PostgresStudioHealthCheckFailed"] = (Verdict.Throttled,
-            "9222 in Postgres Studio's words: a health check failed other than by an expected state, re-checked at HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9237 PostgresStudioTableRowReadFailed"] = (Verdict.Throttled,
-            "9237 in Postgres Studio's words: a row read failed by connection or an unexpected SQLSTATE, and page turns repeat it."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9246 PostgresStudioSessionActivityReadFailed"] = (Verdict.Throttled,
-            "9246 in Postgres Studio's words: a sessions read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.cs : 9270 PostgresStudioHealthExportFailed"] = (Verdict.Throttled,
-            "9270 in Postgres Studio's words: the opt-in health export failed in the studio itself, probed every few seconds."),
+        // ---- StudioLog: the health export ------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/DataStudio.Marten/Services/MartenLog.Deps.cs : 9320 SubscriptionRewindRefused"] = (Verdict.VisitorAction,
             "A rewind the visitor pressed was refused by Marten as an unknown subscription after the studio checked the name; the daemon may have stopped the agents first, and Marten's words, which list every subscription, are kept only here."),
-        ["src/DataStudio.Marten/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Configuration/ConfigurationService.cs : Data Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
             "The configuration screen's own load; not polled, and the page shows the failure."),
-        ["src/DataStudio.Marten/Services/DatabaseReachAuthorization.cs : Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/DatabaseReachAuthorization.cs : Data Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
-        ["src/DataStudio.Postgres/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Postgres/Services/Relationships/RelationshipDataService.cs : Data Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
-        ["src/DataStudio.Postgres/Services/Relationships/RelationshipDataService.cs : Postgres Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
-            "The same line in Postgres Studio's words: the relationships screen's load failed on a catalog read; not polled."),
-        ["src/DataStudio.Marten/Services/MartenRelationshipNodeSource.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/MartenRelationshipNodeSource.cs : Data Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's referenced-by panel failed as a whole; the per-edge counts inside it are Debug."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not create a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not create a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The drift check behind a button failed to build a migration."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not preview a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not preview a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The migration preview behind a button failed."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio's schema apply on {DatabaseId} was cancelled"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio's schema apply on {DatabaseId} was cancelled"] = (Verdict.VisitorAction,
             "An apply was cancelled mid-way by the process stopping; the schema may be half migrated."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.Impact.cs : Marten Studio could not read {What} for a migration preview of database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.Impact.cs : Data Studio could not read {What} for a migration preview of database {DatabaseId}"] = (Verdict.VisitorAction,
             "The migration preview's lock notes (table statistics, sessions, the activity policy) failed behind the Preview button; the preview itself is shown and says so. A lock timeout is Debug."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not read table statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not read table statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's tables tab failed to load."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not read index statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not read index statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's indexes tab failed to load."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not read an index definition for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not read an index definition for database {DatabaseId}"] = (Verdict.VisitorAction,
             "A person opened an index's definition on the schema screen's indexes tab and it failed to load."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not read functions for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not read functions for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's functions tab failed to load."),
-        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Marten Studio could not produce a database script for database {DatabaseId}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Schema/SchemaDataService.cs : Data Studio could not produce a database script for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The DDL script behind a button failed."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not list the document collections of {StoreKey}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not list the document collections of {StoreKey}"] = (Verdict.VisitorAction,
             "The documents rail failed as a whole; not polled, and the rail says so."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not count '{Alias}' exactly"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not count '{Alias}' exactly"] = (Verdict.VisitorAction,
             "An exact count the visitor pressed failed for a reason other than its timeout (which is Debug)."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not read the recent documents of {StoreKey}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not read the recent documents of {StoreKey}"] = (Verdict.VisitorAction,
             "The recent-documents region failed other than by its timeout (which is Debug)."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not list '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not list '{Alias}'"] = (Verdict.VisitorAction,
             "A collection's list failed with a non-Postgres exception; Postgres errors are rendered without a log."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not count '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not count '{Alias}'"] = (Verdict.VisitorAction,
             "A list header's count failed with an unexpected SQLSTATE; its timeout is Debug."),
-        ["src/DataStudio.Marten/Services/Shapes/DocumentShapeCheckService.cs : Marten Studio could not check the shapes of '{Subject}': {Reason}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Shapes/DocumentShapeCheckService.cs : Data Studio could not check the shapes of '{Subject}': {Reason}"] = (Verdict.VisitorAction,
             "A Check shapes the visitor pressed failed for a reason other than its timeouts (a result, not a log); the line carries the subject, an SQLSTATE or an exception type name, never a message."),
-        ["src/DataStudio.Marten/Services/Shapes/EventShapeCheckService.cs : Marten Studio could not check the shapes of events '{Subject}': {Reason}"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Shapes/EventShapeCheckService.cs : Data Studio could not check the shapes of events '{Subject}': {Reason}"] = (Verdict.VisitorAction,
             "A Check shapes the visitor pressed on Event types failed for a reason other than its timeouts (a result, not a log); the line carries the event type name, an SQLSTATE or an exception type name, never a message."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not list the document tables of the database"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not list the document tables of the database"] = (Verdict.VisitorAction,
             "The rail's discovery of unregistered mt_doc tables failed on a catalog read."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Marten Studio could not count '{Alias}' #2"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.cs : Data Studio could not count '{Alias}' #2"] = (Verdict.VisitorAction,
             "A rail count failed with an unexpected SQLSTATE; running out of its two-second budget is Debug."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not read document '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Data Studio could not read document '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document the visitor opened could not be read, other than by a Postgres error it renders."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not read the related documents of '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Data Studio could not read the related documents of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's related-documents panel failed."),
-        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Marten/Services/Documents/DocumentDataService.Detail.cs : Data Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
         // ---- 1.2-H-C ----------------------------------------------------------------------------------
-        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.HealthActions.cs : 9223 HealthActionFailed"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.HealthActions.cs : 9223 HealthActionFailedRaw"] = (Verdict.VisitorAction,
             "A finding's action the visitor pressed failed after its gates passed; one line per press, never polled, and the card shows it."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.HealthActions.cs : 9223 PostgresStudioHealthActionFailed"] = (Verdict.VisitorAction,
-            "9223 in Postgres Studio's words: a finding's action the visitor pressed failed after its gates passed; one line per press."),
-
         // ---- KS-SHELL: KStudio's own events (D34, D35) -------------------------------------------------
         ["src/DataStudio.Kafka/Services/KafkaStudioLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
             "A Kafka capability refusal reaches the service only when a client drives a control the page disabled or hid."),
@@ -307,25 +268,25 @@ public class LogLevelsTests
             "Recording the view of a neighbour's value threw, on the visitor's click: one line per click, and the page says the read failed."),
         ["src/DataStudio.Kafka/Components/Pages/KafkaSearchBody.razor : The Kafka search page failed to record a value view"] = (Verdict.VisitorAction,
             "Recording the view of a value threw, on the visitor's Details or Compare click: one line per click, and the value reads as not available to them."),
-        ["src/DataStudio.Kafka/Services/KafkaSearchService.cs : KStudio could not plan a search"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaSearchService.cs : Data Studio could not plan a search"] = (Verdict.VisitorAction,
             "The engine threw while planning a search the visitor asked for; one line per click, the ring records the failure and the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaSearchService.cs : KStudio could not start a search"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaSearchService.cs : Data Studio could not start a search"] = (Verdict.VisitorAction,
             "The engine threw while starting a search the visitor confirmed; one line per click, the ring records the failure and the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaRecordService.cs : KStudio could not read a record"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaRecordService.cs : Data Studio could not read a record"] = (Verdict.VisitorAction,
             "The engine threw while reading a record the visitor opened; one line per load, the ring records the failure and the page says the same."),
 
         // ---- KS-UI-EXPORT: the export service and its menu (D45) --------------------------------------
-        ["src/DataStudio.Kafka/Services/KafkaExportService.cs : KStudio could not export records"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaExportService.cs : Data Studio could not export records"] = (Verdict.VisitorAction,
             "Writing or sending the file threw (the writer is pure and the delivery's interop loss is a value), on a click the visitor made; one line per click, the ring records the failure and the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaExportService.cs : KStudio could not record an export that ended early"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaExportService.cs : Data Studio could not record an export that ended early"] = (Verdict.VisitorAction,
             "The last-resort entry of an export that was cancelled or threw could not be written (the audit ring itself failed); one line per such click, and the first failure is already logged."),
         ["src/DataStudio.Kafka/Components/Shared/KafkaExportMenu.razor : The Kafka export menu failed to save records"] = (Verdict.VisitorAction,
             "The export call threw rather than returning a value, on the visitor's click; one line per click, and the menu says the export failed."),
 
         // ---- KS-UI-TAIL: the live tail service and page (D46) -----------------------------------------
-        ["src/DataStudio.Kafka/Services/KafkaTailService.cs : KStudio could not plan a live tail"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaTailService.cs : Data Studio could not plan a live tail"] = (Verdict.VisitorAction,
             "The engine threw while planning a tail the visitor asked for (or resumed); one line per click, the ring records the failure and the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaTailService.cs : KStudio could not start a live tail"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaTailService.cs : Data Studio could not start a live tail"] = (Verdict.VisitorAction,
             "The engine threw while starting a tail segment the visitor asked for; one line per click, the ring records the failure and the page says the same."),
         ["src/DataStudio.Kafka/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to read the catalog"] = (Verdict.VisitorAction,
             "The topic list threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
@@ -353,73 +314,47 @@ public class LogLevelsTests
             "Writing the 'not confirmed' entry threw, on the visitor's Cancel: one line per click; the dialog is already closed."),
         ["src/DataStudio.Kafka/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed while reading a search"] = (Verdict.VisitorAction,
             "The batch loop of a search the visitor started threw (the engine returns every broker failure as a value): one line per search, the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : KStudio's related-records search was not valid for the engine ({Errors} errors)"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : Data Studio's related-records search was not valid for the engine ({Errors} errors)"] = (Verdict.VisitorAction,
             "A guard: the query builder writes only texts that parse and compile, so this is a fault in the studio met on a click; one line per click, the page says the search failed."),
-        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : KStudio could not plan a related-records search"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : Data Studio could not plan a related-records search"] = (Verdict.VisitorAction,
             "The engine threw while planning a search the visitor asked for; one line per click, the ring records the failure and the page says the same."),
-        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : KStudio could not start a related-records search"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka/Services/KafkaCorrelationService.cs : Data Studio could not start a related-records search"] = (Verdict.VisitorAction,
             "The engine threw while starting a search the visitor confirmed; one line per click, the ring records the failure and the page says the same."),
 
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Maintenance.cs : 9420 PostgresStudioBloatMeasureFailed"] = (Verdict.VisitorAction,
-            "9420 in Postgres Studio's words: a bloat measure the visitor pressed failed after its gates passed; one line per press."),
-
         // ---- W5-R2 -----------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Replication.cs : 9430 ReplicationReadFailed"] = (Verdict.Throttled,
             "A section of the Replication page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Replication.cs : 9430 PostgresStudioReplicationReadFailed"] = (Verdict.Throttled,
-            "9430 in Postgres Studio's words: a section of the Replication page's facts failed, re-read every HealthInterval."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Replication.cs : 9431 TablespaceSizeFailed"] = (Verdict.VisitorAction,
             "A tablespace size the visitor pressed Measure for failed other than by a privilege or a timeout (both Debug); one line per click."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Replication.cs : 9431 PostgresStudioTablespaceSizeFailed"] = (Verdict.VisitorAction,
-            "9431 in Postgres Studio's words: a tablespace size the visitor asked for failed; one line per click."),
-
         // ---- W5-S2 -----------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.ServerPosture.cs : 9440 ServerFactsReadFailed"] = (Verdict.Throttled,
             "A section of the Server page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.ServerPosture.cs : 9440 PostgresStudioServerFactsReadFailed"] = (Verdict.Throttled,
-            "9440 in Postgres Studio's words: a section of the Server page's facts failed, re-read every HealthInterval."),
-
         // ---- W5-Q1 -----------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.StatementsPage.cs : 9451 StatementsReadFailed"] = (Verdict.Throttled,
             "The Statements page could not take the statement sweep for a reason nobody chose; an expected state is the page's sentence, a check that failed is the sweep's 9222, and the page re-reads every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.StatementsPage.cs : 9451 PostgresStudioStatementsReadFailed"] = (Verdict.Throttled,
-            "9451 in Postgres Studio's words: the Statements page's read failed for a reason nobody chose, re-read every HealthInterval."),
-
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/DataStudio/Services/StudioPreferences.cs : A studio page failed to handle a preference change"] = (Verdict.Fault,
             "Shell A1: a page's preference-change handler threw (a time-zone change that did not redraw): a studio bug, and the page keeps spelling its moments in the old zone. In practice the scope state's relay contains its pages' failures first, so this line is reached only by a handler registered on the preferences directly."),
-        ["src/DataStudio.Postgres/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
+        ["src/DataStudio.Postgres/Services/StudioState.cs : A Data Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
-        ["src/DataStudio.Postgres/Services/StudioState.cs : A Postgres Studio page failed to handle a scope change"] = (Verdict.Fault,
-            "The same line in Postgres Studio's words: a page's scope-change handler threw, and it can show another scope's data."),
-        ["src/DataStudio.Postgres/Services/StudioState.cs : A Marten Studio page failed to handle a change of the scope its links carry"] = (Verdict.Fault,
+        ["src/DataStudio.Postgres/Services/StudioState.cs : A Data Studio page failed to handle a change of the scope its links carry"] = (Verdict.Fault,
             "1.2-HEADER-FU: a page's synchronous link-scope handler threw: a studio bug, and the rail's links can carry the wrong scope until the next render."),
-        ["src/DataStudio.Postgres/Services/StudioState.cs : A Postgres Studio page failed to handle a change of the scope its links carry"] = (Verdict.Fault,
-            "The same line in Postgres Studio's words: a page's link-scope handler threw, and the rail's links can carry the wrong scope."),
         ["src/DataStudio.Postgres/Services/Query/HypotheticalIndexReader.cs : A what-if on database {Database} could neither reset hypopg nor end its own session; backend {ProcessId} may still hold a hypothetical index, which every later user of that pooled connection's planner sees until it is reset or the backend ends"] = (Verdict.Fault,
             "X2: a what-if ended half-done - neither the reset nor ending its own session worked - so a pooled backend may plan with an index that does not exist."),
-        ["src/DataStudio.Marten/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
+        ["src/DataStudio.Marten/Services/Projections/StudioOperationTracker.cs : Data Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
 
         // ---- W5-CAP ---------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Storage.cs : 9410 StorageReadFailed"] = (Verdict.Throttled,
             "A read of a database's storage failed by connection, an unexpected SQLSTATE or a table source that threw; privilege and timeouts are Debug, and the Storage page re-reads every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Storage.cs : 9410 PostgresStudioStorageReadFailed"] = (Verdict.Throttled,
-            "9410 in Postgres Studio's words: a storage read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
-
         // ---- W5-AUR ---------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Aurora.cs : 9500 CapacitySourceFailed"] = (Verdict.Throttled,
             "The host's IPostgresCapacitySource threw; asked once per database and instance per HealthInterval, so Warning once in ten minutes and Debug in between, and the capacity reads as unknown."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Aurora.cs : 9500 PostgresStudioCapacitySourceFailed"] = (Verdict.Throttled,
-            "9500 in Postgres Studio's words: the host's capacity source threw, asked once per HealthInterval."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Aurora.cs : 9501 AuroraReadFailed"] = (Verdict.Throttled,
             "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Aurora.cs : 9501 PostgresStudioAuroraReadFailed"] = (Verdict.Throttled,
-            "9501 in Postgres Studio's words: one of Aurora's own reads failed, re-read every HealthInterval."),
-
         // ---- DataStudio.Kafka.Core: the engine's events above Debug (9650 to 9699) ----------------------------
         ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Catalog.cs : 9654 ClusterUnavailable"] = (Verdict.Throttled,
             "A Kafka cluster the catalog cannot reach; every polling page asks it, so Warning once per cluster per ten minutes, Debug in between."),
@@ -437,11 +372,9 @@ public class LogLevelsTests
         // ---- W5-API ---------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Diagnostics.cs : 9251 DiagnosticsSectionFailed"] = (Verdict.Throttled,
             "A section the diagnostics API was asked for failed by connection, an unexpected SQLSTATE or a reader that threw; a host polls, so Warning once per source, database and kind in ten minutes, and privilege and timeouts are Debug."),
-        ["src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Diagnostics.cs : 9251 PostgresStudioDiagnosticsSectionFailed"] = (Verdict.Throttled,
-            "9251 in Postgres Studio's words: a section of a diagnostics snapshot failed, asked as often as the host polls."),
-        ["src/DataStudio.Postgres/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Postgres/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of source {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
             "The Snapshot menu's builder threw, which the page services never should: one line per click, and the menu says it failed."),
-        ["src/DataStudio.Postgres/Components/Pages/Health/SnapshotCompare.razor : The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} failed"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Postgres/Components/Pages/Health/SnapshotCompare.razor : The Health page's snapshot compare for source {StoreKey}, database {DatabaseId} failed"] = (Verdict.VisitorAction,
             "The compare's service threw something that is not interop loss, a stalled upload (IOException, TimeoutException) or a cancelled page - those are Debug, with a sentence on the page - so it is a bug: one line per chosen file, naming the store and database and none of the file, and the drawer says it failed."),
     };
 
@@ -601,15 +534,15 @@ public class LogLevelsTests
         ThrottledEventMethods().Should().BeEquivalentTo(fromRoster);
         ThrottledEventMethods().Should().Contain(["StoreUnavailable", "DaemonUnreachable", "LiveUpdateHandlerFailed"]);
 
-        // Anti-vacuity for the partials: 9246 is declared in StudioLog.Sessions.cs, and 9410 in a partial of each class.
+        // Anti-vacuity for the partials: 9246 is declared in StudioLog.Sessions.cs, and 9410 in StudioLog.Storage.cs.
         ThrottledEventMethods().Should().Contain(
-            ["SessionActivityReadFailed", "StorageReadFailed", "PostgresStudioStorageReadFailed"],
+            ["SessionActivityReadFailed", "StorageReadFailed"],
             "a throttled event declared in a partial is a throttled event, and its calls are checked like any other");
     }
 
     /// <summary>
-    /// <see cref="EventFiles" /> is every file that declares a part of <c>StudioLog</c>, <c>PostgresStudioLog</c> or
-    /// <c>MartenLog</c> - so a partial named otherwise, or put in another folder, fails here rather than going unscanned.
+    /// <see cref="EventFiles" /> is every file that declares a part of <c>StudioLog</c>, <c>MartenLog</c> or
+    /// <c>ShellLiveLog</c> - so a partial named otherwise, or put in another folder, fails here rather than going unscanned.
     /// </summary>
     [Fact]
     public void The_event_files_are_every_partial_of_every_declaring_class()
@@ -630,7 +563,7 @@ public class LogLevelsTests
         declaring.Should().HaveCountGreaterThan(EventClasses.Length, "the classes have partials, and a scan that finds none has stopped working");
         EventFiles.Should().BeEquivalentTo(declaring, "every part of an event class is an event file, and every event file is one");
         EventFiles.Should().Contain(
-            ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Sessions.cs", "src/DataStudio.Postgres.Diagnostics/Services/PostgresStudioLog.Storage.cs", "src/DataStudio.Marten/Services/MartenLog.Query.cs"]);
+            ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Sessions.cs", "src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Storage.cs", "src/DataStudio.Marten/Services/MartenLog.Query.cs", "src/DataStudio/Services/ShellLiveLog.cs"]);
     }
 
     /// <summary>Every listed throttle-less helper exists, as a static method of that name on that type.</summary>
@@ -739,15 +672,14 @@ public class LogLevelsTests
     private static readonly (string Folder, string Class)[] EventClasses =
     [
         ("src/DataStudio.Postgres.Diagnostics/Services", "StudioLog"),
-        ("src/DataStudio.Postgres.Diagnostics/Services", "PostgresStudioLog"),
         ("src/DataStudio.Marten/Services", "MartenLog"),
+        ("src/DataStudio/Services", "ShellLiveLog"),
     ];
 
     /// <summary>
-    /// The files that declare the studio's events: the shared <c>StudioLog</c>, Postgres Studio's
-    /// <c>PostgresStudioLog</c> and, since 0.5's split (PS-1a), MartenStudio's own <c>MartenLog</c> - one id space - each
-    /// as its own file <em>and every partial of it</em> (<c>StudioLog.Sessions.cs</c>, <c>PostgresStudioLog.Storage.cs</c>,
-    /// <c>MartenLog.Query.cs</c> and the rest), read from disk rather than listed.
+    /// The files that declare the studio's events: the shared <c>StudioLog</c>, the Marten module's own <c>MartenLog</c> and the
+    /// shell's <c>ShellLiveLog</c> (9220) - one id space - each as its own file <em>and every partial of it</em>
+    /// (<c>StudioLog.Sessions.cs</c>, <c>MartenLog.Query.cs</c> and the rest), read from disk rather than listed.
     /// </summary>
     /// <remarks>
     /// Until wave 6 this was the three main files by name, so a throttled event declared in a partial - 9246, the

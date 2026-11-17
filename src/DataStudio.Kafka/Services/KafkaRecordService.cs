@@ -127,7 +127,7 @@ internal sealed class KafkaRecordService(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            logger.LogWarning(e, "KStudio could not read a record");
+            logger.LogWarning(e, "Data Studio could not read a record");
             actionLog.Record(cluster, topics, Action, target, succeeded: false, KafkaStudioText.ReadFailed, KafkaCapability.SearchRecords);
             return new KafkaRecordPageResult.Read(KafkaRecordRead.Without(KafkaRecordReadStatus.Stopped, KafkaStudioText.ReadFailed), grant);
         }

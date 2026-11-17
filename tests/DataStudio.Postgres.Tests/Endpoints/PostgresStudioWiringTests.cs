@@ -1,8 +1,6 @@
 using System.Reflection;
 using System.Security.Claims;
 
-using DataStudio.Marten.Tests.Support;
-using DataStudio.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
@@ -11,7 +9,6 @@ using Npgsql;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Health.Export;
-using DataStudio.Postgres.Services.Live;
 using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
 
@@ -51,11 +48,6 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         object[] owners =
         [
             scope.GetRequiredService<StudioActionLog>(),
-            scope.GetRequiredService<IStudioScopeCatalog>(),
-            scope.GetRequiredService<StudioState>(),
-            scope.GetRequiredService<INavIndicatorService>(),
-            scope.GetRequiredService<StudioLiveUpdatesFactory>(),
-            scope.GetRequiredService<StudioLiveUpdatesFactory>().Create(),
             scope.GetRequiredService<HealthExportRunner>(),
         ];
 
@@ -63,14 +55,13 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         {
             FieldInfo[] words = [.. owner.GetType()
                 .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                .Where(static x => x.FieldType == typeof(StudioProduct) || x.FieldType == typeof(StudioText) || x.FieldType == typeof(StudioLiveLog))];
+                .Where(static x => x.FieldType == typeof(StudioText))];
 
             words.Should().NotBeEmpty(owner.GetType().Name + " takes the studio's words");
 
             foreach (FieldInfo field in words)
             {
-                object? value = field.GetValue(owner);
-                (value is StudioProduct.PostgresStudio || ReferenceEquals(value, PostgresStudioText.Instance) || SaysPostgresStudio(value as StudioLiveLog))
+                ReferenceEquals(field.GetValue(owner), PostgresStudioText.Instance)
                     .Should().BeTrue(owner.GetType().Name + "." + field.Name + " is PostgresStudio's, not MartenStudio's");
             }
         }
@@ -79,22 +70,6 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         scope.GetRequiredService<IStudioSettings>().Text.Should().BeSameAs(PostgresStudioText.Instance);
     }
 
-    /// <summary>
-    /// Whether a live-update log speaks in Postgres Studio's words. The log closes over the container's throttle, so it is no longer one shared
-    /// instance to compare by reference: its first line, the Debug one a failed tick writes, names the product.
-    /// </summary>
-    private static bool SaysPostgresStudio(StudioLiveLog? log)
-    {
-        if (log is null)
-        {
-            return false;
-        }
-
-        CapturingLoggerProvider captured = new();
-        log.LiveUpdateFailed(captured.CreateFactory().CreateLogger("probe"), new InvalidOperationException("probe"));
-
-        return captured.Entries.Should().ContainSingle().Which.Message.Contains("Postgres Studio", StringComparison.Ordinal);
-    }
     [Fact]
     public void A_health_check_registered_without_the_studio_names_AddPostgres()
     {
