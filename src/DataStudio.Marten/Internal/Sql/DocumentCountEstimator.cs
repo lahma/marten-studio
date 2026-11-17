@@ -22,6 +22,9 @@ namespace DataStudio.Marten.Internal.Sql;
 /// </remarks>
 internal static class DocumentCountEstimator
 {
+    /// <summary>The option that sets the exact-count threshold, as a Marten host's registration spells it: the note of a declined count names it.</summary>
+    internal const string ExactCountOption = nameof(MartenOptions) + "." + nameof(MartenOptions.ExactCountThreshold);
+
     extension(CountEstimator estimator)
     {
         /// <summary>

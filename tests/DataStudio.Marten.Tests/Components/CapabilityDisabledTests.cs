@@ -43,4 +43,27 @@ public class CapabilityDisabledTests
         text.Should().Contain("RunSql").And.Contain("BrowseDatabase");
         text.Should().NotContain("every mutating operation off");
     }
+
+    /// <summary>
+    /// The read-only sentence is read whole in each of the three cases (REVIEW-V2-E, finding 2): the shell's switch turns every module's
+    /// capabilities off, the module's turns off the Marten pages', and both is the shell's. A word fused to the next ("off:the") fails it.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, "DataStudioOptions.ReadOnly", "every capability off: the mutating operations")]
+    [InlineData(false, true, "MartenOptions.ReadOnly", "every capability of the Marten pages off: the mutating operations")]
+    [InlineData(true, true, "DataStudioOptions.ReadOnly", "every capability off: the mutating operations")]
+    public void The_read_only_sentence_reads_whole_in_each_of_the_three_cases(bool shell, bool module, string option, string turnsOff)
+    {
+        using var context = new StudioComponentContext();
+        context.Options.Capabilities = MartenCapabilities.All();
+        context.Options.ReadOnly = module;
+        context.ShellOptions.ReadOnly = shell;
+
+        var note = context.Render<CapabilityDisabled>(parameters => parameters
+            .Add(x => x.Capability, nameof(StudioCapability.BrowseDatabase)));
+
+        string text = System.Text.RegularExpressions.Regex.Replace(note.Find(".ms-capability-disabled").TextContent, @"\s+", " ");
+
+        text.Should().Contain(option + " is true, which turns " + turnsOff + ", and the reads authorized like writes");
+    }
 }

@@ -264,7 +264,7 @@ internal sealed partial class ProjectionDataService
         await using HealthConnection connection = new(resolved.Target);
         HealthSqlRunner sql = new(connection, sessionOptions, observer: null);
         HealthCheckContext context = new(
-            resolved, settings, MartenStudioRuntime.Current, NoServices.Instance, sql, DateTimeOffset.UtcNow,
+            resolved, settings, MartenHealthRuntime.Current, NoServices.Instance, sql, DateTimeOffset.UtcNow,
             new HealthSweepMemo(), cancellationToken);
 
         EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);

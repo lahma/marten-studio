@@ -64,7 +64,8 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     public long ExactRefusedAbove { get; init; }
 
     /// <summary>
-    /// A sentence to use in place of the threshold one, for a count declined on some other ground.
+    /// The sentence a refused count carries, from its caller: the threshold's, naming the caller's own option, or one for a count
+    /// declined on some other ground.
     /// </summary>
     /// <remarks>
     /// The rail declines a count for a second reason — a never-analysed table whose heap already occupies
@@ -81,13 +82,11 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     /// it, and two hand-written versions of the same sentence drift. It names the option so that the
     /// person reading it knows which knob turns it.
     /// </remarks>
-    public string? Reason => IsExactRefused
-        ? ExactRefusedNote ?? RefusedAboveNote(ExactRefusedAbove, "MartenOptions.ExactCountThreshold")
-        : null;
+    public string? Reason => IsExactRefused ? ExactRefusedNote : null;
 
     /// <summary>
-    /// The threshold's sentence, naming the option as the studio's own registration spells it - the Marten module's when a
-    /// count carries no note of its own, which is what <see cref="Reason" /> says for its documents.
+    /// The threshold's sentence, naming the option as the module's own registration spells it. Every caller that refuses a count says
+    /// which option it is, because only the caller knows its module's options type; this project holds no default.
     /// </summary>
     /// <param name="threshold">The threshold that declined the upgrade.</param>
     /// <param name="option">The option that sets it: <c>PostgresOptions.ExactCountThreshold</c>.</param>
@@ -111,8 +110,8 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     /// </remarks>
     /// <param name="cheap">The estimate, or <see cref="Unknown"/>.</param>
     /// <param name="threshold">The threshold that declined the upgrade.</param>
-    /// <param name="note">A sentence to use instead of the threshold one, when the ground was different.</param>
-    public static DocumentCount RefusedExact(DocumentCount cheap, long threshold, string? note = null) =>
+    /// <param name="note">What the screen says of it: <see cref="RefusedAboveNote" /> for the threshold, or a sentence of its own when the ground was different.</param>
+    public static DocumentCount RefusedExact(DocumentCount cheap, long threshold, string note) =>
         cheap with { IsExactRefused = true, ExactRefusedAbove = threshold, ExactRefusedNote = note };
 }
 
@@ -379,13 +378,17 @@ internal sealed class CountEstimator
     /// <param name="connection">An open connection.</param>
     /// <param name="schema">The table's schema.</param>
     /// <param name="table">The table.</param>
+    /// <param name="exactCountOption">The caller's option that sets the threshold, as its registration spells it, for the sentence of a declined count.</param>
     /// <param name="cancellationToken">The usual.</param>
     public async Task<DocumentCount> EstimateOrCountAsync(
         NpgsqlConnection connection,
         string schema,
         string table,
+        string exactCountOption,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(exactCountOption);
+
         (DocumentCount estimate, var pages) = await EstimateWithPagesAsync(connection, schema, table, cancellationToken)
             .ConfigureAwait(false);
 
@@ -401,7 +404,7 @@ internal sealed class CountEstimator
 
         return await MayCountExactlyAsync(connection, schema, table, estimate, cancellationToken).ConfigureAwait(false)
             ? await CountExactAsync(connection, schema, table, cancellationToken).ConfigureAwait(false)
-            : DocumentCount.RefusedExact(DocumentCount.Unknown, ExactCountThreshold);
+            : DocumentCount.RefusedExact(DocumentCount.Unknown, ExactCountThreshold, DocumentCount.RefusedAboveNote(ExactCountThreshold, exactCountOption));
     }
 
     /// <summary>The whole table's exact <c>count(*)</c>, for a table that has no scope to narrow by.</summary>

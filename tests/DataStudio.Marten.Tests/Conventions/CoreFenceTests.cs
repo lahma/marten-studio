@@ -396,7 +396,10 @@ public class CoreFenceTests
             declaredIn[renamed].Should().ContainSingle().Which.Should().Match<string>(static x => IsShared(x), "{0} moved and was renamed with its file", renamed);
         }
 
-        declaredIn.Keys.Should().Contain(static x => x.StartsWith("MartenStudio", StringComparison.Ordinal), "MartenStudio's own MartenStudio* types are read, or the rule reads nothing");
+        // Since v2 no type of any module carries the product's old name either (the last, MartenStudioRuntime, became MartenHealthRuntime): the
+        // rule reads the Marten module's own types, so it is not vacuous, and none of them is named for MartenStudio.
+        declaredIn.Should().ContainKey("MartenHealthRuntime", "the Marten module's own types are read, or the rule reads nothing");
+        declaredIn.Keys.Should().NotContain(static x => x.StartsWith("MartenStudio", StringComparison.Ordinal), "the product is Data Studio and the module is Marten");
     }
 
     /// <summary>

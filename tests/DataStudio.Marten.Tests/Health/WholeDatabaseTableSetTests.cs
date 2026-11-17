@@ -78,7 +78,7 @@ public class WholeDatabaseTableSetTests
             store,
             store.Storage.Database),
         MartenSettings.Of(options),
-        MartenStudioRuntime.Current,
+        MartenHealthRuntime.Current,
         services,
         new HealthSqlRunner(new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
         Now,

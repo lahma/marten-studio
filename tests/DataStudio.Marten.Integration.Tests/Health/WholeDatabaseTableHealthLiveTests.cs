@@ -566,7 +566,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
                 host.Store,
                 host.Store.Storage.Database),
             scope.ServiceProvider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>(),
-            DataStudio.Marten.Services.Configuration.MartenStudioRuntime.Current,
+            DataStudio.Marten.Services.Configuration.MartenHealthRuntime.Current,
             scope.ServiceProvider,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
             DateTimeOffset.UtcNow,

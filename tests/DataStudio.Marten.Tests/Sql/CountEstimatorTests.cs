@@ -59,7 +59,7 @@ public class CountEstimatorTests
     [Fact]
     public void A_declined_exact_count_keeps_the_estimate_and_names_the_option()
     {
-        DocumentCount declined = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000);
+        DocumentCount declined = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000, DocumentCount.RefusedAboveNote(100_000, "MartenOptions.ExactCountThreshold"));
 
         declined.IsExactRefused.Should().BeTrue();
         declined.IsEstimate.Should().BeTrue("the estimate is still the answer");
@@ -80,7 +80,7 @@ public class CountEstimatorTests
     [Fact]
     public void A_declined_count_on_a_never_analysed_table_is_still_unknown()
     {
-        DocumentCount declined = DocumentCount.RefusedExact(DocumentCount.Unknown, 100_000);
+        DocumentCount declined = DocumentCount.RefusedExact(DocumentCount.Unknown, 100_000, DocumentCount.RefusedAboveNote(100_000, "MartenOptions.ExactCountThreshold"));
 
         declined.IsUnknown.Should().BeTrue();
         declined.IsUnavailable.Should().BeTrue("a kind of 'no number', as Unknown always was");
@@ -101,6 +101,23 @@ public class CountEstimatorTests
 
         declined.Reason.Should().Be("Because of something else.");
         declined.Reason.Should().NotContain("ExactCountThreshold");
+    }
+
+    /// <summary>
+    /// The note is the caller's (REVIEW-V2-E, finding 4): a declined count says the option its caller names, and the shared estimator
+    /// holds no module's option as a default, so no later caller can print one module's option in another's host.
+    /// </summary>
+    [Fact]
+    public void A_declined_count_says_the_option_its_caller_names_and_the_shared_estimator_names_none()
+    {
+        DocumentCount.RefusedExact(
+                DocumentCount.Estimate(5_000_000), 100_000, DocumentCount.RefusedAboveNote(100_000, "PostgresOptions.ExactCountThreshold"))
+            .Reason.Should().Contain("PostgresOptions.ExactCountThreshold").And.NotContain("Marten");
+
+        DocumentCountEstimator.ExactCountOption.Should().Be("MartenOptions.ExactCountThreshold");
+
+        File.ReadAllText(Conventions.RepositoryRoot.Combine("src", "DataStudio.Postgres", "Internal", "Sql", "CountEstimator.cs"))
+            .Should().NotContain("MartenOptions", "the shared estimator is the caller's option's last word, never its first");
     }
 
     /// <summary>A count nobody declined has nothing to say.</summary>

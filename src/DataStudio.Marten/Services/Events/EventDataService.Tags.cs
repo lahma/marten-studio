@@ -86,7 +86,7 @@ internal sealed partial class EventDataService
                     if (!crossTenant)
                     {
                         DocumentCount counted = await estimator
-                            .EstimateOrCountAsync(connection, table.Schema, type.Table, cancellationToken).ConfigureAwait(false);
+                            .EstimateOrCountAsync(connection, table.Schema, type.Table, DocumentCountEstimator.ExactCountOption, cancellationToken).ConfigureAwait(false);
 
                         rows = ToEventStoreCount(counted);
                         note = counted.Reason;
@@ -108,7 +108,7 @@ internal sealed partial class EventDataService
 
             EventStoreCount versionRows = version.Exists && !crossTenant
                 ? ToEventStoreCount(await estimator
-                    .EstimateOrCountAsync(connection, table.Schema, EventTagModel.VersionTable, cancellationToken)
+                    .EstimateOrCountAsync(connection, table.Schema, EventTagModel.VersionTable, DocumentCountEstimator.ExactCountOption, cancellationToken)
                     .ConfigureAwait(false))
                 : EventStoreCount.Unknown;
 

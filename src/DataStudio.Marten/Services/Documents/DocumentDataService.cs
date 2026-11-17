@@ -185,7 +185,10 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             ? await estimator
                 .CountExactAsync(connection, table, tenantId, deleted, commandTimeout: null, cancellationToken)
                 .ConfigureAwait(false)
-            : DocumentCount.RefusedExact(estimate, estimator.ExactCountThreshold);
+            : DocumentCount.RefusedExact(
+                estimate,
+                estimator.ExactCountThreshold,
+                DocumentCount.RefusedAboveNote(estimator.ExactCountThreshold, DocumentCountEstimator.ExactCountOption));
     }
 
     /// <inheritdoc />

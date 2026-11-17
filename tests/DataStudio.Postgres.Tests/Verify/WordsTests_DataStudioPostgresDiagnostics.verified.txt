@@ -340,7 +340,7 @@ the data source's
 The statements this database runs, their counters and their text, need PostgresDiagnosticsOptions.Capabilities.ViewDatabaseActivity.
 
 [StatementsOnSessionsPage]
-The statements themselves are returned only when the call sets IncludeActivity = true.
+Each session's process id, role, application and client are returned only when the call sets IncludeActivity = true.
 
 [StatementsStorePolicyDenial]
 Your account may not see this database's statements. The source policy (PostgresDiagnosticsOptions.SourceAuthorizationPolicy) refused this data source and database.

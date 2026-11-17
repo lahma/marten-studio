@@ -300,12 +300,16 @@ internal sealed class StudioText
     // ---------------------------------------------------------------------------------------------------------------
     // Health.
 
-    /// <summary>The sentence pointing at Database › Sessions for the statements a finding counts.</summary>
+    /// <summary>
+    /// What a session finding (C04, C05, C06) says of the sessions it counts. A studio points at Database › Sessions, where a visitor
+    /// with the capability reads their statements. A host with no studio has no such page, and the finding carries no statement: what
+    /// <c>IncludeActivity</c> adds is each session's process id, role, application and client, which is all the sentence names.
+    /// </summary>
     public string StatementsOnSessionsPage =>
         HasVisitors
             ? "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
               + "masked for the schemas you may not see."
-            : "The statements themselves are " + ActivityReturnedOnRequest + ".";
+            : "Each session's process id, role, application and client are " + ActivityReturnedOnRequest + ".";
 
     /// <summary>The comment above a server setting in a remedy: <c>A server setting, not a StoreOptions one</c>.</summary>
     public required string ServerSettingComment { get; init; }

@@ -1179,7 +1179,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext();
         context.WithPersistedState(
-            "MartenStudio.Preferences",
+            "DataStudio.Preferences",
             new { Theme = "dark", TimeZoneId = "UTC" });
 
         var layout = RenderLayout(context);

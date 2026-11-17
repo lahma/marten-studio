@@ -6,6 +6,7 @@ using DataStudio.Postgres.Services.Aurora;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Replication;
 using DataStudio.Postgres.Services.Server;
+using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Postgres.Services.Health.Checks;
 
@@ -221,7 +222,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             return AuroraView(facts, aurora);
         }
 
-        return facts.Role.InRecovery ? StandbyView(facts, evaluation) : PrimaryView(facts);
+        return facts.Role.InRecovery ? StandbyView(facts, evaluation) : PrimaryView(facts, evaluation.Text);
     }
 
     /// <summary>The variant of a finding about Aurora's readers (A3).</summary>
@@ -407,7 +408,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         + (reading.Behind is { } time ? ", " + SessionText.Duration(time) + " behind" : string.Empty)
         + (reading.Detail is { Length: > 0 } detail ? ", " + detail : string.Empty);
 
-    private static HealthVerdict PrimaryView(StandbyLagFacts facts)
+    private static HealthVerdict PrimaryView(StandbyLagFacts facts, StudioText text)
     {
         StandbySnapshot standbys = facts.Standbys!;
 
@@ -452,8 +453,8 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             + "replay_lag, which is empty once it has caught up and nothing new arrives - so an idle primary never makes it grow. "
             + "A known limit: a standby that delays replay on purpose (recovery_min_apply_delay) shows that delay here as lag - "
             + "an hour's delay reads as Critical - because the delay is the standby's own setting, which cannot be read from the "
-            + "primary; a data source that reaches the standby judges it there, beyond its delay. Standbys are named only with "
-            + "ViewDatabaseActivity.",
+            + "primary; a data source that reaches the standby judges it there, beyond its delay. A standby's name and address are "
+            + text.ActivityShownOnlyWith + ".",
             [new HealthEvidence("Measured on", "the primary, in pg_stat_replication"), new HealthEvidence("Platform", facts.Server.Platform.Name)]);
 
         string? note = Join(Join(unreadable, capped), others);

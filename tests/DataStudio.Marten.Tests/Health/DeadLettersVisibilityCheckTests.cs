@@ -129,7 +129,7 @@ public class DeadLettersVisibilityCheckTests
                     store,
                     store.Storage.Database),
                 MartenSettings.Of(new MartenOptions { IsDocumentTypeVisible = isVisible }),
-                MartenStudioRuntime.Current,
+                MartenHealthRuntime.Current,
                 services,
                 new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
                 Now,

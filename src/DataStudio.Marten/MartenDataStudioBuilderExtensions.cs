@@ -154,7 +154,7 @@ public static class MartenDataStudioBuilderExtensions
         services.TryAddSingleton<IStatementClassifier>(MartenStatementClassifier.Instance);
         services.TryAddSingleton<IHorizonContributor, MartenHorizonContributor>();
         services.TryAddSingleton<IStudioRuntime>(static provider =>
-            new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
+            new MartenHealthRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
 

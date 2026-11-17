@@ -13,9 +13,10 @@ internal static partial class ProductNameScan
     /// <summary>
     /// The 1.x names no sentence, title, credit, tile or heading says any more: the product is Data Studio, and a module is Marten, Postgres or Kafka.
     /// Both spellings of each - the product's ("Marten Studio") and the type's (<c>MartenStudio</c>) - because a message that names a type is read too.
-    /// A name is a name when nothing that could continue an identifier follows it (<c>MartenDescriptor</c> and <c>KStudioValue</c> are the
-    /// types' and members', which a Razor file's code names and a visitor never reads), and <c>KStudio</c> must begin a word, so that nothing
-    /// that merely ends in it is one.
+    /// A spelled name ("Marten Studio", "Postgres Studio") is prose and is a name whatever follows it, "Marten Studios" included; a
+    /// joined one (<c>MartenStudio</c>) is a name when nothing that could continue an identifier follows it (<c>MartenDescriptor</c> and
+    /// <c>KStudioValue</c> are the types' and members', which a Razor file's code names and a visitor never reads), and <c>KStudio</c> must begin a
+    /// word, so that nothing that merely ends in it is one.
     /// </summary>
     public static readonly Regex Names = NamesRegex();
 
@@ -28,15 +29,12 @@ internal static partial class ProductNameScan
     [
         ("src/DataStudio.Postgres/Services/Health/HealthMutes.cs", "PostgresStudio.Health.MuteKeys.v1",
             "Persisted: the data-protection purpose a mute's key is protected under, so a new name would orphan every mute a host has saved"),
-        ("src/DataStudio/Components/Layout/StudioLayout.razor", "MartenStudio.Preferences",
-            "The key the prerendered theme and time zone are handed to the circuit under, beside the ms_theme and ms_tz cookies (which carry no product "
-            + "name and keep theirs): kept so that a visitor's saved theme survives, as the packet that renamed the words decided"),
         ("*", "martenStudio",
             "The browser global studio.js defines and the interop calls name (martenStudio.prefs, .clipboard, .dialog ...): one identifier on both sides, "
             + "not a sentence a visitor reads, and kept so that a host's own script that reaches it keeps working"),
     ];
 
-    [GeneratedRegex(@"(?:[Mm]arten ?Studio|Postgres ?Studio|\bKStudio)(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
+    [GeneratedRegex(@"[Mm]arten Studio|Postgres Studio|(?:[Mm]artenStudio|PostgresStudio|\bKStudio)(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
     private static partial Regex NamesRegex();
 
     [GeneratedRegex(@"@\*.*?\*@|<!--.*?-->|/\*.*?\*/", RegexOptions.Singleline | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]

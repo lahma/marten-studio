@@ -318,7 +318,7 @@ public class StudioRegistrationTests
         [typeof(IDiagnosticsSettings)] = typeof(MartenSettings),
         [typeof(IStudioSettings)] = typeof(MartenSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
-        [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
+        [typeof(IStudioRuntime)] = typeof(MartenHealthRuntime),
 
         // D34: the shell's descriptor is composed from the registered modules, the database among them, when first resolved.
         [typeof(StudioShellDescriptor)] = typeof(StudioShellDescriptor),

@@ -313,7 +313,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
                 host.Store,
                 host.Store.Storage.Database),
             MartenSettings.Of(new MartenOptions()),
-            MartenStudioRuntime.Current,
+            MartenHealthRuntime.Current,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
             DateTimeOffset.UtcNow,

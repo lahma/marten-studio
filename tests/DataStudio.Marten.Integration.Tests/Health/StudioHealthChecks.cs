@@ -12,5 +12,5 @@ namespace DataStudio.Marten.Integration.Tests.Health;
 internal static class StudioHealthChecks
 {
     /// <summary>The registry.</summary>
-    public static HealthCheckRegistry Registry { get; } = new(MartenDescriptor.Instance, MartenStudioRuntime.Current);
+    public static HealthCheckRegistry Registry { get; } = new(MartenDescriptor.Instance, MartenHealthRuntime.Current);
 }

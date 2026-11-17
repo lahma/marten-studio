@@ -616,10 +616,10 @@ internal sealed partial class EventDataService : IEventDataService
             };
 
             DocumentCount streams = await estimator
-                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
+                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.StreamsTable, DocumentCountEstimator.ExactCountOption, cancellationToken)
                 .ConfigureAwait(false);
             DocumentCount events = await estimator
-                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
+                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.EventsTable, DocumentCountEstimator.ExactCountOption, cancellationToken)
                 .ConfigureAwait(false);
 
             return new EventStoreCounts(Convert(streams), Convert(events), TablesExist: true, Error: null);

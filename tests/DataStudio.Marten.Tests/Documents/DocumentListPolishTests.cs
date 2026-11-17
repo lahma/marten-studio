@@ -270,7 +270,7 @@ public class DocumentListPolishTests
         [
             FakeDocuments.Collection("customer") with
             {
-                Count = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000),
+                Count = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000, DocumentCount.RefusedAboveNote(100_000, "MartenOptions.ExactCountThreshold")),
             },
         ]);
 

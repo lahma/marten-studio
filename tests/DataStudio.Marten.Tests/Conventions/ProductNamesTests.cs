@@ -87,6 +87,16 @@ public class ProductNamesTests
         ProductNameScan.Names.Matches(text).Select(static x => x.Value).Should().Equal(name);
     }
 
+    /// <summary>The plural of a spelled name is the name too: "Marten Studios" says the old product as much as "Marten Studio's" does.</summary>
+    [Fact]
+    public void The_scan_finds_the_plural_of_a_spelled_name()
+    {
+        string text = string.Join('\n', ProductNameScan.TextOf("f.cs", "string s = \"two Marten Studios and the Postgres Studios\";"));
+
+        ProductNameScan.Names.Matches(text).Select(static x => x.Value).Should().Equal("Marten Studio", "Postgres Studio");
+        ProductNameScan.Names.IsMatch("MartenStudios").Should().BeFalse("a joined name continued by a letter is an identifier");
+    }
+
     [Theory]
     [InlineData("// Marten Studio in a comment\nint x;")]
     [InlineData("/// <summary>Postgres Studio</summary>\nclass C { }")]

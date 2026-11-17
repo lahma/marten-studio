@@ -51,7 +51,7 @@ public class HealthSeamTests
                 store,
                 store.Storage.Database),
             MartenSettings.Of(new MartenOptions()),
-            MartenStudioRuntime.Current,
+            MartenHealthRuntime.Current,
             services,
             new HealthSqlRunner(new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
             Now,
@@ -217,8 +217,8 @@ public class HealthSeamTests
     {
         // The probe table is empty at 1.1.0, so the made-up feature (ScriptedStudioRuntime.Feature, Marten 9.99) is judged
         // through a runtime that adds it to the table.
-        MartenStudioRuntime floor = new(ScriptedStudioRuntime.HostWithout);
-        MartenStudioRuntime ahead = new(ScriptedStudioRuntime.HostWithIt);
+        MartenHealthRuntime floor = new(ScriptedStudioRuntime.HostWithout);
+        MartenHealthRuntime ahead = new(ScriptedStudioRuntime.HostWithIt);
         RuntimeFeature feature = ScriptedStudioRuntime.Feature;
 
         floor.FindFeature(ScriptedStudioRuntime.FeatureName).Should().BeNull("the probe table is empty");
@@ -236,7 +236,7 @@ public class HealthSeamTests
     [Fact]
     public void The_registry_a_studio_builds_holds_every_check_in_its_descriptors_assemblies()
     {
-        HealthCheckRegistry registry = new(MartenDescriptor.Instance, MartenStudioRuntime.Current);
+        HealthCheckRegistry registry = new(MartenDescriptor.Instance, MartenHealthRuntime.Current);
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
             MartenDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
@@ -262,7 +262,7 @@ public class HealthSeamTests
         provider.GetRequiredService<IHealthTableRemedies>().Should().BeSameAs(MartenHealthRemedyProvider.Instance);
         provider.GetRequiredService<IHealthPlanAdvisor>().Should().BeSameAs(MartenStatementPlanAdvisor.Instance);
         provider.GetRequiredService<IHorizonContributor>().Should().BeOfType<MartenHorizonContributor>();
-        provider.GetRequiredService<IStudioRuntime>().Should().Be(new MartenStudioRuntime(Floor),
+        provider.GetRequiredService<IStudioRuntime>().Should().Be(new MartenHealthRuntime(Floor),
             "a test's made-up runtime, registered first, is the one the studio judges features against");
     }
 

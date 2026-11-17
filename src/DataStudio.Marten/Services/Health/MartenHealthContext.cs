@@ -47,7 +47,7 @@ internal static class MartenHealthContext
         public IMartenDatabase Database => context.Scope.Database;
 
         /// <summary>The Marten this host runs, and its light-up probes.</summary>
-        public MartenRuntime Runtime => (context.StudioRuntime as MartenStudioRuntime)?.Runtime ?? MartenRuntime.Current;
+        public MartenRuntime Runtime => (context.StudioRuntime as MartenHealthRuntime)?.Runtime ?? MartenRuntime.Current;
 
         /// <summary>
         /// The studio's settings, under the name the Marten module's checks read them by - the interval and the document-type
@@ -60,7 +60,7 @@ internal static class MartenHealthContext
     extension(HealthEvaluation evaluation)
     {
         /// <summary>The Marten the host runs, for a remedy or a judgement that needs a newer one.</summary>
-        public MartenRuntime Runtime => (evaluation.StudioRuntime as MartenStudioRuntime)?.Runtime ?? MartenRuntime.Current;
+        public MartenRuntime Runtime => (evaluation.StudioRuntime as MartenHealthRuntime)?.Runtime ?? MartenRuntime.Current;
 
         /// <summary>
         /// An evaluation at <paramref name="now" /> as the Marten module's sweep makes one, for a unit test: against
@@ -71,7 +71,7 @@ internal static class MartenHealthContext
         /// <param name="runtime">The Marten the host runs.</param>
         /// <param name="history">The history, or none.</param>
         public static HealthEvaluation At(DateTimeOffset now, MartenRuntime? runtime, HealthHistoryView? history = null) =>
-            new(now, new MartenStudioRuntime(runtime ?? MartenRuntime.Current), history ?? HealthHistoryView.Empty)
+            new(now, new MartenHealthRuntime(runtime ?? MartenRuntime.Current), history ?? HealthHistoryView.Empty)
             {
                 TableRemedies = MartenHealthRemedyProvider.Instance,
                 PlanAdvisor = MartenStatementPlanAdvisor.Instance,

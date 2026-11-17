@@ -469,7 +469,7 @@ public class DocumentsPageTests
             context.Data.Rail = FakeDocuments.Rail();
             context.Data.Page = FakeDocuments.Page() with
             {
-                Estimate = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000),
+                Estimate = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000, DocumentCount.RefusedAboveNote(100_000, "MartenOptions.ExactCountThreshold")),
             };
 
             var page = Render(context, "customer");

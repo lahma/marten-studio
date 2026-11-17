@@ -376,7 +376,7 @@ public class ProgressionAheadOfSequenceCheckTests
                 store,
                 store.Storage.Database),
             MartenSettings.Of(new MartenOptions()),
-            MartenStudioRuntime.Current,
+            MartenHealthRuntime.Current,
             services,
             new HealthSqlRunner(
                 new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)),

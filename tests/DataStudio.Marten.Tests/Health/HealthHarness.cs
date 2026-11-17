@@ -149,7 +149,7 @@ internal sealed class ScriptedStudioRuntime(DataStudio.Marten.Services.Configura
 {
     public const string FeatureName = "ScriptedFeature";
 
-    private readonly DataStudio.Marten.Services.Configuration.MartenStudioRuntime inner = new(runtime);
+    private readonly DataStudio.Marten.Services.Configuration.MartenHealthRuntime inner = new(runtime);
 
     /// <summary>A feature of Marten 9.99, built over the probe table's private constructor.</summary>
     public static DataStudio.Marten.Services.Configuration.RuntimeFeature Feature { get; } =
@@ -333,7 +333,7 @@ internal sealed class HealthHarness : IAsyncDisposable
 
         services.AddSingleton(HealthCheckRegistry.ForTypes(
             (checks ?? ScriptedChecks).Select(type => (type, sourceKinds?.Invoke(type))),
-            studioRuntime ?? DataStudio.Marten.Services.Configuration.MartenStudioRuntime.Current));
+            studioRuntime ?? DataStudio.Marten.Services.Configuration.MartenHealthRuntime.Current));
 
         if (environment is not null)
         {
