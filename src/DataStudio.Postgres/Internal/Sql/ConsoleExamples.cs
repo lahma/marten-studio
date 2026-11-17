@@ -1,7 +1,7 @@
 namespace DataStudio.Postgres.Internal.Sql;
 
 /// <summary>
-/// The statements PostgresStudio's SQL console offers before anything has run. They are text for the editor - nothing
+/// The statements the Postgres module's SQL console offers before anything has run. They are text for the editor - nothing
 /// runs them until somebody presses Run, through the console's own gate (D13) - and they are written here, where every
 /// statement the studio composes is, because text that reaches an editor is text somebody may press Run on (AGENTS.md
 /// hard rule 4).

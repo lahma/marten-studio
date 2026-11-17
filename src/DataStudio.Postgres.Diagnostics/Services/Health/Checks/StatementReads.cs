@@ -232,7 +232,7 @@ internal static partial class StatementReads
 
     /// <summary>
     /// The fewest guarded calls in the window a guarded write's conflict rate is judged on - the optimistic-concurrency
-    /// check's own floor (T22's <c>MinCalls</c>, a check of MartenStudio's own, which a test holds equal to this), so that
+    /// check's own floor (T22's <c>MinCalls</c>, a check of the Marten module's own, which a test holds equal to this), so that
     /// the read keeps the guarded writes that check will judge and no others.
     /// </summary>
     internal const int GuardedCallsFloor = 1000;

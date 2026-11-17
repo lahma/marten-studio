@@ -32,7 +32,7 @@ internal enum StudioDatabaseCardinality
 /// <para>
 /// This is everything the shared studio needs of a database, and deliberately nothing more: every shared read is
 /// <see cref="CreateConnection" /> plus the studio's own SQL (D6), and the pool checks read <see cref="DataSource" />.
-/// MartenStudio implements it over <c>IMartenDatabase</c>; a plain data source implements it over the host's own
+/// The Marten module implements it over <c>IMartenDatabase</c>; a plain data source implements it over the host's own
 /// <see cref="NpgsqlDataSource" />, and a host-supplied database provider (issue #8, G11) over whatever it enumerates.
 /// </para>
 /// <para>

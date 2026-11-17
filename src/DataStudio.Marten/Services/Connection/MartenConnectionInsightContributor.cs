@@ -14,7 +14,7 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Services.Connection;
 
 /// <summary>
-/// MartenStudio's <see cref="IConnectionInsightContributor" /> (1.1-NP4): the section "How Marten uses this connection", the
+/// The Marten module's <see cref="IConnectionInsightContributor" /> (1.1-NP4): the section "How Marten uses this connection", the
 /// sentences it adds to the page's own hints, and the average size the <c>BUFFER</c> hint judges.
 /// </summary>
 /// <remarks>

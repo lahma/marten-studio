@@ -2,7 +2,7 @@ namespace DataStudio.Postgres.Services.Database;
 
 /// <summary>The declarations of every registered source, or why they could not all be read.</summary>
 /// <remarks>
-/// Read through the studio's <c>IDatabaseDeclarationsSource</c>: MartenStudio's reads every registered
+/// Read through the studio's <c>IDatabaseDeclarationsSource</c>: the Marten module's reads every registered
 /// store's options; a source with no declarations of its own answers an empty classifier.
 /// </remarks>
 /// <param name="Classifier">The classifier over every source, when every source could be read.</param>

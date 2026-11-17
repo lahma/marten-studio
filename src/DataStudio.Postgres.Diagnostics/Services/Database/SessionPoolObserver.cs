@@ -121,7 +121,7 @@ internal sealed record NpgsqlPoolReading(string PoolName, int Idle, int Used, in
 /// <c>db.client.connection.state</c>) and <c>db.client.connection.max</c>, each tagged
 /// <c>db.client.connection.pool.name</c>, with the same kinds and values (<see cref="NpgsqlPoolInstruments" />). The
 /// observer enables whichever of the four the process's Npgsql publishes and recognises a pool and a state by either
-/// tag, so it never asks which Npgsql it runs beside: a host on Npgsql 10 - PostgresStudio's own, or a MartenStudio
+/// tag, so it never asks which Npgsql it runs beside: a host on Npgsql 10 - the Postgres module's own, or a Marten module
 /// host that brings it - is read as one on 9 is, where the old names alone read nothing at all, silently. Their
 /// callbacks read two <c>volatile int</c>s per pool (<c>PoolingDataSource.Statistics</c>) and run only when this
 /// listener calls <see cref="MeterListener.RecordObservableInstruments" />, on the caller's thread, delivering to this

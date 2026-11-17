@@ -83,7 +83,7 @@ internal sealed record DangerousSettingsFacts(
 /// <c>fsync = off</c> as its own ("Neon syncs data to the Neon database storage engine", <i>Postgres compatibility</i>), so on
 /// a server the detector takes for Neon it is a note. Aurora's and Neon's storage replace Postgres's own, but neither
 /// documents what its servers report for <c>full_page_writes</c> (nor Aurora for <c>fsync</c>), so an <c>off</c> there is
-/// Info - "the provider manages durability; Marten Studio cannot verify this setting's meaning" - never Critical
+/// Info - "the provider manages durability; the Marten module cannot verify this setting's meaning" - never Critical
 /// (<see cref="ManagesDurability" />).
 /// </para>
 /// <para>

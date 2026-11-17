@@ -2,13 +2,13 @@ namespace DataStudio.Postgres.Services.Query;
 
 /// <summary>
 /// 1.2-INDEX-A: a studio's own indexes for the Statements page's index advisor, beside the ones every studio reads off a plan
-/// (<see cref="WorkloadIndexCandidates" />) - the seam MartenStudio registers its document-table indexes through, in the shape of
+/// (<see cref="WorkloadIndexCandidates" />) - the seam the Marten module registers its document-table indexes through, in the shape of
 /// <see cref="IPlanInsightContributor" />.
 /// </summary>
 /// <remarks>
 /// <para>
-/// PostgresStudio defines the seam and runs whatever is registered (<c>IEnumerable&lt;IIndexCandidateContributor&gt;</c>, empty in
-/// Postgres Studio); it names nothing a contributor knows (hard rule 16). The advisor calls each once per admitted plan, in
+/// The Postgres module defines the seam and runs whatever is registered (<c>IEnumerable&lt;IIndexCandidateContributor&gt;</c>, empty in
+/// The Postgres module); it names nothing a contributor knows (hard rule 16). The advisor calls each once per admitted plan, in
 /// registration order, each given the previous one's output.
 /// </para>
 /// <para>

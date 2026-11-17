@@ -33,7 +33,7 @@ namespace DataStudio.Postgres.Services.Query;
 /// <para>
 /// <b>Shared by every studio.</b> Nothing here is a store's: the database is the resolved source's own connection
 /// (<see cref="IStudioDatabase.CreateConnection" />), and the statement is sent as it was typed. A studio's own
-/// screens that need a statement planned through the same gate - MartenStudio's Mode A <c>EXPLAIN</c> - go through
+/// screens that need a statement planned through the same gate - the Marten module's Mode A <c>EXPLAIN</c> - go through
 /// <see cref="ExecuteAsync" /> with their own audit action and their own bound values.
 /// </para>
 /// </remarks>

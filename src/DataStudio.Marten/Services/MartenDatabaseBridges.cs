@@ -9,13 +9,13 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten;
 
 /// <summary>
-/// MartenStudio's spellings of the database browser's and Sessions' shared members, whose shared form no longer names a
+/// The Marten module's spellings of the database browser's and Sessions' shared members, whose shared form no longer names a
 /// Marten type - C# 14 static extension members, so that Marten-only code compiles unchanged.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>A bridge, not an API</b>, on <see cref="Services.MartenServiceBridges" />' terms: Marten-only code may keep calling
-/// these; a file bound for the shared assembly must not. Each member lists its callers, every one of them MartenStudio's
+/// these; a file bound for the shared assembly must not. Each member lists its callers, every one of them the Marten module's
 /// own since PS-1e, which deleted the members nothing called any more (<c>SessionLockLabels.For</c>,
 /// <c>DatabaseAccess.DeclareEveryStore</c>, <c>DatabasePoolSettings.IsPoolOf</c>, <c>DatabaseLinks.ToRelationships</c>)
 /// and moved their last test callers onto the members they forwarded to.
@@ -40,7 +40,7 @@ internal static class MartenDatabaseBridges
     extension(DatabaseLinks)
     {
         /// <summary>
-        /// One relation's detail page, with MartenStudio's descriptor. Callers: <c>Schema.razor</c> and
+        /// One relation's detail page, with the Marten module's descriptor. Callers: <c>Schema.razor</c> and
         /// <c>ReferencedBy.razor</c>.
         /// </summary>
         /// <param name="scope">The scope to carry.</param>
@@ -57,7 +57,7 @@ internal static class MartenDatabaseBridges
             DatabaseLinks.ToObject(MartenDescriptor.Instance, scope, schema, name, tab, extra);
 
         /// <summary>
-        /// A relation's Rows tab, with MartenStudio's descriptor. Caller: <c>ReferencedBy.razor</c>.
+        /// A relation's Rows tab, with the Marten module's descriptor. Caller: <c>ReferencedBy.razor</c>.
         /// </summary>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="schema">The relation's schema.</param>

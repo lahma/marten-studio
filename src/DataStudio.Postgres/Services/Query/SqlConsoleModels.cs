@@ -5,7 +5,7 @@ namespace DataStudio.Postgres.Services.Query;
 /// <summary>Which of the Query page's modes a request, a saved query or an example belongs to.</summary>
 /// <remarks>
 /// Shared because the saved-query drawer keys its storage by mode and the SQL console is one of them. A studio
-/// with no document types offers <see cref="Sql" /> alone; MartenStudio's Query page offers all three.
+/// with no document types offers <see cref="Sql" /> alone; the Marten module's Query page offers all three.
 /// </remarks>
 internal enum QueryMode
 {

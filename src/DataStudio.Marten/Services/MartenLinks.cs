@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioLinks" />: every link the shared screens make into Documents, Streams, the feed,
+/// The Marten module's <see cref="IStudioLinks" />: every link the shared screens make into Documents, Streams, the feed,
 /// Projections and Schema, built by the same link builders those screens' own links use.
 /// </summary>
 /// <remarks>

@@ -13,7 +13,7 @@ namespace DataStudio.Kafka.Core.Catalog;
 /// catalog and the window resolver both read through here, so a page and a scan share one answer.
 /// </summary>
 /// <remarks>
-/// The cache key is <c>{cluster}|…</c> and nothing about the visitor: KStudio asks its cluster policy before it calls, and the engine
+/// The cache key is <c>{cluster}|…</c> and nothing about the visitor: the Kafka module asks its cluster policy before it calls, and the engine
 /// answers only what the broker allows this application's principal.
 /// </remarks>
 internal sealed class KafkaWireReads(

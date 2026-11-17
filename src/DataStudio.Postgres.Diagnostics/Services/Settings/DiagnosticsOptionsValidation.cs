@@ -102,7 +102,7 @@ internal static partial class DiagnosticsOptionsValidation
 
     /// <summary>
     /// The accepted checks (issue #35): each key a check code of <paramref name="descriptor" />'s own registry - a Marten code
-    /// in Postgres Studio is unknown - and each reason non-blank and at most <see cref="MaxAcceptedReasonLength" />
+    /// in the Postgres module is unknown - and each reason non-blank and at most <see cref="MaxAcceptedReasonLength" />
     /// characters. A message names the offending key and nothing else: no list of the codes that would have been valid.
     /// </summary>
     /// <param name="builder">The studio's options builder.</param>

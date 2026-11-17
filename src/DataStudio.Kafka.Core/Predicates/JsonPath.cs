@@ -3,7 +3,7 @@ using System.Text;
 
 namespace DataStudio.Kafka.Core.Predicates;
 
-/// <summary>One step of a JSON path (decision 2.1 of D-PAYLOAD). The names avoid PostgresStudio's <c>JsonPathSegment</c>, which KStudio also imports.</summary>
+/// <summary>One step of a JSON path (decision 2.1 of D-PAYLOAD). The names avoid the Postgres module's <c>JsonPathSegment</c>, which the Kafka module also imports.</summary>
 internal abstract record JsonPathStep;
 
 /// <summary>A member of an object, by name. A search compares names exactly; a redaction rule compares them ignoring case.</summary>

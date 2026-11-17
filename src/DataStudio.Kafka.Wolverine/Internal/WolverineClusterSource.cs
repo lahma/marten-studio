@@ -68,7 +68,7 @@ internal sealed class WolverineSourceSettings
 }
 
 /// <summary>
-/// KStudio's view of a Wolverine application's Kafka configuration (D43, decision 5): one cluster per Kafka transport, one per broker-per-tenant
+/// The Kafka module's view of a Wolverine application's Kafka configuration (D43, decision 5): one cluster per Kafka transport, one per broker-per-tenant
 /// registration, and each transport's topics. It reads the built <c>WolverineOptions</c> once, when the cluster registry is first built, and starts,
 /// connects and writes nothing: it reads no message store, envelope table, handler graph or runtime agent, runs none of Wolverine's builder callbacks
 /// and calls no method that completes or inherits configuration. Every failure is a note, never an exception.

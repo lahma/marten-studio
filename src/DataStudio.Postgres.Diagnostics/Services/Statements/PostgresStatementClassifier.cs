@@ -5,7 +5,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Statements;
 
 /// <summary>
-/// Postgres Studio's statement groups (W5-Q1): the statement's verb, and the first table of the data source's judged set it
+/// The Postgres module's statement groups (W5-Q1): the statement's verb, and the first table of the data source's judged set it
 /// names - <c>select · public.orders</c>, <c>insert · public.audit_log</c>, <c>select · other</c>.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace DataStudio.Postgres.Services.Statements;
 /// <b>The table is matched by name, against the set alone</b> (<see cref="StatementReads.Named" />, T02's own rule): the
 /// first table of the set the text names, in the order it names them - for a write, its target. A statement that names none
 /// of them - a catalog read, <c>select 1</c>, a transaction's control - is grouped by its verb with <see cref="Other" />.
-/// MartenStudio's classifier falls back to this one for every statement that is not one of Marten's own shapes.
+/// The Marten module's classifier falls back to this one for every statement that is not one of Marten's own shapes.
 /// </para>
 /// </remarks>
 internal sealed class PostgresStatementClassifier : IStatementClassifier

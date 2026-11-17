@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// KStudio's authorization (D35): the cluster and capability policies, asked about a <see cref="KafkaTopicResource" /> on every call.
+/// The Kafka module's authorization (D35): the cluster and capability policies, asked about a <see cref="KafkaTopicResource" /> on every call.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,7 +15,7 @@ namespace DataStudio.Kafka.Services;
 /// <c>SourceAuthorizationPolicy</c> and <c>WriteAuthorizationPolicy</c> are asked about <c>MartenStoreResource</c> or
 /// <c>PostgresResource</c>, and their handlers are written for those types: handing one a <see cref="KafkaTopicResource" /> under
 /// the same policy name is what D30 forbids. For the same reason the host's <c>StudioAuthorization</c> is not reused through a second
-/// resource factory. With neither KStudio policy set nothing is asked and everything passes.
+/// resource factory. With neither Kafka module policy set nothing is asked and everything passes.
 /// </para>
 /// <para>
 /// <b>What a question asks.</b> A read (no capability) asks <see cref="KafkaOptions.ClusterAuthorizationPolicy" /> with
@@ -25,7 +25,7 @@ namespace DataStudio.Kafka.Services;
 /// three; the visitor comes from the circuit's authentication state, and nothing is remembered beyond one sweep.
 /// </para>
 /// </remarks>
-/// <param name="options">KStudio's options.</param>
+/// <param name="options">The Kafka module's options.</param>
 /// <param name="authorizationService">The application's policy evaluator.</param>
 /// <param name="authenticationStateProvider">Who is asking.</param>
 internal sealed class KafkaAuthorization(
@@ -33,7 +33,7 @@ internal sealed class KafkaAuthorization(
     IAuthorizationService authorizationService,
     AuthenticationStateProvider authenticationStateProvider)
 {
-    /// <summary>Whether any KStudio policy is configured at all.</summary>
+    /// <summary>Whether any Kafka module policy is configured at all.</summary>
     public bool IsEnabled =>
         !string.IsNullOrWhiteSpace(options.Value.ClusterAuthorizationPolicy)
         || !string.IsNullOrWhiteSpace(options.Value.CapabilityAuthorizationPolicy);

@@ -15,7 +15,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// </remarks>
 internal sealed class PostgresSettings : IStudioSettings
 {
-    /// <summary>The four capabilities PostgresStudio offers, in the chip's order.</summary>
+    /// <summary>The four capabilities the Postgres module offers, in the chip's order.</summary>
     internal static IReadOnlyList<StudioCapability> Offered { get; } =
     [
         StudioCapability.RunSql,
@@ -82,7 +82,7 @@ internal sealed class PostgresSettings : IStudioSettings
     public string ReadOnlyOptionName => shell.ReadOnly ? shell.ReadOnlyOptionName : ((IDiagnosticsSettings) this).OptionName("ReadOnly");
 
     /// <inheritdoc />
-    /// <remarks>The four reads authorized like writes; PostgresStudio has no mutating capability.</remarks>
+    /// <remarks>The four reads authorized like writes; the Postgres module has no mutating capability.</remarks>
     public IReadOnlyList<StudioCapability> Capabilities => Offered;
 
     /// <inheritdoc />
@@ -138,12 +138,12 @@ internal sealed class PostgresSettings : IStudioSettings
     public string? SourceLabel => Value.DataSources.Count + Value.DatabaseSources.Count > 0 ? "Source" : null;
 
     /// <inheritdoc />
-    /// <remarks>Always <see langword="null" />: PostgresStudio has no document types, so none can be hidden.</remarks>
+    /// <remarks>Always <see langword="null" />: the Postgres module has no document types, so none can be hidden.</remarks>
     public Func<Type, bool>? IsDocumentTypeVisible => null;
 
     /// <summary>
     /// The <see cref="PostgresCapabilities" /> property behind <paramref name="capability" />. The default arm throws
-    /// rather than answering <see langword="false" />, as MartenStudio's does: a capability this studio does not have is
+    /// rather than answering <see langword="false" />, as the Marten module's does: a capability this studio does not have is
     /// never asked about by shared code, and one asked by mistake must fail a test rather than be silently off.
     /// </summary>
     internal static bool IsConfigured(PostgresCapabilities capabilities, StudioCapability capability)

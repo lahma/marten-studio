@@ -28,8 +28,8 @@ internal sealed record DriverLoggingFacts(ConnectionFacts Connection, string? En
 /// (<c>NpgsqlCommand.LogExecutingCompleted</c>, Npgsql 9.0.4; <c>LogParameters</c> is read there beside the builder's
 /// <c>EnableParameterLogging()</c>), which the studio cannot see, so the finding says "where the data source has a logger factory" and
 /// that <c>EnableParameterLogging()</c> turns it on whatever the keyword says. Marten 9 defaults <c>StoreOptions.DisableNpgsqlLogging</c>
-/// to <see langword="true" /> (V9.57.0), which leaves its data sources without one: Marten Studio's words say so
-/// (<see cref="Settings.StudioText.LogParametersLoggerClause" />); Postgres Studio's say nothing of it.
+/// to <see langword="true" /> (V9.57.0), which leaves its data sources without one: the Marten module's words say so
+/// (<see cref="Settings.StudioText.LogParametersLoggerClause" />); the Postgres module's say nothing of it.
 /// </para>
 /// <para>
 /// <b>Only in Production, as the host says.</b> The environment is <c>IHostEnvironment.EnvironmentName</c>, as K01 and S04 read it;

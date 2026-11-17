@@ -11,7 +11,7 @@ namespace DataStudio.Marten.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// MartenStudio's <see cref="ResolvedSource" />: every Marten-only service keeps reading <see cref="Registration" />,
+/// The Marten module's <see cref="ResolvedSource" />: every Marten-only service keeps reading <see cref="Registration" />,
 /// <see cref="Store" /> and <see cref="Database" />, and shared code reads the base record's <c>Source</c> and
 /// <c>Target</c>, which are the same registration and the same database seen through the shared seam.
 /// </para>
@@ -66,7 +66,7 @@ internal sealed record ResolvedScope(
 internal static class MartenScopeResources
 {
     /// <summary>
-    /// <paramref name="scope" /> as the resource an authorization handler is asked about: MartenStudio's public
+    /// <paramref name="scope" /> as the resource an authorization handler is asked about: the Marten module's public
     /// <see cref="MartenStoreResource" />.
     /// </summary>
     /// <param name="scope">The scope.</param>

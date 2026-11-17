@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Services.Query;
 /// read-only transaction produces, and saying so out loud is the difference between "the studio is
 /// broken" and "the studio is doing exactly what D13 says it does". <c>57014</c> is the statement timeout,
 /// and naming the number of seconds turns it into something the host can change
-/// (<c>DataStudio.Postgres.Services.Settings.IStudioSettings.QueryTimeout</c>, MartenStudio's <c>QueryTimeout</c>) rather than a mystery.
+/// (<c>DataStudio.Postgres.Services.Settings.IStudioSettings.QueryTimeout</c>, the Marten module's <c>QueryTimeout</c>) rather than a mystery.
 /// </remarks>
 internal static class QuerySqlErrors
 {

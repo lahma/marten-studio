@@ -7,7 +7,7 @@ namespace DataStudio.Postgres.Services.Sources;
 /// <remarks>
 /// <para>
 /// A record rather than an interface so that a studio's own screens can take a richer subtype without a cast at every
-/// use: MartenStudio's <c>ResolvedScope</c> derives from this and adds the store and its database, and its Marten-only
+/// use: the Marten module's <c>ResolvedScope</c> derives from this and adds the store and its database, and its Marten-only
 /// code keeps reading those. Shared code takes this type and nothing more specific, which is why the database is named
 /// <see cref="Target" /> here - a subtype is free to name its own richer database <c>Database</c>.
 /// </para>
@@ -24,7 +24,7 @@ internal record ResolvedSource(StudioScope Scope, StudioSourceRegistration Sourc
     /// <summary>The source's registration.</summary>
     /// <remarks>
     /// Get-only, so that <c>with { Source = … }</c> does not compile: a subtype derives this from its own richer
-    /// members (MartenStudio's <c>ResolvedScope</c> from its <c>Registration</c>), and a copy that replaced only this
+    /// members (the Marten module's <c>ResolvedScope</c> from its <c>Registration</c>), and a copy that replaced only this
     /// would show shared code one source and the subtype's own code another.
     /// </remarks>
     public StudioSourceRegistration Source { get; } = Source;

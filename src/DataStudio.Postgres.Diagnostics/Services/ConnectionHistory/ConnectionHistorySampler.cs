@@ -720,7 +720,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
     }
 
     /// <summary>
-    /// The kept session's name: the studio's own name with "history" after the product (<c>orders-api (Postgres Studio history)</c>),
+    /// The kept session's name: the studio's own name with "history" after the product (<c>orders-api (Data Studio history)</c>),
     /// the host's <c>StudioApplicationName</c> with " (history)" after it, or none when the host chose to keep the application's.
     /// </summary>
     internal static string? HistoryName(string? configured, string? connectionString, string product)

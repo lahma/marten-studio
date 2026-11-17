@@ -111,7 +111,7 @@ internal interface IStudioSource
     /// tenant is one this database answers for, and which same-identity instance that tenant was built from.
     /// </summary>
     /// <remarks>
-    /// MartenStudio answers a <c>ResolvedScope</c>, the <see cref="ResolvedSource" /> subtype its own screens take. A source
+    /// The Marten module answers a <c>ResolvedScope</c>, the <see cref="ResolvedSource" /> subtype its own screens take. A source
     /// without tenancy refuses any tenant with <see cref="KeyNotFoundException" /> - the same answer as an unknown one.
     /// </remarks>
     /// <param name="scope">The scope being resolved.</param>

@@ -52,7 +52,7 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
 
     /// <summary>
     /// The feature of the studio's runtime (<see cref="IStudioRuntime.FindFeature" />) the check needs to run at all, by
-    /// its name - in MartenStudio a field of its probe table, <c>nameof(RuntimeFeature.X)</c> - or <see langword="null" />
+    /// its name - in the Marten module a field of its probe table, <c>nameof(RuntimeFeature.X)</c> - or <see langword="null" />
     /// for one that runs on the floor. On a host without it the check is listed as not applicable, with the version it
     /// needs, and never run.
     /// </summary>

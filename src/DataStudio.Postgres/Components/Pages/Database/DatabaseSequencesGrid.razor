@@ -190,7 +190,7 @@
             return false;
         }
 
-        // Marten's own sequences are structure only where a store declares them (MartenStudio's Schema screen). A value is
+        // Marten's own sequences are structure only where a store declares them (the Marten module's Schema screen). A value is
         // data, not a definition: BrowseDatabase's alone, whatever ViewDefinitions admits.
         return (Settings.Text.ConfigurationDeclaresTables && sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
             || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));

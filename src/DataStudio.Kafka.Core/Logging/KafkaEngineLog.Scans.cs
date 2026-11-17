@@ -4,7 +4,7 @@ namespace DataStudio.Kafka.Core.Logging;
 
 /// <summary>
 /// The scan engine's log events, 9665 to 9676 (decision 11; 9675 is the payload rules' and 9676 the partitioner verification's in M3) and 9679 (the record index, M5). They carry cluster keys, topics, partitions, offsets, counts, enum names and
-/// exception type names, and never a predicate, a literal, a key, a header, a value, an owner or a user: the audit of a scan is KStudio's.
+/// exception type names, and never a predicate, a literal, a key, a header, a value, an owner or a user: the audit of a scan is the Kafka module's.
 /// </summary>
 internal static partial class KafkaEngineLog
 {

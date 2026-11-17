@@ -67,7 +67,7 @@ internal sealed record RelationshipNodeSet(
     public static RelationshipNodeSet None { get; } = new([], [], []);
 
     /// <summary>
-    /// Per node key, the member behind each of its columns that has one - MartenStudio's duplicated fields - which is
+    /// Per node key, the member behind each of its columns that has one - the Marten module's duplicated fields - which is
     /// what an edge's "member" names and what the referenced-by link filters on. Columns compare ignoring case.
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Members { get; init; } = NoMembers;
@@ -83,7 +83,7 @@ internal sealed record RelationshipNodeSet(
 }
 
 /// <summary>
-/// A foreign key a source's configuration declares - MartenStudio's <c>ForeignKey&lt;T&gt;()</c> - with its target
+/// A foreign key a source's configuration declares - the Marten module's <c>ForeignKey&lt;T&gt;()</c> - with its target
 /// resolved by the source as far as its configuration can say.
 /// </summary>
 /// <remarks>

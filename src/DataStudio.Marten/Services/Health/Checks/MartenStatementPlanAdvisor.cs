@@ -9,12 +9,12 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Services.Health.Checks;
 
 /// <summary>
-/// MartenStudio's <see cref="IHealthPlanAdvisor" />: what a sequential scan of a document table filters on - a duplicated
+/// The Marten module's <see cref="IHealthPlanAdvisor" />: what a sequential scan of a document table filters on - a duplicated
 /// column, a JSON path whose keys are literals, a containment test - judged by the Query page's own index advisor
 /// (<see cref="IndexAdvisor" />) against the indexes the sweep read.
 /// </summary>
 /// <remarks>
-/// Pure: the document type is the one MartenStudio described the table with (<see cref="MartenTables.Table" />), and the
+/// Pure: the document type is the one the Marten module described the table with (<see cref="MartenTables.Table" />), and the
 /// filter is the plan's deparsed text. A table that is not a visible document type's is not one it advises on.
 /// </remarks>
 internal sealed partial class MartenStatementPlanAdvisor : IHealthPlanAdvisor

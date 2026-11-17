@@ -4,7 +4,7 @@
     The Postgres Studio diagnostics worker: a generic host with no ASP.NET Core and no studio UI, which registers its own
     NpgsqlDataSource, adds DataStudio.Postgres.Diagnostics and logs a plain-text summary of every database's findings once a
     day. It references src/DataStudio.Postgres.Diagnostics ALONE - not PostgresStudio, not MartenStudio - and that is the
-    point: PostgresStudioFenceTests holds the engine assembly free of ASP.NET Core, and this project is what shows a
+    point: PostgresFenceTests holds the engine assembly free of ASP.NET Core, and this project is what shows a
     worker host can build and run on it. samples/DataStudio.Sample.Postgres.Data is referenced only for the throwaway
     database's demo data; it references no studio either (D17). With no ConnectionStrings:Postgres it starts a
     throwaway Postgres (D18).
@@ -15,7 +15,7 @@
     pinned to and joins the latest-Npgsql pass over data-studio-postgres.slnf (AGENTS.md D30); and
     DataStudioDiagnosticsPinsExtensions, so the conditional Microsoft.Extensions.* rows of Directory.Packages.props -
     Microsoft.Extensions.Hosting among them - apply here as they do to the engine. Nothing here may reach Marten:
-    PostgresStudioSolutionFilterTests holds the filter closed.
+    PostgresSolutionFilterTests holds the filter closed.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

@@ -11,7 +11,7 @@ namespace DataStudio.Services.Settings;
 /// </remarks>
 internal interface IShellSettings
 {
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
+    /// <summary>The product's name in a sentence: <c>the Marten module</c>.</summary>
     string ProductName { get; }
 
     /// <summary>The browser title.</summary>

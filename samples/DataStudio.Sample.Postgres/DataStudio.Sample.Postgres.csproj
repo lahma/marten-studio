@@ -11,7 +11,7 @@
 
     It sets DataStudioPostgresPinsNpgsql, as every PostgresStudio-only project does, so it restores the Npgsql the
     PostgresStudio package is pinned to and joins the latest-Npgsql pass over data-studio-postgres.slnf (AGENTS.md D30).
-    Nothing here may reach Marten: PostgresStudioSolutionFilterTests holds the filter closed.
+    Nothing here may reach Marten: PostgresSolutionFilterTests holds the filter closed.
   -->
   <PropertyGroup>
     <UserSecretsId>postgres-studio-sample</UserSecretsId>

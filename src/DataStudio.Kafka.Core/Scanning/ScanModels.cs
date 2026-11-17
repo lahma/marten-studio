@@ -9,7 +9,7 @@ using DataStudio.Kafka.Core.Windows;
 
 namespace DataStudio.Kafka.Core.Scanning;
 
-/// <summary>Who a scan belongs to. Opaque: KStudio decides who an owner is (a visitor, a session), and the engine only counts per key.</summary>
+/// <summary>Who a scan belongs to. Opaque: the Kafka module decides who an owner is (a visitor, a session), and the engine only counts per key.</summary>
 /// <param name="Key">The owner's key. It is never logged.</param>
 internal sealed record KafkaScanOwner(string Key);
 

@@ -15,7 +15,7 @@ namespace DataStudio.Postgres.Services.Relationships;
 /// <b>The physical graph is a database fact, and shared.</b> The tables, the keys between them and the far ends the
 /// database browser's gate withholds are the same in every studio (D27 moved the page to the Database section), and
 /// they are read here through <see cref="RelationshipReads" />: the visitor's gate, the relations it admits, and the
-/// one cached <c>pg_constraint</c> read per database. What a source knows beyond the catalog - MartenStudio's
+/// one cached <c>pg_constraint</c> read per database. What a source knows beyond the catalog - the Marten module's
 /// document types over their tables, the keys its configuration declares, and the members behind its columns - comes
 /// from its <see cref="IRelationshipNodeSource" />; a studio with none draws tables and keys only.
 /// </para>
@@ -132,7 +132,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
     /// <inheritdoc />
     /// <remarks>
-    /// "Referenced by" is about one of a source's own nodes - in MartenStudio a document - so it is the node source's
+    /// "Referenced by" is about one of a source's own nodes - in the Marten module a document - so it is the node source's
     /// to answer: it resolves the scope, builds the same graph the screen draws from the same shared reads, and counts.
     /// A studio with no node source has nothing that can be referenced and answers <see cref="ReferencedBy.None" />.
     /// </remarks>

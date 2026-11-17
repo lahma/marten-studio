@@ -72,7 +72,7 @@ internal static class KafkaProfileCeilings
                 return capped;
         }
 
-        // The same for both: matches, the match's bytes and the decode cap stay at KStudio's defaults.
+        // The same for both: matches, the match's bytes and the decode cap stay at the Kafka module's defaults.
         capped.MaxMatches = Math.Min(capped.MaxMatches, 500);
         capped.MaxMatchBytes = Math.Min(capped.MaxMatchBytes, 64 * 1024);
         capped.MaxDecodeBytes = Math.Min(capped.MaxDecodeBytes, 1024 * 1024);

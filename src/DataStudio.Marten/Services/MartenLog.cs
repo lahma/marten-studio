@@ -4,7 +4,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// The events only MartenStudio logs, in the studio's one id space (<c>9200-9299</c>, see <see cref="StudioLog" />).
+/// The events only the Marten module logs, in the studio's one id space (<c>9200-9299</c>, see <see cref="StudioLog" />).
 /// </summary>
 /// <remarks>
 /// <para>

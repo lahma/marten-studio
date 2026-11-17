@@ -9,7 +9,7 @@ using DataStudio.Postgres.Services.Statements;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's statement groups (W5-Q1, issue #8 G6): by Marten operation and document type - <c>load/query · Order</c>,
+/// The Marten module's statement groups (W5-Q1, issue #8 G6): by Marten operation and document type - <c>load/query · Order</c>,
 /// <c>upsert · Order</c>, <c>event append</c>, <c>projection progress</c>, <c>daemon</c> - read off the SQL Marten itself
 /// writes, as <c>pg_stat_statements</c> records it (its constants replaced by <c>$n</c>).
 /// </summary>
@@ -62,7 +62,7 @@ namespace DataStudio.Marten.Services;
 /// <b>A hidden type is never named.</b> A statement that names an <c>mt_doc_</c> table the judged set does not hold - a type
 /// <c>IsDocumentTypeVisible</c> hides, another registered store's, or one Marten has not learned - is grouped as
 /// <see cref="Hidden" /> whatever else it names, and its text is withheld by the page as it is everywhere
-/// (<c>SessionQueryText</c>). Everything that is none of Marten's shapes is grouped as Postgres Studio groups it, by its verb
+/// (<c>SessionQueryText</c>). Everything that is none of Marten's shapes is grouped as the Postgres module groups it, by its verb
 /// and its first table of the set (<see cref="PostgresStatementClassifier" />): the host's own relational tables beside the
 /// store (issue #8 G1).
 /// </para>

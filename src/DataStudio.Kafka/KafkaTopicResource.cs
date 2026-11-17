@@ -1,7 +1,7 @@
 namespace DataStudio.Kafka;
 
 /// <summary>
-/// What KStudio's authorization policies are asked about (AGENTS.md D35). Deliberately unrelated to <c>MartenStoreResource</c> and
+/// What the Kafka module's authorization policies are asked about (AGENTS.md D35). Deliberately unrelated to <c>MartenStoreResource</c> and
 /// <c>PostgresResource</c>: a handler written for one must never be handed another (D30).
 /// </summary>
 /// <param name="Cluster">The cluster entry's key.</param>

@@ -14,7 +14,7 @@ namespace DataStudio.Postgres.Services;
 /// 9215-9218) and LINQ mode (9260-9264). A shared event is here, and a Marten one is in <c>MartenLog</c>; a later feature
 /// adds its events in a partial file of its own (<c>StudioLog.Storage.cs</c>, <c>MartenLog.Query.cs</c>), never by
 /// renumbering. Every shared template says <b>Data Studio</b> and calls a Marten store or a plain data source a
-/// <b>source</b>; 1.x kept a second class in Postgres Studio's words, so that an id named two
+/// <b>source</b>; 1.x kept a second class in the Postgres module's words, so that an id named two
 /// templates. An id, a level and a property's name are promises (<c>docs/stability.md</c>); a template's words are not. An
 /// event that names an option takes its name as a property from <c>OptionName(...)</c>, as 9202 and 9230 do.
 /// </para>
@@ -49,7 +49,7 @@ namespace DataStudio.Postgres.Services;
 /// at Information. 9491-9499 (the index and browser lints) are reserved and unused: those checks log nothing of their own.</item>
 /// <item>9500 and 9501 are Aurora's (9500-9509): the host's capacity source that threw, and Aurora's own reads that
 /// failed, both throttled.</item>
-/// <item>9510-9519 (MartenStudio's whole-database table set) are reserved and unused.</item>
+/// <item>9510-9519 (the Marten module's whole-database table set) are reserved and unused.</item>
 /// </list>
 /// <para>
 /// A value a visitor could shape reaches any of these only through <see cref="StudioLogValue" /> (AGENTS.md hard rule 5).

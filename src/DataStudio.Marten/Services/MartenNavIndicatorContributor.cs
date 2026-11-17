@@ -9,7 +9,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's sidebar badges beyond the health glance: the dead-letter count and the projections dot.
+/// The Marten module's sidebar badges beyond the health glance: the dead-letter count and the projections dot.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -88,7 +88,7 @@ internal sealed class MartenNavIndicatorContributor : INavIndicatorContributor
     }
 }
 
-/// <summary>What MartenStudio's two badges are drawn from.</summary>
+/// <summary>What the Marten module's two badges are drawn from.</summary>
 /// <param name="DeadLetters">
 /// How many dead letters this database holds, or <see langword="null" /> when nobody could tell. Zero and "could not
 /// tell" are different answers and neither draws a badge.
@@ -97,7 +97,7 @@ internal sealed class MartenNavIndicatorContributor : INavIndicatorContributor
 /// <param name="ProjectionsExplanation">What to put in the dot's tooltip, when there is a dot.</param>
 internal sealed record MartenNavReading(long? DeadLetters, bool ProjectionsNeedAttention, string? ProjectionsExplanation);
 
-/// <summary>How MartenStudio's two badges read - in one place, whoever read the numbers.</summary>
+/// <summary>How the Marten module's two badges read - in one place, whoever read the numbers.</summary>
 internal static class MartenNavBadges
 {
     /// <summary>No badge at all.</summary>

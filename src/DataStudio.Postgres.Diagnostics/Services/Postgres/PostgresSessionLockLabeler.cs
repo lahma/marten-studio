@@ -4,7 +4,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's <see cref="ISessionLockLabeler" />: a plain data source takes no advisory lock of its own, so only the
+/// The Postgres module's <see cref="ISessionLockLabeler" />: a plain data source takes no advisory lock of its own, so only the
 /// relations are labelled, through the classifier the caller hands in, and every advisory lock is the application's.
 /// </summary>
 /// <remarks>
@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// takes none of its own, and Postgres knows only the key, which is the application's to interpret - and a relation
 /// nobody declares is "a relation", named only to a visitor who may see details, as the shared labels always do. An
 /// object the <c>mt_</c> rule calls Marten's is "a relation named like Marten's", named to nobody: its name can carry a
-/// Marten store's alias or tenant, and Marten Studio is where it is read.
+/// Marten store's alias or tenant, and the Marten module is where it is read.
 /// </para>
 /// <para>
 /// Configuration only, never a connection: a singleton, cheap enough for a sweep and the Sessions poll, and it never

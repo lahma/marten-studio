@@ -3,10 +3,10 @@ using Microsoft.Extensions.Logging;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// The events only PostgresStudio logs: what its source provider leaves out of a listing. Ids 9300-9309.
+/// The events only the Postgres module logs: what its source provider leaves out of a listing. Ids 9300-9309.
 /// </summary>
 /// <remarks>
-/// Everything else PostgresStudio's sources log is a shared event with its shared id: a source that will not build is
+/// Everything else the Postgres module's sources log is a shared event with its shared id: a source that will not build is
 /// 9210, a source whose databases cannot be listed is 9213, each throttled as every studio throttles it.
 /// </remarks>
 internal static partial class PostgresLog

@@ -9,7 +9,7 @@ namespace DataStudio.Postgres.Services.Sources;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>MartenStudio</b> answers with every registered store's declarations (<c>SchemaDeclarationReader</c> over each
+/// <b>the Marten module</b> answers with every registered store's declarations (<c>SchemaDeclarationReader</c> over each
 /// store's options - configuration, no connection) and with each other store's policies for this database.
 /// <b>A plain source</b> answers with an empty classifier whose own schemas are its admitted browsable schemas, and no
 /// other sources: one source is one database, and another source's objects are not classified as its.

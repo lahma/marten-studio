@@ -4,7 +4,7 @@
        it never shares a reused container with DataStudio.Marten.Integration.Tests), the core pages' services against it, and
        Playwright over samples/DataStudio.Sample.Postgres. No Marten anywhere in its graph: it references PostgresStudio, the
        sample data and the sample, each of which sets DataStudioPostgresPinsNpgsql, so the latest-Npgsql pass over
-       data-studio-postgres.slnf runs it too (PostgresStudioSolutionFilterTests). -->
+       data-studio-postgres.slnf runs it too (PostgresSolutionFilterTests). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>

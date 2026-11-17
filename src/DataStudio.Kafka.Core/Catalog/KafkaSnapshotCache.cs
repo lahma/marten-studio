@@ -8,7 +8,7 @@ namespace DataStudio.Kafka.Core.Catalog;
 /// <remarks>
 /// Single flight: concurrent callers for one key share one in-flight task. The work runs under <see cref="CancellationToken.None" /> and
 /// each caller waits through <c>WaitAsync(token)</c>, so one tab navigating away never cancels the read the others wait on. A faulted or
-/// cancelled entry is removed. <b>Authorization is never part of a key</b>: KStudio asks its cluster policy before it calls, and the
+/// cancelled entry is removed. <b>Authorization is never part of a key</b>: the Kafka module asks its cluster policy before it calls, and the
 /// engine answers only what the broker allows this application's principal. The time-to-live is per call, so the 60-second entries
 /// (configs, authorized operations, the cluster description) and the refresh-interval entries share one cache.
 /// </remarks>

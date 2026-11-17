@@ -6,7 +6,7 @@ namespace DataStudio.Kafka.Core.Decoding;
 /// <summary>
 /// A record's value as the engine understood it, <b>whole</b> (decision 2.4 of D-PAYLOAD): nothing is cut to a match's budget here, so that
 /// the payload rules see all of it and a value clause compares all of it. It is internal to DataStudio.Kafka.Core, never kept by a match and never
-/// returned from an API KStudio calls. Under the envelope grant only the kind, the length, the schema id and the CloudEvents attributes are
+/// returned from an API the Kafka module calls. Under the envelope grant only the kind, the length, the schema id and the CloudEvents attributes are
 /// filled in; the bytes, the parsed element and the preview are for a visitor who may read payloads.
 /// </summary>
 internal sealed record RecordValue

@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services.Postgres;
 namespace DataStudio.Postgres;
 
 /// <summary>
-/// Adds Postgres Studio's health advisor to the host's own ASP.NET Core health checks.
+/// Adds the Postgres module's health advisor to the host's own ASP.NET Core health checks.
 /// </summary>
 public static class PostgresDiagnosticsHealthChecksBuilderExtensions
 {
@@ -69,7 +69,7 @@ public static class PostgresDiagnosticsHealthChecksBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         // One runner per process however many registrations name it, so a liveness and a readiness check over the same
-        // studio still cost one run per interval between them. Built with Postgres Studio's words, which are the ones it
+        // studio still cost one run per interval between them. Built with the Postgres module's words, which are the ones it
         // says "call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres()" in when neither was added.
         builder.Services.TryAddSingleton(static services =>
             ActivatorUtilities.CreateInstance<HealthExportRunner>(services, PostgresText.Instance));

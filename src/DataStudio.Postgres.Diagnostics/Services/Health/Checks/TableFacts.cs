@@ -822,8 +822,8 @@ internal static class Autovacuum
         }
 
         // Where a person sees which parameters differ: the catalog for a relational table, which no Schema screen describes,
-        // and for a Marten table the studio's own words - MartenStudio's Schema screen, or, in a studio over plain data
-        // sources, Marten Studio's over the store whose StoreOptions declare the table.
+        // and for a Marten table the studio's own words - the Marten module's Schema screen, or, in a studio over plain data
+        // sources, the Marten module's over the store whose StoreOptions declare the table.
         string partly = table.Row.DifferingStorageOptions.Contains("autovacuum_enabled", StringComparer.OrdinalIgnoreCase)
             ? " Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off for some "
               + "of them ("

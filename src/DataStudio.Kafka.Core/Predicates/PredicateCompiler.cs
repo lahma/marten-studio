@@ -115,7 +115,7 @@ internal static class PredicateCompiler
             return new CompiledValueNullClause(clause.Operator);
         }
 
-        // The value and a JSON path need the payload grant, which KStudio decides before it compiles; an internal caller with the wrong
+        // The value and a JSON path need the payload grant, which the Kafka module decides before it compiles; an internal caller with the wrong
         // grant still gets a refusal and not a silent false.
         if (clause.Field is ValueField or JsonPathField && !payload)
         {

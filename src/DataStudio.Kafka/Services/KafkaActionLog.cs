@@ -15,7 +15,7 @@ internal sealed record KafkaAuditScope(string Cluster, string? TenantId, IReadOn
 
 /// <summary>
 /// What a Kafka service calls when a visitor does, or is refused, something worth keeping: the process-wide Activity ring through the
-/// studio's <see cref="StudioActivity" />, under the module's own scope, and KStudio's own log events (D34). Written on failure as well as on
+/// studio's <see cref="StudioActivity" />, under the module's own scope, and the Kafka module's own log events (D34). Written on failure as well as on
 /// success (AGENTS.md hard rule 5).
 /// </summary>
 /// <param name="activity">The studio's way into the ring, which this writes through.</param>

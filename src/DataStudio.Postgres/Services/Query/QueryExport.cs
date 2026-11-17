@@ -34,7 +34,7 @@ namespace DataStudio.Postgres.Services.Query;
 internal static class QueryExport
 {
     /// <summary>
-    /// Documents - an id and the JSON a store wrote - as a JSON array of <c>{ id, document }</c>: MartenStudio's where
+    /// Documents - an id and the JSON a store wrote - as a JSON array of <c>{ id, document }</c>: the Marten module's where
     /// clause results (<c>MartenQueryExportBridges</c>).
     /// </summary>
     /// <param name="rows">Each row's id and its JSON, exactly as the database holds it.</param>

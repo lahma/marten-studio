@@ -184,8 +184,8 @@ internal sealed class RelationshipReads
 
     /// <summary>
     /// The schemas the shared read spans: the source's own, and - when <c>BrowseDatabase</c> is on for the process at
-    /// all - every schema <c>BrowsableSchemas</c> admits. In Postgres Studio the schemas it names exactly are the
-    /// source's own (D27 in PostgresStudio), so they join whatever <c>BrowseDatabase</c> says; only <c>"*"</c> waits for
+    /// all - every schema <c>BrowsableSchemas</c> admits. In the Postgres module the schemas it names exactly are the
+    /// source's own (D27 in the Postgres module), so they join whatever <c>BrowseDatabase</c> says; only <c>"*"</c> waits for
     /// it (issue #18). The same for every visitor.
     /// </summary>
     private async Task<string[]> SchemaSetAsync(

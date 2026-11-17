@@ -68,7 +68,7 @@ internal sealed record PhysicalForeignKeyRead(IReadOnlyList<PhysicalForeignKey> 
 /// (AGENTS.md hard rule 4). The catalog read interpolates nothing at all - the schema names travel as a single
 /// <c>text[]</c> parameter compared with <c>= any(@schemas)</c>, exactly as the schema screen's statistics read does.
 /// The count of a table's rows that point at one row is the database browser's own statement
-/// (<see cref="TableRowQueryBuilder.BuildInboundCount" />); MartenStudio's count of one collection's documents is its
+/// (<see cref="TableRowQueryBuilder.BuildInboundCount" />); the Marten module's count of one collection's documents is its
 /// own builder's, beside its document reads.
 /// </para>
 /// <para>

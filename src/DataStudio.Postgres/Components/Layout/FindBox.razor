@@ -355,7 +355,7 @@
         && string.Equals(hit.DatabaseId, active.DatabaseId, StringComparison.OrdinalIgnoreCase)
         && string.Equals(hit.TenantId, active.TenantId, StringComparison.Ordinal);
 
-    /// <summary>The source picker's word in lower case: "store" in Marten Studio, "source" in Postgres Studio.</summary>
+    /// <summary>The source picker's word in lower case: "store" in the Marten module, "source" in the Postgres module.</summary>
     private string SourceWord => Settings.SourceLabelOf(Descriptor).ToLowerInvariant();
 
     /// <summary>
@@ -372,8 +372,8 @@
         StoreListing? store = State.AvailableStores.FirstOrDefault(x => string.Equals(x.Key, scope.StoreKey, StringComparison.OrdinalIgnoreCase));
         string name = store?.DisplayName ?? scope.StoreKey;
 
-        // Postgres Studio names the scope as its header does - "Source Default › Database admin" - and the database by the identity the
-        // header's picker shows; Marten Studio's wording is as it was (D30).
+        // The Postgres module names the scope as its header does - "Source Default › Database admin" - and the database by the identity the
+        // header's picker shows; the Marten module's wording is as it was (D30).
         bool likeThePickers = Settings.Text.FindNamesScopeLikeThePickers;
         if (likeThePickers)
         {
@@ -395,7 +395,7 @@
             }
 
 
-            // Only a source with tenants has any to name: Postgres Studio's data sources have none, and "(all tenants)" is not its word.
+            // Only a source with tenants has any to name: the Postgres module's data sources have none, and "(all tenants)" is not its word.
             if (State.ShowTenantSelector)
             {
                 name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : narrowed ? " (your tenants)" : " (all tenants)";

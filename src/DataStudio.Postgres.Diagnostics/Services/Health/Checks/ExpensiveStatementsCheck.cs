@@ -61,7 +61,7 @@ internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList
 /// member cannot be named and links to the Query page's advisor, which can. What the plan does say soundly is a scan
 /// filtering on a duplicated column, a containment (<c>@&gt;</c>) test, a JSON path written with literal keys - and a
 /// read of the whole table with no filter at all - and those go to the studio's own index advisor
-/// (<see cref="IHealthPlanAdvisor" />; MartenStudio's is the Query page's), whose verdict is the remedy.
+/// (<see cref="IHealthPlanAdvisor" />; the Marten module's is the Query page's), whose verdict is the remedy.
 /// </para>
 /// </remarks>
 [HealthCheck("T02", HealthArea.Tables, HealthCostTier.Statements, "Expensive statements", Gate = HealthGate.Activity)]

@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Internal.Sql;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Where it sits.</b> Both of the studio's databases attach it to every connection they hand out: MartenStudio's
+/// <b>Where it sits.</b> Both of the studio's databases attach it to every connection they hand out: the Marten module's
 /// <c>MartenSourceDatabase.CreateConnection</c>, which every Marten-side read of the studio's own SQL now goes through - the
 /// documents and event reads, the projections screen, the Query page, the schema reads, tenant discovery - and Postgres
 /// Studio's <c>DataSourceDatabase.CreateConnection</c>. So every statement the studio issues on a connection of its own is

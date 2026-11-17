@@ -8,7 +8,7 @@ namespace DataStudio.Marten.Services.Query;
 /// </summary>
 /// <remarks>
 /// The shared export takes a document as its id and its JSON - all it ever read of a <see cref="MartenQueryRow" /> -
-/// so the row type, which is MartenStudio's, stays out of the shared assembly. Nothing is reformatted on the way: the
+/// so the row type, which is the Marten module's, stays out of the shared assembly. Nothing is reformatted on the way: the
 /// JSON is the <c>data</c> column exactly as Marten wrote it.
 /// </remarks>
 internal static class MartenQueryExportBridges

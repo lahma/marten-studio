@@ -46,7 +46,7 @@ internal static class StudioConnectionPools
     /// <summary>What the studio in this process configured.</summary>
     /// <param name="Max">The cap per pool.</param>
     /// <param name="ApplicationName">The name the host set, <c>""</c> for none, or <see langword="null" /> for the derived one.</param>
-    /// <param name="Product">The product the derived name ends with: <c>Marten Studio</c>.</param>
+    /// <param name="Product">The product the derived name ends with: <c>Data Studio</c>.</param>
     /// <param name="Timeout">How long an open waits for a slot before it gives up.</param>
     private sealed record Configuration(int Max, string? ApplicationName, string Product, TimeSpan Timeout);
 
@@ -160,7 +160,7 @@ internal static class StudioConnectionPools
 
     /// <summary>
     /// The name a studio session carries: the host's own (validated at startup), none for <c>""</c>, or - by default - the
-    /// application's own <c>Application Name</c> with the product after it in parentheses (<c>orders-api (Marten Studio)</c>), or the
+    /// application's own <c>Application Name</c> with the product after it in parentheses (<c>orders-api (Data Studio)</c>), or the
     /// product alone when the application names none. Printable ASCII only, and at most <see cref="MaxApplicationNameBytes" /> bytes,
     /// cut from the application's part so the product is always said.
     /// </summary>

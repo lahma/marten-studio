@@ -11,13 +11,13 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Services.Health;
 
 /// <summary>
-/// MartenStudio's reading of the shared health context and evaluation: the store, its options, its database and the
-/// Marten it runs - C# 14 extension members, so that MartenStudio's own checks read the context as they always have.
+/// The Marten module's reading of the shared health context and evaluation: the store, its options, its database and the
+/// Marten it runs - C# 14 extension members, so that the Marten module's own checks read the context as they always have.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Only for a Marten source.</b> The shared context holds the resolver's own record, which for a Marten store is a
-/// <see cref="ResolvedScope" />; a check in MartenStudio's assembly is only ever offered MartenStudio's sources, so
+/// <see cref="ResolvedScope" />; a check in the Marten module's assembly is only ever offered the Marten module's sources, so
 /// <c>Scope</c>'s cast holds - and where it would not, it throws and the check is a "could not check" row rather than a
 /// misreading.
 /// </para>
@@ -50,7 +50,7 @@ internal static class MartenHealthContext
         public MartenRuntime Runtime => (context.StudioRuntime as MartenStudioRuntime)?.Runtime ?? MartenRuntime.Current;
 
         /// <summary>
-        /// The studio's settings, under the name MartenStudio's checks read them by - the interval and the document-type
+        /// The studio's settings, under the name the Marten module's checks read them by - the interval and the document-type
         /// filter, which are all they read, live from <c>MartenOptions</c>.
         /// </summary>
         public IStudioSettings StudioOptions => context.Settings as IStudioSettings
@@ -63,8 +63,8 @@ internal static class MartenHealthContext
         public MartenRuntime Runtime => (evaluation.StudioRuntime as MartenStudioRuntime)?.Runtime ?? MartenRuntime.Current;
 
         /// <summary>
-        /// An evaluation at <paramref name="now" /> as MartenStudio's sweep makes one, for a unit test: against
-        /// <paramref name="runtime" /> (this process's when <see langword="null" />), with MartenStudio's remedy wording and
+        /// An evaluation at <paramref name="now" /> as the Marten module's sweep makes one, for a unit test: against
+        /// <paramref name="runtime" /> (this process's when <see langword="null" />), with the Marten module's remedy wording and
         /// plan advisor.
         /// </summary>
         /// <param name="now">When.</param>
@@ -81,9 +81,9 @@ internal static class MartenHealthContext
 }
 
 /// <summary>
-/// MartenStudio's spellings of shared health members whose shared form takes the studio's seams - C# 14 static extension
+/// The Marten module's spellings of shared health members whose shared form takes the studio's seams - C# 14 static extension
 /// members, so that Marten-only code compiles unchanged. The rule is <see cref="MartenServiceBridges" />'s: Marten-only code
-/// may call these; a shared-bound file must not, and each member lists its callers - every one MartenStudio's own since
+/// may call these; a shared-bound file must not, and each member lists its callers - every one the Marten module's own since
 /// PS-1e, which moved the last test caller of <c>HealthService.WithheldSchemaReason</c> onto
 /// <see cref="HealthService.WithheldSchemaReasonFor" /> and deleted that member.
 /// </summary>
@@ -102,8 +102,8 @@ internal static class MartenHealthBridges
     extension(HealthLinks)
     {
         /// <summary>
-        /// <see cref="HealthLinks.ToPage(string, StudioScope?)" /> with MartenStudio's source
-        /// parameter. Caller: <c>Overview.razor</c>, MartenStudio's overview body.
+        /// <see cref="HealthLinks.ToPage(string, StudioScope?)" /> with the Marten module's source
+        /// parameter. Caller: <c>Overview.razor</c>, the Marten module's overview body.
         /// </summary>
         /// <param name="scope">The scope to carry.</param>
         internal static string ToPage(StudioScope? scope) =>
@@ -111,7 +111,7 @@ internal static class MartenHealthBridges
 
         /// <summary>
         /// <see cref="HealthLinks.ToFinding(string, StudioScope?, HealthReportFinding)" /> with
-        /// MartenStudio's source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
+        /// The Marten module's source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
         /// <c>Projections.razor</c> and <c>IndexesTab.razor</c>.
         /// </summary>
         /// <param name="scope">The scope to carry.</param>

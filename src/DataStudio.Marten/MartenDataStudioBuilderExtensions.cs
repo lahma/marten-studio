@@ -105,8 +105,8 @@ public static class MartenDataStudioBuilderExtensions
                 provider.GetRequiredService<IOptions<MartenOptions>>(),
                 provider.GetRequiredService<IShellSettings>()));
 
-        // The options both studios share are validated by one chain (StudioOptionsValidation), in MartenStudio's names and
-        // with its sentences unchanged; MartenStudio's own validations sit between its parts, where they always were, so the
+        // The options both studios share are validated by one chain (StudioOptionsValidation), in the Marten module's names and
+        // with its sentences unchanged; the Marten module's own validations sit between its parts, where they always were, so the
         // failures an OptionsValidationException lists keep their order (pinned by MartenOptionsTest).
         OptionsBuilder<MartenOptions> optionsBuilder = services
             .AddOptions<MartenOptions>()
@@ -162,10 +162,10 @@ public static class MartenDataStudioBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
 
         // 1.2-INDEX-A: the Statements page's index advisor, in Marten's terms - a document table's indexes are the StoreOptions lines
-        // that declare them (Postgres Studio's service takes any number of these; it has none of its own).
+        // that declare them (the Postgres module's service takes any number of these; it has none of its own).
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IIndexCandidateContributor, MartenIndexCandidateContributor>());
 
-        // 1.2-H-C: E06's on-demand action, "Find the 20 longest streams". The runner and its flights are PostgresStudio's
+        // 1.2-H-C: E06's on-demand action, "Find the 20 longest streams". The runner and its flights are the Postgres module's
         // (StudioCoreRegistration); a finding offers an action only if one is registered here.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHealthFindingAction, LongestStreamsAction>());
 

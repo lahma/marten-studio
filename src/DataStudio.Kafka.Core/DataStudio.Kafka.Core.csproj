@@ -40,7 +40,7 @@
     </AssemblyAttribute>
   </ItemGroup>
 
-  <!-- No FrameworkReference: the engine has no ASP.NET Core (KStudioCoreFenceTests). -->
+  <!-- No FrameworkReference: the engine has no ASP.NET Core (KafkaCoreFenceTests). -->
 
   <ItemGroup>
     <None Include="../DataStudio.Kafka/README.md" Pack="true" PackagePath="/" />

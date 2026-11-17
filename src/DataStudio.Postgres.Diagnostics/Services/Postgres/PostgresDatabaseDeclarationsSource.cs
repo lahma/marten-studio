@@ -5,7 +5,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's <see cref="IDatabaseDeclarationsSource" />: a plain data source declares nothing, so every object is
+/// The Postgres module's <see cref="IDatabaseDeclarationsSource" />: a plain data source declares nothing, so every object is
 /// "Other" but what the <c>mt_</c> rule calls Marten's, and its own schemas are the ones
 /// <c>PostgresDiagnosticsOptions.BrowsableSchemas</c> names exactly.
 /// </summary>

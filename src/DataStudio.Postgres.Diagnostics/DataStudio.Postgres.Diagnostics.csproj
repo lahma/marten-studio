@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <!-- No FrameworkReference: this assembly is the engine alone, and a worker or console host must not need ASP.NET Core
-       to use it. PostgresStudioFenceTests holds that at this file, the assets file and the built references. -->
+       to use it. PostgresFenceTests holds that at this file, the assets file and the built references. -->
   <ItemGroup>
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />

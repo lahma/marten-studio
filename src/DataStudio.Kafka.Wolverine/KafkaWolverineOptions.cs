@@ -29,7 +29,7 @@ public sealed class KafkaWolverineOptions
 
     /// <summary>
     /// Declares that endpoints whose serializer is a <typeparamref name="TSerializer" /> (or a type assignable to it) write structured CloudEvents, so
-    /// KStudio decodes their topics' values as CloudEvents, as it does for Wolverine's own <c>CloudEventsMapper</c> (<c>ce.*</c> predicates and
+    /// The Kafka module decodes their topics' values as CloudEvents, as it does for Wolverine's own <c>CloudEventsMapper</c> (<c>ce.*</c> predicates and
     /// chips). Nothing is guessed from a value: a custom serializer that sets the content type to <c>application/json</c> is only a CloudEvents
     /// writer because the host says so here.
     /// </summary>
@@ -96,7 +96,7 @@ public sealed class KafkaWolverineOptions
     }
 
     /// <summary>
-    /// Applies <paramref name="configure" /> to each discovered cluster's builder, after KStudio gave it its default name:
+    /// Applies <paramref name="configure" /> to each discovered cluster's builder, after the Kafka module gave it its default name:
     /// a display name or environment, <c>OAuthBearerTokenRefresh</c> (Wolverine's builder delegates are never run, so a host that refreshes tokens there
     /// must say so here), <c>ConsumerGroup</c> and <c>Topic</c>. A listener's consumer group is not added to the builder: it is shown on the topics that
     /// listener reads, and a <c>ConsumerGroup</c> declared here is the host's, for the whole cluster, shown on every topic (or named on one muted line

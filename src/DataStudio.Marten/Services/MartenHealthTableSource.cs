@@ -13,7 +13,7 @@ using DataStudio.Postgres.Services.Health.Checks;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IHealthTableSource" /> (issue #8, G1): every ordinary and partitioned table of the store's own
+/// The Marten module's <see cref="IHealthTableSource" /> (issue #8, G1): every ordinary and partitioned table of the store's own
 /// schemas and of the schemas the database browser admits, with the store's declarations laid over the catalog.
 /// </summary>
 /// <remarks>
@@ -42,7 +42,7 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal sealed class MartenHealthTableSource : IHealthTableSource
 {
-    /// <summary>How many tables a sweep judges at most - Postgres Studio's cap (design R5), declared tables first.</summary>
+    /// <summary>How many tables a sweep judges at most - the Postgres module's cap (design R5), declared tables first.</summary>
     internal const int TableCap = PostgresHealthTableSource.TableCap;
 
     /// <summary>The memo key of the one statement that lists the other tables.</summary>
@@ -102,7 +102,7 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
 }
 
 /// <summary>
-/// MartenStudio's remedy wording (<see cref="IHealthTableRemedies" />): a <c>StoreOptions</c> line for a table the store's
+/// The Marten module's remedy wording (<see cref="IHealthTableRemedies" />): a <c>StoreOptions</c> line for a table the store's
 /// configuration declares, worded exactly as the checks have always worded it, and nothing for a table no Marten line
 /// changes - never DDL for a Marten table (D29), because the next <c>CreateOrUpdate</c> reconciles whatever the
 /// configuration does not declare.
@@ -110,7 +110,7 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
 /// <remarks>
 /// <para>
 /// <b>A table no Marten store declares</b> (issue #8, G1) - one <see cref="MartenHealthTableSource" /> found beside the
-/// store - is nothing an apply reconciles, so it is given Postgres Studio's migration SQL
+/// store - is nothing an apply reconciles, so it is given the Postgres module's migration SQL
 /// (<see cref="PostgresHealthTableRemedies" />, composed rather than copied) where the design is the host's: the host's own
 /// relational table in the store's schemas gets every statement. A library's table or somebody else's gets none that
 /// changes its design - an index added or dropped, its fillfactor - because that design is not the host's; the
@@ -121,7 +121,7 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
 /// </remarks>
 internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
 {
-    /// <summary>Postgres Studio's migration wording, which a table no Marten store declares is given.</summary>
+    /// <summary>The Postgres module's migration wording, which a table no Marten store declares is given.</summary>
     private static PostgresHealthTableRemedies Migration => PostgresHealthTableRemedies.Instance;
 
     /// <summary>
@@ -664,7 +664,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
 }
 
 /// <summary>
-/// MartenStudio's <see cref="IHorizonContributor" />: whether the store runs async projections, whose high-water mark an open
+/// The Marten module's <see cref="IHorizonContributor" />: whether the store runs async projections, whose high-water mark an open
 /// writer pins (D01), and whether its HotCold leader holds its lock in a transaction (<c>Events.UseAdvisoryLockTransaction</c>)
 /// - both from the store's configuration, read with no I/O.
 /// </summary>

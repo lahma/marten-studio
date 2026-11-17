@@ -17,7 +17,7 @@ namespace DataStudio.Marten.Internal.Sql;
 /// <remarks>
 /// C# 14 extension members rather than a second part of a partial class: <see cref="CountEstimator" /> moves to the shared
 /// assembly (PS-2), and a partial type cannot span two assemblies - a part left behind would compile as a second
-/// <c>CountEstimator</c> in MartenStudio and make every file that sees both namespaces ambiguous. Callers keep writing
+/// <c>CountEstimator</c> in the Marten module and make every file that sees both namespaces ambiguous. Callers keep writing
 /// <c>estimator.CountExactAsync(connection, table, …)</c> and <c>CountEstimator.ExactSql(…)</c>.
 /// </remarks>
 internal static class DocumentCountEstimator

@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Marten.Services.Links;
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioRouteLinks" />: a link from a module's page to a document or a stream of one of this
+/// The Marten module's <see cref="IStudioRouteLinks" />: a link from a module's page to a document or a stream of one of this
 /// application's Marten stores (D-CORR 7.2).
 /// </summary>
 /// <remarks>

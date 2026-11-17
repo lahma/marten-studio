@@ -6,10 +6,10 @@ namespace DataStudio.Postgres;
 /// </summary>
 public enum PostgresFindingCategory
 {
-    /// <summary>Marten's async daemon, its shards and the high-water mark (<c>D</c> codes, Marten Studio).</summary>
+    /// <summary>Marten's async daemon, its shards and the high-water mark (<c>D</c> codes, the Marten module).</summary>
     Daemon = 0,
 
-    /// <summary>The event store's traffic and shape (<c>E</c> codes, Marten Studio).</summary>
+    /// <summary>The event store's traffic and shape (<c>E</c> codes, the Marten module).</summary>
     Events = 1,
 
     /// <summary>Tables and their indexes (<c>T</c> codes).</summary>

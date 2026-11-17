@@ -23,7 +23,7 @@ internal sealed record StoreAvailability(bool IsAvailable, string? Message, Date
 /// <summary>Where a tenant listing came from, which is what the selector says under it.</summary>
 internal enum TenantListSource
 {
-    /// <summary>The host named them in its options (MartenStudio's <c>KnownTenantIds</c>).</summary>
+    /// <summary>The host named them in its options (the Marten module's <c>KnownTenantIds</c>).</summary>
     Configured,
 
     /// <summary>The source's own configuration carried them (Marten's database descriptors).</summary>

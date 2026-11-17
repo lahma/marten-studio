@@ -43,14 +43,14 @@ internal sealed record MartenSourceDatabase(IMartenDatabase Database) : IStudioD
     /// <inheritdoc />
     /// <remarks>
     /// Metered, open to close, for the studio's cost line (<see cref="StudioConnectionMeter" />, W5-Q1) - as is every
-    /// connection MartenStudio's own reads take from a Marten database (<see cref="CreateConnection(IMartenDatabase, ConnectionUsage)" />).
+    /// connection the Marten module's own reads take from a Marten database (<see cref="CreateConnection(IMartenDatabase, ConnectionUsage)" />).
     /// </remarks>
     public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) =>
         CreateConnection(Database, usage == StudioConnectionUsage.Read ? ConnectionUsage.Read : ConnectionUsage.ReadWrite);
 
     /// <summary>
     /// A new, unopened connection to <paramref name="database" />, metered for the studio's cost line - the one way
-    /// MartenStudio's own reads (documents, events, projections, the Query page, the schema reads, tenant discovery) take a
+    /// The Marten module's own reads (documents, events, projections, the Query page, the schema reads, tenant discovery) take a
     /// connection from a Marten database, so that every statement of theirs is counted (W5-Q1, backlog §C). A Marten
     /// session the studio opens for a write or to steer the daemon takes its connection from Marten, and is not.
     /// </summary>

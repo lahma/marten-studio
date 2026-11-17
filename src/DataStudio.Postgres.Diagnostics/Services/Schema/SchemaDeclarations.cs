@@ -18,7 +18,7 @@ internal sealed record DeclaredIndex(
 /// <summary>
 /// Everything the Schema screen's read paths need to know about what <c>StoreOptions</c> declares,
 /// derived from the options alone - the model the database browser classifies objects with, read by
-/// MartenStudio's <c>SchemaDeclarationReader</c>.
+/// The Marten module's <c>SchemaDeclarationReader</c>.
 /// </summary>
 /// <param name="Schemas">
 /// The schemas this store owns in this database, in a stable order: the document and event schemas, every

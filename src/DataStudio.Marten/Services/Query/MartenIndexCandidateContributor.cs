@@ -12,7 +12,7 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Services.Query;
 
 /// <summary>
-/// 1.2-INDEX-A: MartenStudio's <see cref="IIndexCandidateContributor" /> - the Statements page's index advisor, in Marten's terms. On
+/// 1.2-INDEX-A: the Marten module's <see cref="IIndexCandidateContributor" /> - the Statements page's index advisor, in Marten's terms. On
 /// a Marten document table an index read off a plan is replaced by the index Marten would create for a <c>StoreOptions</c> line
 /// (and carries that line as its remedy), or dropped. It adds nothing of its own: a recorded statement names no JSON member
 /// (<c>pg_stat_statements</c> replaces every constant, the key included, with <c>$n</c>), so P26's member-by-member advice cannot be
@@ -31,7 +31,7 @@ namespace DataStudio.Marten.Services.Query;
 /// and the mappings, <c>AllKnownDocumentTypes()</c> touches no connection, and nothing here calls a storage-ensuring API. A hidden
 /// document type has no <see cref="MartenPlanTable" />, so its candidates are dropped and its table is never named. The store is
 /// learned the way any scope is (authorization first, the tenant dropped); when it cannot be, every candidate on a table named like
-/// Marten's is dropped and the rest are returned - MartenStudio never offers an unlined index on a Marten table.
+/// Marten's is dropped and the rest are returned - the Marten module never offers an unlined index on a Marten table.
 /// </para>
 /// <para>
 /// <b>A line the configuration already declares is no remedy.</b> A <c>Duplicate()</c> always declares the index on its column, so

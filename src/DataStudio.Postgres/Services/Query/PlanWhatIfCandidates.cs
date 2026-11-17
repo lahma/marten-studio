@@ -86,7 +86,7 @@ internal static class PlanWhatIfCandidates
 /// filter, P05's nested loop over a sequential scan) and P10's shape without <c>ANALYZE</c>: the plain columns the filter of an
 /// index or bitmap scan compares, read off the node itself because a plain plan has no rows removed to count. Every index is
 /// written by <see cref="MigrationSqlText.CreateIndex" />. Not P17's expression-index remedy, which no builder writes, and not P26's
-/// JSON filter, which is MartenStudio's (<see cref="IIndexCandidateContributor" />). Pure.
+/// JSON filter, which is the Marten module's (<see cref="IIndexCandidateContributor" />). Pure.
 /// </summary>
 internal static class WorkloadIndexCandidates
 {

@@ -7,8 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka;
 
 /// <summary>
-/// The engine's options (AGENTS.md D36): the clusters KStudio may read and what it declares about their topics, the limits of a
-/// scan, and a few timings. KStudio's own options derive from this class.
+/// The engine's options (AGENTS.md D36): the clusters the Kafka module may read and what it declares about their topics, the limits of a
+/// scan, and a few timings. The Kafka module's own options derive from this class.
 /// </summary>
 /// <remarks>
 /// The host's client configuration is <b>cloned</b> when a cluster is added and never written; a later change to the host's
@@ -46,7 +46,7 @@ public class KafkaEngineOptions
 
     /// <summary>
     /// Registers the host's record index (AGENTS.md D48): <typeparamref name="TIndex" /> is created once, on first use, from the container (a topic's
-    /// <c>Value&lt;TDecoder&gt;()</c> is made the same way), and is asked once while a search for a key or a correlation value is planned. KStudio ships
+    /// <c>Value&lt;TDecoder&gt;()</c> is made the same way), and is asked once while a search for a key or a correlation value is planned. The Kafka module ships
     /// no implementation and keeps no index. There is one index per engine: a second call replaces the first.
     /// </summary>
     /// <typeparam name="TIndex">The host's index.</typeparam>

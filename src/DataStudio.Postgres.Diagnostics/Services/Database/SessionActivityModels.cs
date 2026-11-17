@@ -632,7 +632,7 @@ internal sealed record SessionBlockingCounts(int Chains, int Held, TimeSpan? Lon
 /// <remarks>
 /// The relation is the details' and masked for this visitor (D27): qualified for a schema they may see, <c>‹withheld›</c> -
 /// and no name - for one they may not, and nothing for a relation nobody is told about (a hidden document type's, another
-/// store's, one only the <c>mt_</c> rule calls Marten's in Postgres Studio). <see cref="Target" /> says what it is in the
+/// store's, one only the <c>mt_</c> rule calls Marten's in the Postgres module). <see cref="Target" /> says what it is in the
 /// studio's words either way.
 /// </remarks>
 internal sealed record BlockingNodeView

@@ -24,7 +24,7 @@ internal sealed record ServerPlatformRow(
     DateTimeOffset? StartedAt = null);
 
 /// <summary>
-/// PostgresStudio's Overview reads the server's version and platform outside a health sweep, with S01's own statement:
+/// The Postgres module's Overview reads the server's version and platform outside a health sweep, with S01's own statement:
 /// no new SQL, run here so that a command is still built only under <c>Internal/Sql</c> (AGENTS.md hard rule 4).
 /// </summary>
 internal static class OverviewServerQueries

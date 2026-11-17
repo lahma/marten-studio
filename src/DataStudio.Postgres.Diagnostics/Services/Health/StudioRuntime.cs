@@ -7,7 +7,7 @@ namespace DataStudio.Postgres.Services.Health;
 /// <remarks>
 /// <para>
 /// The health engine only ever prints one and passes it back to <see cref="IStudioRuntime" />: whether this host has it,
-/// and what this host runs instead, are the runtime's to say. MartenStudio's features are its probe table
+/// and what this host runs instead, are the runtime's to say. The Marten module's features are its probe table
 /// (<c>RuntimeFeature</c>), whose private constructor is what keeps a remedy from claiming a version nothing checks.
 /// </para>
 /// <para>
@@ -27,7 +27,7 @@ internal abstract class StudioFeatureRequirement
 /// </summary>
 /// <remarks>
 /// <para>
-/// A singleton a studio registers. MartenStudio answers from the Marten, JasperFx and JasperFx.Events this process runs
+/// A singleton a studio registers. The Marten module answers from the Marten, JasperFx and JasperFx.Events this process runs
 /// (or a made-up runtime a test registers); a studio with no versioned library behind it registers none, and
 /// <see cref="NoStudioRuntime" /> answers that nothing is required and nothing can be claimed.
 /// </para>

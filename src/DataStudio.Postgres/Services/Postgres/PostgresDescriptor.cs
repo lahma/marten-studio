@@ -20,7 +20,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One instance per process, immutable. The source parameter is <c>store</c>, as MartenStudio's is, so the shared code
+/// One instance per process, immutable. The source parameter is <c>store</c>, as the Marten module's is, so the shared code
 /// that reads and writes a scope needs no second spelling; what a visitor reads is the label, "Database".
 /// </para>
 /// <para>
@@ -30,7 +30,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// </remarks>
 internal static class PostgresDescriptor
 {
-    /// <summary>PostgresStudio's descriptor key, and its registration marker's.</summary>
+    /// <summary>The Postgres module's descriptor key, and its registration marker's.</summary>
     public const string Key = PostgresRoutes.Root;
 
     /// <summary>The compile-time root every Postgres page's <c>@page</c> starts with, and the first segment of its address.</summary>

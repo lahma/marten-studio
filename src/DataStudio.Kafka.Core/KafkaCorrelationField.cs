@@ -53,7 +53,7 @@ public sealed class KafkaCorrelationField
         return this;
     }
 
-    /// <summary>The field holds the id of a document of this type: its kind is <c>document:{documentType}</c>, and a Marten Studio in the same host can link to it.</summary>
+    /// <summary>The field holds the id of a document of this type: its kind is <c>document:{documentType}</c>, and a Marten module in the same host can link to it.</summary>
     /// <param name="documentType">The document type's name, as the host's store aliases it or as its class is called.</param>
     /// <param name="store">The store, when the host has more than one; <see langword="null" /> for its default.</param>
     /// <returns>This field.</returns>
@@ -65,7 +65,7 @@ public sealed class KafkaCorrelationField
         return this;
     }
 
-    /// <summary>The field holds the id or key of an event stream: its kind is <c>stream</c>, and a Marten Studio in the same host can link to it.</summary>
+    /// <summary>The field holds the id or key of an event stream: its kind is <c>stream</c>, and a Marten module in the same host can link to it.</summary>
     /// <param name="store">The store, when the host has more than one; <see langword="null" /> for its default.</param>
     /// <returns>This field.</returns>
     public KafkaCorrelationField Stream(string? store = null)

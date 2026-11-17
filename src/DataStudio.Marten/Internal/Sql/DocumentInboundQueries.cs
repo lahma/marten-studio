@@ -6,7 +6,7 @@ using DataStudio.Postgres.Internal.Sql;
 namespace DataStudio.Marten.Internal.Sql;
 
 /// <summary>
-/// MartenStudio's half of the Relationships reads: how many documents of one collection point at one document.
+/// The Marten module's half of the Relationships reads: how many documents of one collection point at one document.
 /// </summary>
 /// <remarks>
 /// <para>

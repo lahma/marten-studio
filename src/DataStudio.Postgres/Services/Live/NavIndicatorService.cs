@@ -24,7 +24,7 @@ namespace DataStudio.Postgres.Services.Live;
 /// <param name="Badges">
 /// The badges beyond the health glance, keyed as the descriptor's sidebar entries name them
 /// (<see cref="StudioNavItem.BadgeKey" />) - what each registered <see cref="INavIndicatorContributor" /> read: in
-/// MartenStudio, the dead-letter count and the projections dot. A key with no badge is absent; "zero" and "could not
+/// The Marten module, the dead-letter count and the projections dot. A key with no badge is absent; "zero" and "could not
 /// tell" are both absent, because neither draws anything.
 /// </param>
 internal sealed record NavIndicators(IReadOnlyDictionary<string, StudioNavBadge> Badges)
@@ -283,7 +283,7 @@ internal sealed class NavIndicatorService : INavIndicatorService
     /// <summary>
     /// One key per scope, by the registered key and the database's identity (<paramref name="named" />) - the shape the other
     /// services key on, so the cache's prefix invalidation reaches it when anything in that database is changed: a projection
-    /// write invalidates <c>Key|Identity|</c> (MartenStudio's <c>ProjectionDataService</c>), every tenant's entry with it.
+    /// write invalidates <c>Key|Identity|</c> (the Marten module's <c>ProjectionDataService</c>), every tenant's entry with it.
     /// </summary>
     /// <param name="named">The scope as <see cref="StudioSourceResolver.Named" /> spells it.</param>
     internal static string CacheKey(StudioScope named) =>

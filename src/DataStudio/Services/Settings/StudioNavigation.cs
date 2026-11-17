@@ -37,7 +37,7 @@ internal sealed record StudioNavItem(
     public Func<IShellSettings, bool>? IsShown { get; init; }
 
     /// <summary>
-    /// The key of the condition the module's rail answers for this entry, or <see langword="null" /> for none (1.2): MartenStudio's Stores
+    /// The key of the condition the module's rail answers for this entry, or <see langword="null" /> for none (1.2): the Marten module's Stores
     /// entry is drawn while the visitor may see two or more stores, the same test the header's store picker makes. The module's
     /// <see cref="IStudioModuleRail.IsShown" /> answers it, in memory, on every render, and a key it does not know is not shown (fail
     /// closed). The database's keys are <c>DatabaseRailConditions</c>.

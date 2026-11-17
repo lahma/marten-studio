@@ -8,7 +8,7 @@ namespace DataStudio.Kafka.Core.Decoding;
 /// <summary>
 /// One record being judged by a predicate (decision 7.5). It decodes each artefact (the key's text, a header's text, the CloudEvents
 /// attributes) at most once and only when a clause asks, and counts every real decode in <see cref="DecodeCounters" />, which is how tests
-/// prove that clauses run cheapest first. It is internal to DataStudio.Kafka.Core and never returned from an API KStudio calls (decision 10.4).
+/// prove that clauses run cheapest first. It is internal to DataStudio.Kafka.Core and never returned from an API the Kafka module calls (decision 10.4).
 /// </summary>
 internal sealed class RecordEvaluationContext
 {

@@ -18,7 +18,7 @@ internal sealed record ConnectionContribution
     public IReadOnlyList<ConnectionContributedSection> Sections { get; init; } = [];
 
     /// <summary>
-    /// The average row or document size in bytes the studio can vouch for (Marten Studio passes T09's and E04's), for the
+    /// The average row or document size in bytes the studio can vouch for (the Marten module passes T09's and E04's), for the
     /// <c>BUFFER</c> hint; <see langword="null" /> when it knows none.
     /// </summary>
     public long? AverageRowBytes { get; init; }
@@ -36,7 +36,7 @@ internal sealed record ConnectionContribution
 
 /// <summary>
 /// The internal seam a studio fills to add its own knowledge to the Connection page (D32's pattern, as
-/// <c>IPlanInsightContributor</c>): PostgresStudio runs every registered contributor and MartenStudio registers its own. A
+/// <c>IPlanInsightContributor</c>): the Postgres module runs every registered contributor and the Marten module registers its own. A
 /// contributor contributes section data and hint evidence, never markup and never a string taken from a connection string.
 /// </summary>
 /// <remarks>

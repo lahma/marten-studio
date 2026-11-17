@@ -5,7 +5,7 @@ using DataStudio.Kafka.Core.Predicates;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// KStudio's own sentences (D34): the host studio's <c>StudioText</c> does not change, so none of its words are borrowed. One place,
+/// The Kafka module's own sentences (D34): the host studio's <c>StudioText</c> does not change, so none of its words are borrowed. One place,
 /// so that a rename of the product is one edit.
 /// </summary>
 internal static class KafkaText
@@ -13,7 +13,7 @@ internal static class KafkaText
     /// <summary>The module's key: its audit scope kind, and its segment under the studio's mount.</summary>
     public const string Key = "kafka";
 
-    /// <summary>The durable audit events KStudio logs, as the Activity page's footer names them (#77): 9600 to 9609 (9610 and 9611 are not audit events), see <c>KafkaLog</c>.</summary>
+    /// <summary>The durable audit events the Kafka module logs, as the Activity page's footer names them (#77): 9600 to 9609 (9610 and 9611 are not audit events), see <c>KafkaLog</c>.</summary>
     public const string AuditEventIds = "9600-9609";
 
     /// <summary>The module's name: the rail's credit line, the chip's headings and the front page's tile.</summary>
@@ -637,7 +637,7 @@ internal static class KafkaText
     /// <summary>The note on a group compared by its key and value as shown.</summary>
     public const string DuplicatesComparedAsShown = "Compared as shown: a masked part counts as equal to any other mask.";
 
-    /// <summary>The words of the button a Marten Studio record screen draws to look a record up in Kafka (D44). The studio never spells it.</summary>
+    /// <summary>The words of the button a Marten module record screen draws to look a record up in Kafka (D44). The studio never spells it.</summary>
     public const string FindInKafka = "Find in Kafka";
 
     /// <summary>Said instead of Marten links on a record whose <c>tenant-id</c> header is hidden: the address would carry the hidden value.</summary>

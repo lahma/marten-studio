@@ -86,7 +86,7 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
         : null;
 
     /// <summary>
-    /// The threshold's sentence, naming the option as the studio's own registration spells it - MartenStudio's when a
+    /// The threshold's sentence, naming the option as the studio's own registration spells it - the Marten module's when a
     /// count carries no note of its own, which is what <see cref="Reason" /> says for its documents.
     /// </summary>
     /// <param name="threshold">The threshold that declined the upgrade.</param>
@@ -141,7 +141,7 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 /// twenty-five sequential scans.
 /// </para>
 /// <para>
-/// Not partial: the count a Marten document list narrows by tenant and soft delete is MartenStudio's, written as
+/// Not partial: the count a Marten document list narrows by tenant and soft delete is the Marten module's, written as
 /// extension members (<c>DocumentCountEstimator</c>) because a partial type cannot span the two assemblies.
 /// </para>
 /// </remarks>
@@ -366,7 +366,7 @@ internal sealed class CountEstimator
     /// For a table the studio has no document description for — the event store's own
     /// <c>mt_events</c> and <c>mt_streams</c>, or a relation in the database browser — where "whole table" is the
     /// only question there is. A caller that has a scope to narrow by wants the scoped <c>CountExactAsync</c>
-    /// overload MartenStudio adds for a document table instead, because a count under a list that shows fewer
+    /// overload the Marten module adds for a document table instead, because a count under a list that shows fewer
     /// rows than it is a count of a different question.
     /// </para>
     /// <para>

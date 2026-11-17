@@ -6,15 +6,15 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// Whether a Kafka capability is on (D35): the host studio's master switch is off and the host switched the flag on. KStudio has no
+/// Whether a Kafka capability is on (D35): the host studio's master switch is off and the host switched the flag on. The Kafka module has no
 /// <c>ReadOnly</c> of its own - the host studio's turns every capability off, here and in the chip - so there is one master switch and the
 /// chip's "every capability is off" stays true.
 /// </summary>
-/// <param name="options">KStudio's options.</param>
+/// <param name="options">The Kafka module's options.</param>
 /// <param name="settings">The host studio's settings, whose <c>ReadOnly</c> is the master switch.</param>
 internal sealed class KafkaCapabilityGuard(IOptions<KafkaOptions> options, IShellSettings settings)
 {
-    /// <summary>Every capability KStudio offers.</summary>
+    /// <summary>Every capability the Kafka module offers.</summary>
     public static IReadOnlyList<KafkaCapability> Offered { get; } = Enum.GetValues<KafkaCapability>();
 
     /// <summary>Whether the host studio's master switch is on, which turns every capability off.</summary>

@@ -12,7 +12,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// </remarks>
 internal static class PostgresDiagnosticsDescriptor
 {
-    /// <summary>The descriptor key: Postgres Studio's.</summary>
+    /// <summary>The descriptor key: the Postgres module's.</summary>
     public const string Key = "postgres";
 
     /// <summary>The descriptor every engine service reads in a host with no studio.</summary>

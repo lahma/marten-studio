@@ -3,7 +3,7 @@ using DataStudio.Kafka.Core.Clusters;
 namespace DataStudio.Kafka.Core.Wire;
 
 /// <summary>
-/// Every broker call KStudio makes (AGENTS.md D36), one per cluster. It exists so that the fast suite can run the engine on a
+/// Every broker call the Kafka module makes (AGENTS.md D36), one per cluster. It exists so that the fast suite can run the engine on a
 /// hand-written fake broker, not for a second client; no Confluent type crosses it and errors are values. It has no produce,
 /// commit, delete or alter method, so neither the Confluent driver nor the fake can be asked for one (D37).
 /// </summary>

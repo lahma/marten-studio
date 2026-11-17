@@ -77,7 +77,7 @@ public static class MartenHealthChecksBuilderExtensions
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> or <paramref name="name" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The application was deployed without the PostgresStudio package this one was released with, or with
+    /// The application was deployed without the Postgres module package this one was released with, or with
     /// another version of it.
     /// </exception>
     public static IHealthChecksBuilder AddMartenDiagnostics(
@@ -91,8 +91,8 @@ public static class MartenHealthChecksBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         // The same guard, for the same reason, as services.AddDataStudio().AddMarten(): a host may register its health checks
-        // first, and this body names no PostgresStudio type so the guard can explain a missing or mismatched
-        // PostgresStudio before the JIT meets one. The rest is in a NoInlining method; PostgresVersionGuardTests
+        // first, and this body names no Postgres module type so the guard can explain a missing or mismatched
+        // The Postgres module before the JIT meets one. The rest is in a NoInlining method; PostgresVersionGuardTests
         // scans this method's IL.
         PostgresVersionGuard.Ensure();
 

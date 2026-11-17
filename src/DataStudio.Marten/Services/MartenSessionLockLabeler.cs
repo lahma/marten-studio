@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="ISessionLockLabeler" />: the store's daemon leadership and shard keys and its schema-apply
+/// The Marten module's <see cref="ISessionLockLabeler" />: the store's daemon leadership and shard keys and its schema-apply
 /// lock, read from its options, and the relations named through the classifier the caller hands in.
 /// </summary>
 /// <remarks>

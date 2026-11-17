@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is tested
-       with (DataStudio.Kafka.Core itself has no framework reference, which KStudioCoreFenceTests holds). -->
+       with (DataStudio.Kafka.Core itself has no framework reference, which KafkaCoreFenceTests holds). -->
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

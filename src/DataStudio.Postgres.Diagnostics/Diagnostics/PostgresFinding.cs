@@ -32,7 +32,7 @@ public sealed record PostgresFinding
 
     /// <summary>
     /// The tenant it is about, or null. Present only with <see cref="PostgresDiagnosticsRequest.IncludeActivity" />: without
-    /// it a finding about one tenant is withheld whole. Marten Studio only.
+    /// it a finding about one tenant is withheld whole. The Marten module only.
     /// </summary>
     public string? TenantId { get; init; }
 

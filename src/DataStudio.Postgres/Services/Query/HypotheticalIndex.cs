@@ -12,7 +12,7 @@ internal enum HypotheticalIndexOrigin
     /// <summary>Read off a plan: a sequential scan's filter on plain columns of the table it reads (X2).</summary>
     Plan,
 
-    /// <summary>The index Marten would create for the advisor's <c>StoreOptions</c> line - Marten's own DDL, from MartenStudio.</summary>
+    /// <summary>The index Marten would create for the advisor's <c>StoreOptions</c> line - Marten's own DDL, from the Marten module.</summary>
     Marten,
 }
 

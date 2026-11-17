@@ -135,7 +135,7 @@
    It cannot be scoped. `.ms-studio` is on a <div> inside the document's <body>, and there is no selector
    that reaches a descendant's ancestor except `:has()` - which would make the studio's own margin depend
    on a match the browser re-evaluates on every DOM mutation, to fix a leak that does not exist. This
-   stylesheet is linked from exactly one document: the studio's own shell, which MartenStudioApp renders
+   stylesheet is linked from exactly one document: the studio's own shell, which DataStudioApp renders
    and owns the <body> of. A host page never loads it, so `body` here is the studio's body and nobody
    else's (AGENTS.md hard rule 3).
 

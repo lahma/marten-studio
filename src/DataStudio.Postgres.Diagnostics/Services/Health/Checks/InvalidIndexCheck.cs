@@ -222,7 +222,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             ],
             Caveat = caveat,
             // An ignored index is one no apply touches, and a partitioned table's is one no apply can resume: both are said in
-            // words above. Anything else is the studio's to word - a re-apply in MartenStudio.
+            // words above. Anything else is the studio's to word - a re-apply in the Marten module.
             Remedy = index.Origin == IndexOrigin.Ignored || onPartitionedTable ? null : remedies?.RebuildInvalidIndex(table, index.Row, index.Origin),
         };
     }

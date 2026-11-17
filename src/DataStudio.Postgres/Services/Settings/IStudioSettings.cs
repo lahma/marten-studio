@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <b>Names, not values, are what a sentence needs.</b> A disabled control says which option a host would set, spelled
 /// the way the host's own registration spells it (D4). <c>OptionName</c> composes that spelling from
 /// <c>OptionsTypeName</c>, so the shared code that writes the sentence never names a studio's type itself:
-/// MartenStudio answers <c>MartenOptions.Capabilities.RunSql</c>, and a studio with options of its own answers in
+/// The Marten module answers <c>MartenOptions.Capabilities.RunSql</c>, and a studio with options of its own answers in
 /// its own type's name.
 /// </para>
 /// <para>
@@ -33,7 +33,7 @@ internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
 
     /// <summary>
     /// The policy asked, with the scope as the resource, before anything of a source, database or tenant is listed,
-    /// framed or read - MartenStudio's <c>StoreAuthorizationPolicy</c>. <see langword="null" /> asks nothing.
+    /// framed or read - the Marten module's <c>StoreAuthorizationPolicy</c>. <see langword="null" /> asks nothing.
     /// </summary>
     string? ScopePolicy { get; }
 

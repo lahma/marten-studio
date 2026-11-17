@@ -77,7 +77,7 @@ internal sealed class MartenSettings : IStudioSettings
     public string ReadOnlyOptionName => shell.ReadOnly ? shell.ReadOnlyOptionName : ((IDiagnosticsSettings) this).OptionName("ReadOnly");
 
     /// <inheritdoc />
-    /// <remarks>Every member: MartenStudio offers all fourteen.</remarks>
+    /// <remarks>Every member: the Marten module offers all fourteen.</remarks>
     public IReadOnlyList<StudioCapability> Capabilities => StudioCapabilityGuard.All;
 
     /// <inheritdoc />

@@ -95,7 +95,7 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// </para>
 /// <para>
 /// <b>The databases are the ones the sources already hold</b> (<see cref="IStudioSourceProvider.ListUnattendedAsync" />;
-/// MartenStudio's are the ones each tenancy holds), so the export's own listing never makes a master-table, sharded or
+/// The Marten module's are the ones each tenancy holds), so the export's own listing never makes a master-table, sharded or
 /// single-server tenancy apply, seed, query or create anything, and a database is opened only when the run reaches it
 /// (<see cref="IStudioSourceProvider.ResolveUnattendedAsync" />). The provider is a circuit's service, so a run resolves it
 /// from a scope of its own and disposes the scope when it ends.

@@ -1,7 +1,7 @@
 namespace DataStudio.Kafka;
 
 /// <summary>
-/// What KStudio may read beyond metadata (AGENTS.md D35). Every flag defaults to <see langword="false" /> (D4); describing clusters,
+/// What the Kafka module may read beyond metadata (AGENTS.md D35). Every flag defaults to <see langword="false" /> (D4); describing clusters,
 /// topics, partitions and groups needs none of them (K5). The host studio's <c>ReadOnly</c> turns every flag off at once.
 /// </summary>
 public sealed class KafkaCapabilities

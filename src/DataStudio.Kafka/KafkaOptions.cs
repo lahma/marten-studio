@@ -3,13 +3,13 @@ using DataStudio.Kafka.Internal;
 namespace DataStudio.Kafka;
 
 /// <summary>
-/// KStudio's options (AGENTS.md D34, D35): the clusters and topics it may read and what a scan may cost, from its engine's
+/// The Kafka module's options (AGENTS.md D34, D35): the clusters and topics it may read and what a scan may cost, from its engine's
 /// <see cref="KafkaEngineOptions" />, and the policies and capabilities that decide who may use them.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Chaining.</b> The cluster and topic methods (<c>AddCluster</c>, <c>Topic</c>) are the engine's and return
-/// <see cref="KafkaEngineOptions" />. Chaining from them works; KStudio's own settings are properties, so they are set in the same
+/// <see cref="KafkaEngineOptions" />. Chaining from them works; the Kafka module's own settings are properties, so they are set in the same
 /// callback, and the fluent API is not duplicated here.
 /// </para>
 /// <para>
@@ -36,7 +36,7 @@ public sealed class KafkaOptions : KafkaEngineOptions
     /// </summary>
     public string? CapabilityAuthorizationPolicy { get; set; }
 
-    /// <summary>What KStudio may read beyond metadata. Every capability is off until the host sets it.</summary>
+    /// <summary>What the Kafka module may read beyond metadata. Every capability is off until the host sets it.</summary>
     public KafkaCapabilities Capabilities { get; set; } = new();
 
     private readonly List<KafkaExternalLinkRegistration> externalLinks = [];

@@ -14,7 +14,7 @@ internal sealed partial class RuntimeFeature : StudioFeatureRequirement
 }
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioRuntime" />: the probe table (<see cref="RuntimeFeature" />) and the Marten, JasperFx and
+/// The Marten module's <see cref="IStudioRuntime" />: the probe table (<see cref="RuntimeFeature" />) and the Marten, JasperFx and
 /// JasperFx.Events this host runs - this process's own, or a made-up one a test registers.
 /// </summary>
 /// <param name="Runtime">The runtime the features are judged against.</param>

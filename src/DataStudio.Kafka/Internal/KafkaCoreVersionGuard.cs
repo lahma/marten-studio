@@ -47,10 +47,10 @@ internal static class KafkaCoreVersionGuard
     /// <summary>The shell's assembly name: a string, never a type, for the reason in the remarks.</summary>
     internal const string ShellAssemblyName = "DataStudio";
 
-    /// <summary>KStudio's engine assembly name, checked the same way.</summary>
+    /// <summary>The Kafka module's engine assembly name, checked the same way.</summary>
     internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
 
-    /// <summary>The key of the assembly metadata that names KStudio's preview label (Directory.Build.props' <c>KafkaPrereleaseLabel</c>).</summary>
+    /// <summary>The key of the assembly metadata that names the Kafka module's preview label (Directory.Build.props' <c>KafkaPrereleaseLabel</c>).</summary>
     internal const string PrereleaseLabelMetadataKey = "KafkaPrereleaseLabel";
 
     /// <summary>
@@ -83,7 +83,7 @@ internal static class KafkaCoreVersionGuard
     /// <param name="bringer">The package whose reference brings it, which a host that removes its pin lets do so.</param>
     /// <param name="kStudio">DataStudio.Kafka's own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
-    /// <param name="family">Whether the required assembly is the family's, at the version without KStudio's preview label.</param>
+    /// <param name="family">Whether the required assembly is the family's, at the version without the Kafka module's preview label.</param>
     private static void EnsureAssembly(string name, string bringer, Assembly kStudio, Func<Assembly> load, bool family)
     {
         string? self = InformationalVersion(kStudio);
@@ -207,7 +207,7 @@ internal static class KafkaCoreVersionGuard
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadShell() => Assembly.Load(new AssemblyName(ShellAssemblyName));
 
-    /// <summary>Loads KStudio's engine by name, for the same reason and from a method of its own.</summary>
+    /// <summary>Loads the Kafka module's engine by name, for the same reason and from a method of its own.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadEngine() => Assembly.Load(new AssemblyName(EngineAssemblyName));
 }

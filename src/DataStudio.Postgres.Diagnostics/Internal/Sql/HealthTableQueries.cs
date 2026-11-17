@@ -1495,7 +1495,7 @@ internal static class HealthTableQueries
 
         string[] named = names as string[] ?? [.. names];
 
-        // The schemas named exactly are the source's own (D27 in Postgres Studio): the second total counts them.
+        // The schemas named exactly are the source's own (D27 in the Postgres module): the second total counts them.
         return new HealthQuery(
             RelationalTablesSql,
             [

@@ -16,11 +16,11 @@ namespace DataStudio.Kafka.Core.Scanning;
 /// <param name="Topic">The topic.</param>
 /// <param name="Partition">The partition.</param>
 /// <param name="Offset">The offset.</param>
-/// <param name="Neighbours">How many records to read on each side, 0 to 10; KStudio passes 5.</param>
+/// <param name="Neighbours">How many records to read on each side, 0 to 10; the Kafka module passes 5.</param>
 /// <param name="Grant">What the visitor may read; it must include <see cref="KafkaReadGrant.Envelope" />.</param>
 /// <param name="Isolation">Whether uncommitted records are included.</param>
 /// <param name="FocusValueBytes">
-/// Under the payload grant: how many bytes of value the record asked for may keep (KStudio passes the decode limit), where its neighbours keep
+/// Under the payload grant: how many bytes of value the record asked for may keep (the Kafka module passes the decode limit), where its neighbours keep
 /// what is left of the match budget. A record read then holds at most 21 matches plus this.
 /// </param>
 internal sealed record KafkaRecordRequest(

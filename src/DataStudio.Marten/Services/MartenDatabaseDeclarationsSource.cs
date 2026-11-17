@@ -17,7 +17,7 @@ using DataStudio.Postgres.Services.Schema;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IDatabaseDeclarationsSource" />: every registered store's declarations, read from each
+/// The Marten module's <see cref="IDatabaseDeclarationsSource" />: every registered store's declarations, read from each
 /// store's options by <see cref="SchemaDeclarationReader" />, and every other store's policies for the database the
 /// visitor's scope resolved to.
 /// </summary>

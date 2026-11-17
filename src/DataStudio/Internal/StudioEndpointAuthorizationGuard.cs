@@ -30,11 +30,11 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Internal;
 
 /// <summary>
-/// Refuses to start an application whose Marten Studio endpoints nothing authorizes.
+/// Refuses to start an application whose Marten module endpoints nothing authorizes.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Marten Studio's pages are fully mutating and add no authentication of their own: they can read and
+/// The Marten module's pages are fully mutating and add no authentication of their own: they can read and
 /// edit every document in every Marten store in this process, archive event streams, control the
 /// projection daemon, apply schema changes and run SQL. An open one is therefore a serious exposure
 /// rather than an information leak, and the mistake that opens it is a mapping call that says nothing.

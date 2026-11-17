@@ -1,7 +1,7 @@
 namespace DataStudio.Postgres.Services.Find;
 
 /// <summary>
-/// One kind of thing Find can look for, and the page its hits open: PostgresStudio's tables and statements, MartenStudio's documents,
+/// One kind of thing Find can look for, and the page its hits open: the Postgres module's tables and statements, the Marten module's documents,
 /// streams and events (1.2).
 /// </summary>
 /// <remarks>

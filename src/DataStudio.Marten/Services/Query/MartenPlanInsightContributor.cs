@@ -5,7 +5,7 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Services.Query;
 
 /// <summary>
-/// MartenStudio's <see cref="IPlanInsightContributor" /> (1.0-P3C): P26 to P28, judged against the document tables the store in the
+/// The Marten module's <see cref="IPlanInsightContributor" /> (1.0-P3C): P26 to P28, judged against the document tables the store in the
 /// visitor's scope declares (<see cref="MartenPlanInsights" />).
 /// </summary>
 /// <remarks>

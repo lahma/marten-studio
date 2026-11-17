@@ -7,11 +7,11 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// KStudio as a module of the studio the host registered (D34): its pages, its rail section, its cluster selector, its words and its
-/// capabilities, composed into the shell's descriptor when it is first resolved. Everything here is pure and reads only KStudio's own options,
+/// The Kafka module as a module of the studio the host registered (D34): its pages, its rail section, its cluster selector, its words and its
+/// capabilities, composed into the shell's descriptor when it is first resolved. Everything here is pure and reads only the Kafka module's own options,
 /// read live on every call so a rail entry or the chip follows the options exactly.
 /// </summary>
-/// <param name="options">KStudio's options.</param>
+/// <param name="options">The Kafka module's options.</param>
 internal sealed class KafkaModule(IOptions<KafkaOptions> options) : IStudioModule
 {
     /// <summary>The compile-time root every Kafka page's <c>@page</c> starts with.</summary>

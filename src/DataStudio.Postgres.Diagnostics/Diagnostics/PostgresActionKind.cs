@@ -6,7 +6,7 @@ namespace DataStudio.Postgres;
 /// </summary>
 public enum PostgresActionKind
 {
-    /// <summary>A line of the application's own configuration - in Marten Studio a <c>StoreOptions</c> line. Never DDL.</summary>
+    /// <summary>A line of the application's own configuration - in the Marten module a <c>StoreOptions</c> line. Never DDL.</summary>
     ApplicationConfiguration = 0,
 
     /// <summary>SQL for the application's own migrations, for a table they own.</summary>

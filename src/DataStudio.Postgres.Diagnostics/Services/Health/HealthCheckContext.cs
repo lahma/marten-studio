@@ -25,7 +25,7 @@ namespace DataStudio.Postgres.Services.Health;
 /// database; what only a studio knows - its tables (<see cref="IHealthTableSource" />), its lock labels
 /// (<see cref="ISessionLockLabeler" />), its daemon's facts (<see cref="IHorizonContributor" />) - a gatherer asks
 /// <see cref="Services" /> for. A studio adds its own reading of the context as C# extension members over this type
-/// (MartenStudio's <c>Store</c>, <c>StoreOptions</c>, <c>Database</c>, <c>Runtime</c>), and a check of that studio's
+/// (the Marten module's <c>Store</c>, <c>StoreOptions</c>, <c>Database</c>, <c>Runtime</c>), and a check of that studio's
 /// own assembly is only ever handed that studio's sources.
 /// </para>
 /// <para>
@@ -74,7 +74,7 @@ internal sealed class HealthCheckContext
 
     /// <summary>
     /// The source and database being swept, resolved with no tenant - the resolver's own record, whose subtype a studio's
-    /// extension members read (MartenStudio's <c>ResolvedScope</c>), so it is never rebuilt from its parts.
+    /// extension members read (the Marten module's <c>ResolvedScope</c>), so it is never rebuilt from its parts.
     /// </summary>
     public ResolvedSource Source { get; }
 

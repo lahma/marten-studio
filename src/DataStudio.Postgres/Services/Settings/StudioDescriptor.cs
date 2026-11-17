@@ -38,7 +38,7 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     public required string Summary { get; init; }
 
     /// <summary>
-    /// The body the studio's shared <c>query</c> page (<c>QueryPage</c>) renders - MartenStudio's three-mode page, or
+    /// The body the studio's shared <c>query</c> page (<c>QueryPage</c>) renders - the Marten module's three-mode page, or
     /// the shared SQL console panel alone. A component with no <c>@page</c> of its own, so two modules' bodies never claim the route twice.
     /// </summary>
     public required Type QueryComponent { get; init; }
@@ -51,15 +51,15 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
 
     /// <summary>
     /// The resource an authorization handler is shown for a scope and a capability (or
-    /// <see langword="null" /> for a read): MartenStudio's public <c>MartenStoreResource</c>. Pure, and called for every
+    /// <see langword="null" /> for a read): the Marten module's public <c>MartenStoreResource</c>. Pure, and called for every
     /// policy question, so it must not allocate more than the resource itself or do any IO.
     /// </summary>
     public required Func<StudioScope, string?, object> CreateResource { get; init; }
 
     /// <summary>
     /// The keyboard shortcuts only this studio's pages answer to (1.2), listed on the shortcut sheet after
-    /// <see cref="StudioShortcuts.Shared" />: MartenStudio's document list and document editor. Empty for a studio with none, so a
-    /// Postgres Studio host is never told about a key that does nothing on its pages.
+    /// <see cref="StudioShortcuts.Shared" />: the Marten module's document list and document editor. Empty for a studio with none, so a
+    /// The Postgres module host is never told about a key that does nothing on its pages.
     /// </summary>
     public IReadOnlyList<StudioShortcutGroup> ExtraShortcuts { get; init; } = [];
 }
@@ -69,7 +69,7 @@ internal static class StudioNavConditions
 {
     /// <summary>
     /// Whether the SQL console's capability is effectively on: <c>RunSql</c> set and the master switch off. The entries that
-    /// are only a door to a page that runs SQL (Postgres Studio's Query) are absent otherwise, so an
+    /// are only a door to a page that runs SQL (the Postgres module's Query) are absent otherwise, so an
     /// administrator is not offered a page whose one sentence is addressed to the developer who configures the host
     /// (issue #37). The page keeps its notice for anyone who reaches it by address.
     /// </summary>

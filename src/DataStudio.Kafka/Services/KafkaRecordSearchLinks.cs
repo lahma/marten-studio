@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// "Find in Kafka" (D44, decision 8 of D-CORR): from a Marten Studio record screen to the timeline of records that refer to that document or stream.
+/// "Find in Kafka" (D44, decision 8 of D-CORR): from a Marten module record screen to the timeline of records that refer to that document or stream.
 /// Pure, as <see cref="IStudioRecordSearchLinks" /> requires: it reads the registered clusters' declarations and nothing from Kafka, asks no policy, and
 /// grants nothing, because the timeline page authorizes everything it reads. The value travels only in the address's fragment, which a browser never
 /// sends to a server, and no part of the address is built by concatenating unescaped text.

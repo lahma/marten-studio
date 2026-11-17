@@ -3,11 +3,11 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's <see cref="IStudioLinks" />: it has no documents, event store, projections or schema screen, so every
+/// The Postgres module's <see cref="IStudioLinks" />: it has no documents, event store, projections or schema screen, so every
 /// link is <see langword="null" /> and the shared screens draw what they would have linked as plain text.
 /// </summary>
 /// <remarks>
-/// That is the honest answer for an object the <c>mt_</c> rule calls Marten's: its rows are read in Marten Studio, where
+/// That is the honest answer for an object the <c>mt_</c> rule calls Marten's: its rows are read in the Marten module, where
 /// its tenancy and visibility rules apply, and there is nowhere here to send anybody. The database page says so once
 /// (<see cref="StudioText.MartenStoreNotice" />). Pure, like every <see cref="IStudioLinks" />: no IO, no scope.
 /// </remarks>

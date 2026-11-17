@@ -185,7 +185,7 @@ internal sealed record MartenTableScope(
 }
 
 /// <summary>
-/// How MartenStudio classifies a table the catalog lists beside the store, and the set the two halves make (issue #8, G1).
+/// How the Marten module classifies a table the catalog lists beside the store, and the set the two halves make (issue #8, G1).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -390,7 +390,7 @@ internal static class MartenDatabaseTables
 }
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioTableSet" /> (issue #8, G1): the tables the store declares, with their kinds,
+/// The Marten module's <see cref="IStudioTableSet" /> (issue #8, G1): the tables the store declares, with their kinds,
 /// origin-aware index rules and <c>StoreOptions</c> remedies exactly as before, and every other table of the admitted
 /// schemas beside them, classified as the host's, a library's or somebody else's.
 /// </summary>

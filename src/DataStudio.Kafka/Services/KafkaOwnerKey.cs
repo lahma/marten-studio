@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// Who a scan belongs to (D-UI decision 11): the engine counts concurrent scans and the hourly byte allowance per owner, and only KStudio decides
+/// Who a scan belongs to (D-UI decision 11): the engine counts concurrent scans and the hourly byte allowance per owner, and only the Kafka module decides
 /// who an owner is. A visitor with a name is <c>user:{name}</c>, so two tabs of one user share the slot and the allowance, which is the point of an
 /// owner. A principal with no name at all (a host with no authentication) is <c>circuit:{guid}</c>, a Guid made once per circuit. The key is the
 /// engine's to keep: it is never logged and never drawn.

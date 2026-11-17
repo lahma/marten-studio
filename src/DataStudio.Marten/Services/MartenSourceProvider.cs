@@ -17,7 +17,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioSourceProvider" />: the application's Marten stores (<see cref="MartenStoreRegistry" />),
+/// The Marten module's <see cref="IStudioSourceProvider" />: the application's Marten stores (<see cref="MartenStoreRegistry" />),
 /// their databases (<c>Storage.AllDatabases()</c>, D27's rules unchanged) and their tenants (<see cref="TenantDiscovery" />).
 /// </summary>
 /// <remarks>

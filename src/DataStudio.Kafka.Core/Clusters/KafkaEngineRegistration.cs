@@ -13,7 +13,7 @@ namespace DataStudio.Kafka.Core.Clusters;
 
 /// <summary>
 /// The engine's registrations (decision 2.5): singletons only. No hosted service, no startup filter, nothing resolved here and nothing
-/// connected: a client is created by the first call that needs it. KStudio calls <see cref="Add" />; tests call it directly, putting a
+/// connected: a client is created by the first call that needs it. The Kafka module calls <see cref="Add" />; tests call it directly, putting a
 /// fake <see cref="IKafkaWireFactory" /> first.
 /// </summary>
 internal static class KafkaEngineRegistration

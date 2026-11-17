@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// KStudio's own log events, 9600 to 9649 (the engine's are 9650 to 9699, <c>KafkaEngineLog</c>): the audit and refusal events of the module
+/// The Kafka module's own log events, 9600 to 9649 (the engine's are 9650 to 9699, <c>KafkaEngineLog</c>): the audit and refusal events of the module
 /// and its shell side. Source-generated with a pinned id each, declared <c>private</c> and called only through the wrappers below, so
 /// that a value a visitor could shape reaches the log only through <see cref="KafkaLogValue" /> - control, format and separator
 /// characters escaped, a backslash doubled, a name bounded at 256 characters and other text at 4,000 (AGENTS.md hard rule 5).

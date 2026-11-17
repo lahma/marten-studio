@@ -27,7 +27,7 @@ namespace DataStudio.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every endpoint the studio's own <c>MapRazorComponents&lt;MartenStudioApp&gt;()</c> produced — its
+/// Every endpoint the studio's own <c>MapRazorComponents&lt;DataStudioApp&gt;()</c> produced — its
 /// pages <em>and</em> the <c>/_blazor</c> circuit it registered — because the studio owns that root
 /// component and therefore owns everything that call mapped. A <c>RequireAuthorization()</c> or an
 /// <c>AllowAnonymous()</c> the caller wrote is a statement about <em>the studio</em>, and a statement

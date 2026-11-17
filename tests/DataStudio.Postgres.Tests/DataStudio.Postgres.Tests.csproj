@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <!-- PostgresStudio's own fast suite: no Docker, and no Marten anywhere in its graph. It references the PostgresStudio
-       project alone, so a host with only Npgsql is what these tests build against (PostgresStudioFenceTests proves the
+       project alone, so a host with only Npgsql is what these tests build against (PostgresFenceTests proves the
        assembly and its output folder hold no Marten family). Sdk.Razor, not Sdk: bUnit renders components declared in
        .razor test files. -->
   <PropertyGroup>

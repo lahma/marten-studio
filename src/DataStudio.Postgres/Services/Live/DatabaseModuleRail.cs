@@ -13,10 +13,10 @@ namespace DataStudio.Postgres.Services.Live;
 /// <summary>The conditions the database's rail answers for an entry (<see cref="StudioNavItem.ShownWhen" />).</summary>
 internal static class DatabaseRailConditions
 {
-    /// <summary>Drawn while the visitor may see two or more stores or sources: the header's picker's own test (MartenStudio's Stores entry).</summary>
+    /// <summary>Drawn while the visitor may see two or more stores or sources: the header's picker's own test (the Marten module's Stores entry).</summary>
     public const string SeveralSources = "several-sources";
 
-    /// <summary>Drawn where the header draws a tenant picker (MartenStudio's Tenants entry).</summary>
+    /// <summary>Drawn where the header draws a tenant picker (the Marten module's Tenants entry).</summary>
     public const string TenantSelector = "tenant-selector";
 
     /// <summary>

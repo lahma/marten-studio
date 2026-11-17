@@ -25,7 +25,7 @@ internal sealed record PublicSchemaCreateFacts(IReadOnlyList<string> OwnSchemas,
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The source's own schemas only</b>: a Marten store's schemas, Postgres Studio's admitted <c>BrowsableSchemas</c>
+/// <b>The source's own schemas only</b>: a Marten store's schemas, the Postgres module's admitted <c>BrowsableSchemas</c>
 /// (<see cref="IDatabaseDeclarationsSource" />, read from configuration). Their names are structure every visitor through the
 /// check's gate is shown already, so the finding names the schema.
 /// </para>
@@ -45,7 +45,7 @@ internal sealed class PublicSchemaCreateCheck : HealthCheck<PublicSchemaCreateFa
 {
     /// <summary>
     /// What the status row says when the declarations naming the database's own schemas could not be read - in words that
-    /// are a Marten store's and a Postgres Studio source's alike.
+    /// are a Marten store's and a Postgres module source's alike.
     /// </summary>
     internal const string DeclarationsUnread =
         "Which schemas are this database's own could not be read, so whether PUBLIC may create in them is not checked.";

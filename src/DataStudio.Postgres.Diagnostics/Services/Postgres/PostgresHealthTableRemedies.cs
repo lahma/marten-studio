@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's remedy wording (<see cref="IHealthTableRemedies" />, issue #8 G12): the SQL a DBA would put in a
+/// The Postgres module's remedy wording (<see cref="IHealthTableRemedies" />, issue #8 G12): the SQL a DBA would put in a
 /// migration - <c>ALTER TABLE … SET (autovacuum_…)</c>, <c>CREATE INDEX CONCURRENTLY …</c>,
 /// <c>DROP INDEX CONCURRENTLY …</c>, <c>REINDEX INDEX CONCURRENTLY …</c> - as text to hand to whoever owns the schema.
 /// The studio never runs any of it.
@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <b>Only for a table the host's migrations own.</b> Every remedy here is <see cref="HealthRemedy.ForMigration" />, and
 /// only for a <see cref="StudioTableKind.Relational" /> table: a migration statement on a table some library's
 /// configuration reconciles is a statement that library undoes. So a table the <c>mt_</c> rule calls Marten's gets none
-/// - Marten's next <c>CreateOrUpdate</c> drops an index nobody declares, and its rows and its schema are Marten Studio's
+/// - Marten's next <c>CreateOrUpdate</c> drops an index nobody declares, and its rows and its schema are the Marten module's
 /// business - and neither does a library's, whose index design is the library's (they are exempt from those rules
 /// anyway), except where a storage parameter is the only lever and it is the host's database.
 /// </para>

@@ -62,7 +62,7 @@ internal interface IConnectionInsightService
 /// visitor's spelling, every later question and audit entry the registered key and the resolved identity.
 /// </para>
 /// <para>
-/// <b>Not audited, but for the sessions.</b> The page is a read of configuration, like Marten Studio's Configuration page, and
+/// <b>Not audited, but for the sessions.</b> The page is a read of configuration, like the Marten module's Configuration page, and
 /// records nothing. What names other programs' activity - the sessions, and the pool's peak counted by application name - is one
 /// ring entry each under <c>ViewDatabaseActivity</c> for the first reveal per circuit, per store and database (each has its own
 /// ledger key and signature, so one never shadows the other, and the Overview's glance, which shows no peak, records neither);

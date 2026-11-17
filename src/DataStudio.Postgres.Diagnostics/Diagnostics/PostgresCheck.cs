@@ -12,7 +12,7 @@ public sealed record PostgresCheck
     public PostgresFindingCategory Category { get; init; }
 
     /// <summary>
-    /// What it looks for, in English and in this studio's own words - Marten Studio's and Postgres Studio's may differ, and
+    /// What it looks for, in English and in this studio's own words - the Marten module's and the Postgres module's may differ, and
     /// either may be worded differently from the heading in <c>docs/health/codes.md</c>. Wording, not identity: key your own
     /// on <see cref="Code" />. The check's documentation is <see cref="DocsUrl" />.
     /// </summary>

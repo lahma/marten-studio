@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services.Schema;
 namespace DataStudio.Marten.Services.Schema;
 
 /// <summary>
-/// The storage parameters a Marten document mapping declares - MartenStudio's half of <see cref="StorageParameters" />,
+/// The storage parameters a Marten document mapping declares - the Marten module's half of <see cref="StorageParameters" />,
 /// which compares them with a table's own.
 /// </summary>
 /// <remarks>

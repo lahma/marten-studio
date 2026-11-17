@@ -25,8 +25,8 @@ internal sealed record NamedPoolIdentification(IReadOnlyDictionary<string, strin
 /// <remarks>
 /// <para>
 /// <b>Which data sources.</b> The one the sweep is about (<see cref="IStudioDatabase.DataSource" />), then whatever the studio's
-/// source provider holds (<see cref="IStudioSourceProvider.HeldDataSourcesAsync" />): PostgresStudio's registered and
-/// <c>AddDataSource</c> sources, and MartenStudio's stores' databases. <b>Never a host's database source</b>
+/// source provider holds (<see cref="IStudioSourceProvider.HeldDataSourcesAsync" />): the Postgres module's registered and
+/// <c>AddDataSource</c> sources, and the Marten module's stores' databases. <b>Never a host's database source</b>
 /// (<c>IPostgresDatabaseSource</c>): its contract is that the studio asks it for a data source only for a database somebody opens
 /// or a sweep reaches, and a host that builds lazily would have every tenant's built by the first sweep. No new scan of the
 /// container: a data source the studio does not resolve stays unidentified, and C18 says so.

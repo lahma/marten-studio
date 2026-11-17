@@ -1,7 +1,7 @@
 namespace DataStudio.Postgres;
 
 /// <summary>
-/// The resource Postgres Studio passes to <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> when
+/// The resource the Postgres module passes to <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> when
 /// evaluating <see cref="PostgresOptions.SourceAuthorizationPolicy" /> and
 /// <see cref="PostgresOptions.WriteAuthorizationPolicy" />. A host writes one
 /// <c>AuthorizationHandler&lt;TRequirement, PostgresResource&gt;</c> and it answers for the source picker, the page

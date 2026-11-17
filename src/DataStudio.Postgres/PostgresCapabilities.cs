@@ -1,7 +1,7 @@
 namespace DataStudio.Postgres;
 
 /// <summary>
-/// The reads Postgres Studio authorizes like writes. Postgres Studio changes nothing in any database; each of these is
+/// The reads the Postgres module authorizes like writes. The Postgres module changes nothing in any database; each of these is
 /// a read that reaches past a schema's structure - into rows and definitions, into whatever SQL can read, into other
 /// people's sessions - and so is off until the host enables it, one switch at a time or with <see cref="All" />.
 /// <see cref="PostgresOptions.ReadOnly" /> overrides every property here.

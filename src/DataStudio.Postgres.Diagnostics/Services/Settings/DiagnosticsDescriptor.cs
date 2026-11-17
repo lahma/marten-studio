@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <param name="Assembly">The assembly the registry discovers checks in.</param>
 /// <param name="SourceKinds">
 /// The kinds of source its checks are offered, or <see langword="null" /> for every kind. A check that reads a source
-/// through a studio's own types - MartenStudio's checks read the store, its options and its daemon - names that studio's
+/// through a studio's own types - the Marten module's checks read the store, its options and its daemon - names that studio's
 /// kind here, and is then never run against any other: no row, not a "could not check" one.
 /// </param>
 internal sealed record StudioHealthCheckAssembly(Assembly Assembly, IReadOnlySet<StudioSourceKind>? SourceKinds = null);

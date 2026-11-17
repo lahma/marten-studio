@@ -51,10 +51,10 @@ public sealed class KafkaClusterBuilder
     }
 
     /// <summary>
-    /// What kind of cluster this is, for KStudio's limits (AGENTS.md D47): a profile lowers limits on this cluster and, for
+    /// What kind of cluster this is, for the Kafka module's limits (AGENTS.md D47): a profile lowers limits on this cluster and, for
     /// <see cref="KafkaProfile.Production" />, forbids export and live tail even when they are granted. It never grants a capability and
     /// never raises a limit above the host's. It is set explicitly only: with no call, the cluster uses the host's limits as they are, and
-    /// KStudio never infers one from the host's environment or from <see cref="Environment" />. A second call replaces the first.
+    /// The Kafka module never infers one from the host's environment or from <see cref="Environment" />. A second call replaces the first.
     /// </summary>
     /// <param name="profile">The profile.</param>
     /// <returns>This builder.</returns>

@@ -23,7 +23,7 @@
     and audited statement by statement (D13). The README says it plainly: grant RunSql to people you would give
     psql to.
 
-    Shared by every studio: MartenStudio's Query page renders it as its SQL tab, and a studio with no document
+    Shared by every studio: the Marten module's Query page renders it as its SQL tab, and a studio with no document
     types renders it as its whole Query page. The page that hosts it keeps its state (SqlConsoleSession), so a tab
     switch does not lose the statement or the last result, and hears about runs and saves through callbacks - its
     deep link and its saved-query drawer are its own. The service refuses whatever this renders (hard rule 5);

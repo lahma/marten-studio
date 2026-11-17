@@ -23,7 +23,7 @@ internal readonly record struct StudioCost(TimeSpan Total, int Connections, Time
 /// <remarks>
 /// <para>
 /// <b>What is counted: every connection the studio opens through its sources</b> (W5-Q1, backlog §C). Both of the studio's
-/// databases - MartenStudio's over <c>IMartenDatabase</c> and Postgres Studio's over the host's <see cref="NpgsqlDataSource" />
+/// databases - the Marten module's over <c>IMartenDatabase</c> and the Postgres module's over the host's <see cref="NpgsqlDataSource" />
 /// - hand out connections metered by <see cref="StudioConnectionMeter" />, which times each from its open to its close. So
 /// every statement the studio issues on them is inside the time: health sweeps, catalog and schema reads, the database
 /// browser's lists and rows, the documents and event reads, the projections screen, the SQL console and the Query page, the

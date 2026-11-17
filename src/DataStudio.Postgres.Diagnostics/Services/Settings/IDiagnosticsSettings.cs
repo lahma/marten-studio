@@ -69,7 +69,7 @@ internal interface IDiagnosticsSettings
 
     /// <summary>
     /// The source picker's label for this configuration, or <see langword="null" /> for the descriptor's own
-    /// (<see cref="DiagnosticsDescriptor.SourceLabel" />). PostgresStudio says "Source" once a host or <c>AddDataSource</c>
+    /// (<see cref="DiagnosticsDescriptor.SourceLabel" />). The Postgres module says "Source" once a host or <c>AddDataSource</c>
     /// source exists, so the source picker and the database picker are never both called "Database".
     /// </summary>
     string? SourceLabel => null;

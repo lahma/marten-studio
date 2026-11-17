@@ -4,7 +4,7 @@
 @inject KafkaClusterRegistry Registry
 
 @* Links from a record to the Marten documents and streams its topic's correlation fields name (D44, decision 7.3 of D-CORR). It draws nothing in a
-   host that has no Marten Studio (no IStudioRouteLinks), for a topic with no such field, and for a record that holds no such value. The addresses are
+   host that has no Marten module (no IStudioRouteLinks), for a topic with no such field, and for a record that holds no such value. The addresses are
    the studio's, verbatim: this component builds none, and a link grants nothing, because the page it opens asks the policies again. *@
 
 @if (set is { IsEmpty: false })

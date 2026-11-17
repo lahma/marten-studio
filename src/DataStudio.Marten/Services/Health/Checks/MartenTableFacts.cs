@@ -18,11 +18,11 @@ using DataStudio.Postgres.Services.Schema;
 namespace DataStudio.Marten.Services.Health.Checks;
 
 /// <summary>
-/// What a Marten table is, for the tables-and-indexes checks: MartenStudio's names for the shared
+/// What a Marten table is, for the tables-and-indexes checks: the Marten module's names for the shared
 /// <see cref="StudioTableKind" /> members, so that the Marten-only checks keep reading as they always have.
 /// </summary>
 /// <remarks>
-/// A table the store declares is a <see cref="StudioTable" /> (<c>MartenTable</c> is that type's name in MartenStudio, a
+/// A table the store declares is a <see cref="StudioTable" /> (<c>MartenTable</c> is that type's name in the Marten module, a
 /// global alias), and its kind is the shared enum; these are its constants under the names the Marten checks use.
 /// </remarks>
 internal static class MartenTableKind
@@ -42,7 +42,7 @@ internal static class MartenTableKind
 
 /// <summary>
 /// The tables this store declares in this database, from its configuration alone - and what it declares about their
-/// indexes. The declared half of MartenStudio's judged set (<see cref="MartenDatabaseTableSet" />), and an
+/// indexes. The declared half of the Marten module's judged set (<see cref="MartenDatabaseTableSet" />), and an
 /// <see cref="IStudioTableSet" /> of its own for a context with no table source.
 /// </summary>
 /// <param name="Tables">Every declared table but a hidden document type's, in schema and table order.</param>
@@ -103,7 +103,7 @@ internal sealed record MartenTableSet(
 }
 
 /// <summary>
-/// Reads the tables this store declares, for the tables-and-indexes checks: the declared half of MartenStudio's judged set
+/// Reads the tables this store declares, for the tables-and-indexes checks: the declared half of the Marten module's judged set
 /// (<see cref="MartenHealthTableSource" /> lays it over the catalog), and the Marten-only checks' way to the shared reader
 /// (<see cref="HealthTables" />).
 /// </summary>
@@ -136,7 +136,7 @@ internal static class MartenTables
     /// <summary>The document type behind each document table this process described, by the table's instance.</summary>
     private static readonly ConditionalWeakTable<StudioTable, IDocumentType> DocumentTypeOf = new();
 
-    /// <summary>The memo key of the declared-table set, as MartenStudio built it.</summary>
+    /// <summary>The memo key of the declared-table set, as the Marten module built it.</summary>
     internal const string SetKey = "tables.marten-set";
 
     /// <summary>One table the store declares, as the checks know it.</summary>

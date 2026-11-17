@@ -2,7 +2,7 @@
 
   <!-- DataStudio.Kafka.Wolverine (AGENTS.md D43): lists the Kafka clusters and topics of a Wolverine application's configuration in KStudio. It reads
        the built WolverineOptions once and starts, connects and writes nothing. It references DataStudio.Kafka.Core and WolverineFx.Kafka only: no
-       studio, no KStudio, no Marten, Weasel or Npgsql (KStudioWolverineFenceTests). Ships as a preview with the other two (K8). -->
+       studio, no KStudio, no Marten, Weasel or Npgsql (KafkaWolverineFenceTests). Ships as a preview with the other two (K8). -->
   <PropertyGroup>
     <AssemblyName>DataStudio.Kafka.Wolverine</AssemblyName>
     <RootNamespace>DataStudio.Kafka</RootNamespace>

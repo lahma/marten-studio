@@ -6,7 +6,7 @@ public sealed record PostgresDatabaseRef
     /// <summary>Names a database.</summary>
     /// <param name="source">
     /// The source's name: <c>default</c>, a name given to <see cref="PostgresDiagnosticsOptions.AddDataSource" /> or
-    /// <see cref="PostgresDiagnosticsOptions.AddDatabaseSource" />, or in Marten Studio a store's key.
+    /// <see cref="PostgresDiagnosticsOptions.AddDatabaseSource" />, or in the Marten module a store's key.
     /// </param>
     /// <param name="database">The source's name for the database. Empty means the source's only (or default) database.</param>
     /// <exception cref="ArgumentException"><paramref name="source" /> is null, empty or whitespace.</exception>
@@ -25,7 +25,7 @@ public sealed record PostgresDatabaseRef
 
     /// <summary>
     /// The database: a data source's registration name, a name a host's <see cref="IPostgresDatabaseSource" /> lists, or
-    /// in Marten Studio the database's identity.
+    /// in the Marten module the database's identity.
     /// </summary>
     public string Database { get; }
 }

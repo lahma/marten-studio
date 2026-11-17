@@ -8,7 +8,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <para>
 /// <b>Why a seam.</b> The database browser, the Relationships screen, Sessions and Health all point somewhere when an
 /// object is really read elsewhere: a Marten document table's rows are read in Documents, where tenancy, soft deletes and
-/// the store's serializer apply (D27), and the event store's in Streams. Those screens exist only in MartenStudio. A
+/// the store's serializer apply (D27), and the event store's in Streams. Those screens exist only in the Marten module. A
 /// shared screen asks here and draws plain text where the answer is <see langword="null" />, which is the honest answer
 /// in a studio that has no such screen.
 /// </para>

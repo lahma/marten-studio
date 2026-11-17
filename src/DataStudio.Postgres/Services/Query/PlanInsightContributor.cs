@@ -1,12 +1,12 @@
 namespace DataStudio.Postgres.Services.Query;
 
 /// <summary>
-/// 1.0-P3C: a studio's own plan insights, beside the ones every studio has (<see cref="PlanInsights" />) - the seam MartenStudio
-/// registers its document-table insights (P26 to P28) through, in the shape of the health checks' MartenStudio half.
+/// 1.0-P3C: a studio's own plan insights, beside the ones every studio has (<see cref="PlanInsights" />) - the seam the Marten module
+/// registers its document-table insights (P26 to P28) through, in the shape of the health checks' the Marten module half.
 /// </summary>
 /// <remarks>
 /// <para>
-/// PostgresStudio defines the seam and runs whatever is registered (<c>IEnumerable&lt;IPlanInsightContributor&gt;</c>, empty in a
+/// The Postgres module defines the seam and runs whatever is registered (<c>IEnumerable&lt;IPlanInsightContributor&gt;</c>, empty in a
 /// host that registered none); it names nothing a contributor knows. The judging stays pure: a contributor reads the plan, the
 /// facts beside it and what its studio declares, and reads no database. The only asynchronous step is the one a contributor needs
 /// to learn what is declared <em>for this visitor's scope</em> - authorized as the studio authorizes any scope, never from the

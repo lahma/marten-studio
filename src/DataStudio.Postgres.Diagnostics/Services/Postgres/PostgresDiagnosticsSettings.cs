@@ -6,7 +6,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
 /// The diagnostics engine's <see cref="IDiagnosticsSettings" /> for a host that registered
-/// <c>AddPostgresDiagnostics()</c>: a live adapter over <see cref="PostgresDiagnosticsOptions" />, with Postgres Studio's
+/// <c>AddPostgresDiagnostics()</c>: a live adapter over <see cref="PostgresDiagnosticsOptions" />, with the Postgres module's
 /// name and words (<see cref="PostgresText" />).
 /// </summary>
 /// <remarks>

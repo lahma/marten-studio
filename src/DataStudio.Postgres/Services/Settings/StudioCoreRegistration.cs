@@ -211,7 +211,7 @@ internal static class StudioCoreRegistration
         // 1.2-H-A: "Mark" on Statements, Storage and Maintenance. The circuit's, in memory, numbers only - never stored, never shared.
         services.TryAddScoped<SinceMarks>();
         // X2: the what-if engine - hypopg's availability cached per database, every hypothetical index reset on the connection
-        // it was made on - shared by the console, the drill-in and MartenStudio's advisors.
+        // it was made on - shared by the console, the drill-in and the Marten module's advisors.
         services.TryAddSingleton<HypotheticalIndexReader>();
         // 1.2-INDEX-A: the index advisor on Statements. One run per database at once is the process's; what a visitor is shown of it
         // is the circuit's. The contributors (IIndexCandidateContributor) are a studio's own and need no registration here: Postgres
@@ -227,7 +227,7 @@ internal static class StudioCoreRegistration
 
         // 1.2-SCOPE-3: Find by id, the header's box. The service is the circuit's (one Find at a time, a newer one cancelling the one
         // in flight); each kind is a contributor that asks the service of the page its hit opens, under that page's gates. These two
-        // are PostgresStudio's own; a studio adds its kinds beside them with TryAddEnumerable, and a studio with none draws no box.
+        // are the Postgres module's own; a studio adds its kinds beside them with TryAddEnumerable, and a studio with none draws no box.
         services.TryAddScoped<FindService>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, RelationFindContributor>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, StatementFindContributor>());

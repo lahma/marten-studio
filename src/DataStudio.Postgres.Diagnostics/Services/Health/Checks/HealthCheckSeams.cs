@@ -5,13 +5,13 @@ namespace DataStudio.Postgres.Services.Health.Checks;
 
 /// <summary>
 /// How a studio words each table remedy the tables-and-indexes checks offer - one member per remedy shape (issue #8,
-/// G12): MartenStudio's are <c>StoreOptions</c> lines, and a studio over plain data sources words the statement a DBA
+/// G12): the Marten module's are <c>StoreOptions</c> lines, and a studio over plain data sources words the statement a DBA
 /// would hand to whoever owns the schema. The one table-remedy seam: PS-1a's generic <c>IHealthRemedyProvider</c>
 /// (storage parameter, add index, remove index) was folded into it in PS-1e, each of its shapes being one of these.
 /// </summary>
 /// <remarks>
 /// <para>
-/// MartenStudio answers a <c>StoreOptions</c> line for a document table (<c>opts.Schema.For&lt;T&gt;()…</c>), because the
+/// The Marten module answers a <c>StoreOptions</c> line for a document table (<c>opts.Schema.For&lt;T&gt;()…</c>), because the
 /// next <c>CreateOrUpdate</c> resets whatever the configuration does not declare. A plain source answers the statement a
 /// DBA would run - <c>ALTER TABLE … SET (autovacuum_…)</c>, <c>CREATE INDEX CONCURRENTLY …</c> - as text to hand to
 /// whoever owns the schema, rendered under "For your own migrations - the studio never runs this".
@@ -116,7 +116,7 @@ internal interface IHealthTableRemedies
 
     /// <summary>
     /// T15: why the studio offers no index for the key, in its own words, when <see cref="IndexTheForeignKey" /> has none -
-    /// a table the source's library creates and reconciles (MartenStudio: Marten's DCB tag tables, marten#5694) - or
+    /// a table the source's library creates and reconciles (the Marten module: Marten's DCB tag tables, marten#5694) - or
     /// <see langword="null" /> for nothing to add.
     /// </summary>
     /// <param name="table">The referencing table.</param>
@@ -145,7 +145,7 @@ internal interface IHealthTableRemedies
 /// reads, and which index would serve it.
 /// </summary>
 /// <remarks>
-/// MartenStudio reads a document table's filter with its own index advisor - the Query page's - over the document type's
+/// The Marten module reads a document table's filter with its own index advisor - the Query page's - over the document type's
 /// duplicated fields and JSON paths. A studio with no such model registers none, and a scan is described by its node and
 /// table alone. Pure: handed to an evaluator in <see cref="HealthEvaluation.PlanAdvisor" />.
 /// </remarks>
@@ -178,7 +178,7 @@ internal sealed record HealthIndexVerdict(string Subject, string Reason, string 
 /// projection daemon's progress, and whether the source's own leader holds its lock in a transaction.
 /// </summary>
 /// <remarks>
-/// MartenStudio answers from the store's configuration - its async shards and <c>Events.UseAdvisoryLockTransaction</c> -
+/// The Marten module answers from the store's configuration - its async shards and <c>Events.UseAdvisoryLockTransaction</c> -
 /// read with no I/O. A studio with no daemon registers none, and T14 reads <see cref="HorizonSourceFacts.None" />.
 /// </remarks>
 internal interface IHorizonContributor

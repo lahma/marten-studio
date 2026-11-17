@@ -3,7 +3,7 @@ using DataStudio.Services.Settings;
 namespace DataStudio.Postgres.Services.Sources;
 
 /// <summary>
-/// The sidebar badges a studio draws beyond the shared health badge - MartenStudio's dead-letter count and its
+/// The sidebar badges a studio draws beyond the shared health badge - the Marten module's dead-letter count and its
 /// projections dot - keyed by the <see cref="StudioNavItem.BadgeKey" /> its descriptor's entries carry.
 /// </summary>
 /// <remarks>

@@ -7,7 +7,7 @@ namespace DataStudio.Marten.Services;
 
 /// <summary>
 /// Turns the three strings in a URL into the Marten objects behind them, refusing before it looks
-/// anything up - MartenStudio's typed face of the shared <see cref="StudioSourceResolver" />.
+/// anything up - the Marten module's typed face of the shared <see cref="StudioSourceResolver" />.
 /// </summary>
 /// <remarks>
 /// <para>

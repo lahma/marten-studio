@@ -38,7 +38,7 @@ namespace DataStudio.Postgres.Components;
 /// </para>
 /// <para>
 /// The source key's parameter is the studio's own (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />:
-/// <c>store</c> in MartenStudio); the database and the tenant are spelled the same in every studio.
+/// <c>store</c> in the Marten module); the database and the tenant are spelled the same in every studio.
 /// </para>
 /// </remarks>
 internal static class StudioScopeQuery

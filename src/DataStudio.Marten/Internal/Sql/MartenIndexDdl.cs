@@ -10,7 +10,7 @@ namespace DataStudio.Marten.Internal.Sql;
 
 /// <summary>
 /// X2: the index Marten would create for the index advisor's <c>StoreOptions</c> line - Marten's own DDL, for hypopg to imagine.
-/// The other of the two places a Postgres identifier becomes SQL text in MartenStudio (hard rule 4): here, it is Marten that
+/// The other of the two places a Postgres identifier becomes SQL text in the Marten module (hard rule 4): here, it is Marten that
 /// writes it, through the very classes its migration would.
 /// </summary>
 /// <remarks>

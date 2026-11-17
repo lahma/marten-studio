@@ -11,7 +11,7 @@ namespace DataStudio.Postgres.Services;
 /// <summary>
 /// Holds the scope policy (<see cref="IStudioSettings.ScopePolicy" />) and the write policy
 /// (<see cref="IStudioSettings.WritePolicy" />) against the resource the studio's descriptor builds for a scope
-/// (<see cref="StudioDescriptor.CreateResource" /> - MartenStudio's public <c>MartenStoreResource</c>).
+/// (<see cref="StudioDescriptor.CreateResource" /> - the Marten module's public <c>MartenStoreResource</c>).
 /// </summary>
 /// <remarks>
 /// <para>

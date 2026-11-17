@@ -20,7 +20,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IRelationshipNodeSource" />: the store's visible document types as nodes over their
+/// The Marten module's <see cref="IRelationshipNodeSource" />: the store's visible document types as nodes over their
 /// tables, the foreign keys <c>StoreOptions</c> declares between them, and "referenced by" - how many documents and
 /// rows point at one document.
 /// </summary>

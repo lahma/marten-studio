@@ -41,7 +41,7 @@ internal sealed record ColumnStatisticsRow(
 /// <summary>
 /// The two lock-free statements that read, for a list of values of one column, how many rows each has in each listed table
 /// (1.2, the Tenants overview): by partition for a table list-partitioned on the column, and by the planner's statistics for any
-/// other. Plain Postgres, no store: MartenStudio decides which tables, which column and which values.
+/// other. Plain Postgres, no store: the Marten module decides which tables, which column and which values.
 /// </summary>
 /// <remarks>
 /// <para>

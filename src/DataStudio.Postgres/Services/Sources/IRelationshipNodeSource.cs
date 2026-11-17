@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Services.Sources;
 /// <para>
 /// The physical foreign-key graph is a database fact and shared (D27 moved the page to the Database section): the
 /// tables, the keys between them, the far ends gated by the database browser's gate. What a source knows beyond the
-/// catalog is its own: MartenStudio draws each visible document type as a node over its table, labels a key by the
+/// catalog is its own: the Marten module draws each visible document type as a node over its table, labels a key by the
 /// document member it is on, compares the keys its configuration declares with the ones that exist, and counts the
 /// documents that point at one document. A plain source registers none of this, and its graph is tables and keys
 /// only.
@@ -28,7 +28,7 @@ namespace DataStudio.Postgres.Services.Sources;
 internal interface IRelationshipNodeSource
 {
     /// <summary>
-    /// The source's own nodes for <paramref name="resolved" />'s database - MartenStudio's visible document types, each
+    /// The source's own nodes for <paramref name="resolved" />'s database - the Marten module's visible document types, each
     /// carrying the schema and table it lives in and its row estimate - with the tables it claims but hides, its own
     /// schemas and the members behind its columns. A resolved scope that is not this source's kind answers
     /// <see cref="RelationshipNodeSet.None" />.
@@ -38,7 +38,7 @@ internal interface IRelationshipNodeSource
     Task<RelationshipNodeSet> NodesAsync(ResolvedSource resolved, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The foreign keys the source's configuration declares on its visible nodes - MartenStudio's
+    /// The foreign keys the source's configuration declares on its visible nodes - the Marten module's
     /// <c>ForeignKey&lt;T&gt;()</c> - each with its target resolved as far as the configuration can say, in the
     /// configuration's own order. Read from configuration: no IO.
     /// </summary>
@@ -47,7 +47,7 @@ internal interface IRelationshipNodeSource
 
     /// <summary>
     /// What points at one of the source's nodes: every node or table with a key to it, and how many of its rows point
-    /// at this one - MartenStudio's "referenced by" panel. A source with no such node answers
+    /// at this one - the Marten module's "referenced by" panel. A source with no such node answers
     /// <see cref="ReferencedBy.None" />. Never throws for a database that would not answer: the result carries the
     /// failure.
     /// </summary>

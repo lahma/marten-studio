@@ -14,7 +14,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Marten.Services.Relationships;
 
 /// <summary>
-/// MartenStudio's half of the Relationships graph: what <c>StoreOptions</c> says about the store's document types -
+/// The Marten module's half of the Relationships graph: what <c>StoreOptions</c> says about the store's document types -
 /// which are drawn, which are hidden, which members sit behind which columns, and which foreign keys the
 /// configuration declares - as the shared builder takes it.
 /// </summary>

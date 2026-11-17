@@ -238,7 +238,7 @@ internal sealed class HealthService : IHealthService
         // The store by its registered key and the database by its identity - not the visitor's spelling of either, a store
         // key matching in any case and a database id often empty (D29) - for every question, the audit and the mute keys.
         // A copy of the resolver's own record with the scope replaced, never one rebuilt from its parts: a studio's checks
-        // read the record's subtype (MartenStudio's ResolvedScope).
+        // read the record's subtype (the Marten module's ResolvedScope).
         string storeKey = resolved.Source.Key;
         string databaseId = resolved.Target.Identity;
         ResolvedSource whole = resolved with { Scope = new StudioScope(storeKey, databaseId, null) };
@@ -792,7 +792,7 @@ internal sealed class HealthService : IHealthService
     internal const string UncheckedSchemaReason =
         "names a table in a schema outside the store's own, which could not be checked against the database browser's gate for you";
 
-    /// <summary><see cref="UncheckedSchemaReason" /> in the studio's own words: MartenStudio's is that constant.</summary>
+    /// <summary><see cref="UncheckedSchemaReason" /> in the studio's own words: the Marten module's is that constant.</summary>
     /// <param name="text">The studio's words.</param>
     internal static string UncheckedSchemaReasonFor(StudioText text)
     {

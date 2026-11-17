@@ -68,7 +68,7 @@ internal sealed record HealthColumnSkewRow
 
 /// <summary>
 /// One lock-free statement that says how the listed tables' rows spread over one column's values - T18's tenant skew, over
-/// <c>tenant_id</c> (X4). Plain Postgres, no store: MartenStudio decides which tables and which column.
+/// <c>tenant_id</c> (X4). Plain Postgres, no store: the Marten module decides which tables and which column.
 /// </summary>
 /// <remarks>
 /// <para>

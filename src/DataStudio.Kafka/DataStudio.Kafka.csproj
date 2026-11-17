@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <!-- The shell this module joins, and the engine it shows. Confluent.Kafka reaches this project only through DataStudio.Kafka.Core: the
-       built DataStudio.Kafka.dll references no Confluent assembly (KStudioFenceTests). -->
+       built DataStudio.Kafka.dll references no Confluent assembly (KafkaFenceTests). -->
   <ItemGroup>
     <ProjectReference Include="../DataStudio/DataStudio.csproj" />
     <ProjectReference Include="../DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />

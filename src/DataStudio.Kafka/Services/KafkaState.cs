@@ -6,7 +6,7 @@ namespace DataStudio.Kafka.Services;
 
 /// <summary>
 /// What the circuit's Kafka pages are about (D34): the cluster entry in scope, and the entries this visitor may see. The host studio's
-/// own state is not generalised; this is KStudio's own, and the two never touch.
+/// own state is not generalised; this is the Kafka module's own, and the two never touch.
 /// </summary>
 /// <remarks>
 /// <para>

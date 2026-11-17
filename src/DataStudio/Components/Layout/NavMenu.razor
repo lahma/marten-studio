@@ -109,7 +109,7 @@
 
     /// <summary>
     /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -
-    /// MartenStudio's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
+    /// The Marten module's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
     /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address - and
     /// then what the entry's module says of it, when the module has a rail.
     /// </summary>
@@ -311,7 +311,7 @@
         }
 
         // The most specific entry wins: under a studio whose sidebar has both "database" and "database/sessions", the
-        // Sessions page lights Sessions alone. A sidebar with no entry nested in another - MartenStudio's - is unchanged.
+        // Sessions page lights Sessions alone. A sidebar with no entry nested in another - the Marten module's - is unchanged.
         bool isActive = Covers(route, relativePath)
             && !Shell.Navigation.Any(section => section.Items.Any(item =>
                 item.Route is { Length: > 0 } other && other.Length > route.Length && Covers(other, relativePath)));

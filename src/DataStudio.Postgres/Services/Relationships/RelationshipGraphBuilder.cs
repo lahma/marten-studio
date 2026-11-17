@@ -44,7 +44,7 @@ internal sealed record RelationshipDatabaseView(
 /// </para>
 /// <para>
 /// <b>Hidden types are dropped, unknown ones are listed, withheld ones are counted.</b> A key with an end
-/// belonging to a table the source hides (<see cref="RelationshipNodeSet.HiddenTables" />: in MartenStudio a mapping
+/// belonging to a table the source hides (<see cref="RelationshipNodeSet.HiddenTables" />: in the Marten module a mapping
 /// the host hid with <c>IsDocumentTypeVisible</c>) — or to Marten's own bookkeeping, by its <c>mt_</c> prefix, which
 /// fails closed in every studio — disappears completely: not as an edge, not as a node, and not as an entry in
 /// <see cref="RelationshipGraph.Unmatched"/>, because naming the hidden collection in a list of "keys that
@@ -288,7 +288,7 @@ internal static class RelationshipGraphBuilder
     /// <summary>What a foreign-key end turned out to be.</summary>
     private enum EndKind
     {
-        /// <summary>One of the source's own nodes - in MartenStudio, a visible document type.</summary>
+        /// <summary>One of the source's own nodes - in the Marten module, a visible document type.</summary>
         Document,
 
         /// <summary>A table the graph draws: somebody else's, or Marten-managed relational data.</summary>

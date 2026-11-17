@@ -127,7 +127,7 @@ internal sealed record LockTarget(LockTargetKind Kind, string Label, string? Sch
 /// <remarks>
 /// <para>
 /// <b>Built by a source's labeler.</b> This class only labels: which advisory keys are the source's own, and whose
-/// each relation is, arrive from outside - from <see cref="DataStudio.Postgres.Services.Sources.ISessionLockLabeler" />, whose MartenStudio
+/// each relation is, arrive from outside - from <see cref="DataStudio.Postgres.Services.Sources.ISessionLockLabeler" />, whose Marten module
 /// implementation reads them from the store's options (<see cref="Create" />), and whose implementation for a source
 /// that takes no advisory lock of its own names only the relations (<see cref="RelationsOnly" />).
 /// </para>
@@ -197,7 +197,7 @@ internal sealed class SessionLockLabels
 
     /// <summary>
     /// Every advisory key Marten's daemon negotiates leadership with - the base id and every shard's - as the one
-    /// definition of the set has it (MartenStudio's <c>DaemonCheckConfiguration.LockKeysFor</c>, which D02 and D01's
+    /// definition of the set has it (the Marten module's <c>DaemonCheckConfiguration.LockKeysFor</c>, which D02 and D01's
     /// Explain read too). Empty for a source that takes no advisory lock of its own.
     /// </summary>
     public IReadOnlyList<long> DaemonLockIds { get; }
@@ -426,7 +426,7 @@ internal sealed class SessionLockLabels
 
 /// <summary>
 /// A studio's words for a lock that is nobody's it knows - which differ by studio, because "not Marten's" is a fact only
-/// MartenStudio can state.
+/// The Marten module can state.
 /// </summary>
 /// <param name="OtherAdvisoryLock">An advisory lock that is not one of the source's own.</param>
 /// <param name="OtherRelation">A relation nobody here owns, after any part words ("an index of ").</param>
@@ -435,7 +435,7 @@ internal sealed class SessionLockLabels
 /// </param>
 internal sealed record SessionLockWording(string OtherAdvisoryLock, string OtherRelation, string UndeclaredMartenRelation)
 {
-    /// <summary>MartenStudio's words, as 0.4 wrote them.</summary>
+    /// <summary>The Marten module's words, as 0.4 wrote them.</summary>
     public static SessionLockWording Marten { get; } = new(
         "an advisory lock that is not Marten's",
         "a relation Marten does not own",

@@ -9,7 +9,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's <see cref="IHealthTableSource" /> (issue #8, G1): every ordinary and partitioned table of the schemas
+/// The Postgres module's <see cref="IHealthTableSource" /> (issue #8, G1): every ordinary and partitioned table of the schemas
 /// <c>PostgresDiagnosticsOptions.BrowsableSchemas</c> admits, each one the host's own, a recognised library's, or somebody
 /// else's.
 /// </summary>

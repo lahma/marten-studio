@@ -14,7 +14,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// PostgresStudio's <see cref="IStudioSourceProvider" />: the application's own data sources and the database sets it
+/// The Postgres module's <see cref="IStudioSourceProvider" />: the application's own data sources and the database sets it
 /// lists itself (<see cref="PostgresSourceRegistry" />), each one database or many, none with a tenant.
 /// </summary>
 /// <remarks>
@@ -450,7 +450,7 @@ internal sealed class PostgresHostSource : IStudioSource
     }
 }
 
-/// <summary>What every PostgresStudio scope must say before it is completed.</summary>
+/// <summary>What every Postgres module scope must say before it is completed.</summary>
 internal static class PostgresTenancy
 {
     /// <summary>

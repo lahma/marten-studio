@@ -64,7 +64,7 @@ internal interface IHealthFindingAction
 
 /// <summary>What the runner hands an action: the scope as selected, the gates it may still ask, and its cost bounds.</summary>
 /// <param name="Resolved">
-/// The resolver's own record for the scope as the visitor selected it (a studio's checks read its subtype - MartenStudio's
+/// The resolver's own record for the scope as the visitor selected it (a studio's checks read its subtype - the Marten module's
 /// <c>ResolvedScope</c>), tenant and all.
 /// </param>
 /// <param name="Whole">The database as a whole: the registered key, the database's identity and no tenant (D29).</param>

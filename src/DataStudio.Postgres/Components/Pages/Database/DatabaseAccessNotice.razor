@@ -46,7 +46,7 @@
             <p class="ms-muted">@denial</p>
             @if ((access.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly) && access.DefinitionDenial is { Length: > 0 } definitions && definitions != denial)
             {
-                @* Said in the studio's own words (the sentence above, which MartenStudio pins, names BrowseDatabase alone):
+                @* Said in the studio's own words (the sentence above, which the Marten module pins, names BrowseDatabase alone):
                    what a definition needs is either of two capabilities. *@
                 <p class="ms-muted">@definitions</p>
             }

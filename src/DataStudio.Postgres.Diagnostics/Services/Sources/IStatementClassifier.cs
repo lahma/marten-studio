@@ -26,8 +26,8 @@ internal sealed record StatementGroup(string Key, string Label)
 /// <b>Gate-free, and never a name it should not say.</b> A classifier is handed the statement's normalised text, its comments
 /// masked, and the source's judged tables (<see cref="IStudioTableSet" />), and answers from those alone. It names a table
 /// only from the set - so a hidden document type, which the set never holds, is never named - and the page withholds a
-/// named table whose schema the visitor may not see. Postgres Studio's names the verb and the first table of the set the
-/// statement names; MartenStudio's names the Marten operation and the document type.
+/// named table whose schema the visitor may not see. The Postgres module's names the verb and the first table of the set the
+/// statement names; the Marten module's names the Marten operation and the document type.
 /// </para>
 /// <para>
 /// Registered by each studio's <c>Add…</c>. A studio that registers none groups nothing: the page shows the statements

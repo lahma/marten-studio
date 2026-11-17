@@ -47,7 +47,7 @@ namespace DataStudio.Postgres.Services.Health.Checks;
 /// </para>
 /// <para>
 /// <b>Severity is Warning</b> for both; the remedy is the data source's settings. K08 judges the same server timeout against
-/// the HotCold daemon's leadership in Marten Studio (<see cref="Settings.StudioText.PoolIdleTimeoutLeaderClause" />).
+/// the HotCold daemon's leadership in the Marten module (<see cref="Settings.StudioText.PoolIdleTimeoutLeaderClause" />).
 /// </para>
 /// </remarks>
 [HealthCheck(

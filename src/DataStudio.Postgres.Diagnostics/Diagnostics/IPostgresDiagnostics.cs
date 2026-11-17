@@ -34,7 +34,7 @@ public interface IPostgresDiagnostics
 
     /// <summary>
     /// The databases the studio would list, in the order it lists them: each data source and database source in
-    /// registration order (the unkeyed data source first), and for Marten Studio each store's databases its tenancy already
+    /// registration order (the unkeyed data source first), and for the Marten module each store's databases its tenancy already
     /// holds. Nothing is created to list them, no data source is built, and a source that cannot be listed is left out and
     /// logged.
     /// </summary>

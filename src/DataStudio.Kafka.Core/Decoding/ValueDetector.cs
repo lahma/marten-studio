@@ -49,7 +49,7 @@ internal sealed record ValueDetection(
     Action<Exception>? OnDecoderFailed = null,
     IKafkaRedactor? Redactor = null);
 
-/// <summary>What a visitor may read of a record (decision 10.1). KStudio computes it after its own authorization.</summary>
+/// <summary>What a visitor may read of a record (decision 10.1). The Kafka module computes it after its own authorization.</summary>
 [Flags]
 internal enum KafkaReadGrant
 {

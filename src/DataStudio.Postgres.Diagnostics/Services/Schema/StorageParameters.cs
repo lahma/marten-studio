@@ -39,7 +39,7 @@ internal sealed record StorageParameterState(string Name, string? Declared, stri
 /// </summary>
 /// <remarks>
 /// <para>
-/// What is declared is the source's to say: in MartenStudio, <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and
+/// What is declared is the source's to say: in the Marten module, <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and
 /// <c>.StorageParameter(name, value)</c> from Marten 9.47, read by <c>DeclaredStorageParameters</c>. Where nothing can be
 /// declared there is nothing to compare against, and the table's own parameters are shown as they are.
 /// </para>

@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <param name="Failure">Why they could not be, in a sentence for the page.</param>
 internal sealed record PostgresServerRead(PostgresServerFacts? Facts, string? Failure);
 
-/// <summary>Reads the server behind a scope for PostgresStudio's Overview.</summary>
+/// <summary>Reads the server behind a scope for the Postgres module's Overview.</summary>
 internal interface IPostgresServerReader
 {
     /// <summary>
@@ -36,7 +36,7 @@ internal interface IPostgresServerReader
 /// detector the health checks use.
 /// </summary>
 /// <remarks>
-/// Scoped: what it remembers is this circuit's, the way MartenStudio's store overview remembers a store's version. A
+/// Scoped: what it remembers is this circuit's, the way the Marten module's store overview remembers a store's version. A
 /// version read is remembered until the page asks for a refresh; a failure only for <c>HealthInterval</c>, so a page that
 /// polls does not ask an unreachable server again on every tick, and the server is asked again once it may be back -
 /// event 9214, throttled across circuits.

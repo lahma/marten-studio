@@ -13,14 +13,14 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// The sources PostgresStudio offers, process-wide: the application's unkeyed <see cref="NpgsqlDataSource" /> found in
+/// The sources the Postgres module offers, process-wide: the application's unkeyed <see cref="NpgsqlDataSource" /> found in
 /// the service collection, then what <see cref="PostgresDiagnosticsOptions.AddDataSource" /> and
 /// <see cref="PostgresDiagnosticsOptions.AddDatabaseSource" /> named - built on first use, a failure remembered for ten
 /// seconds, and a host's database list remembered for a minute.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Lazy, like MartenStudio's store registry.</b> Holds the <see cref="IServiceCollection" /> captured at
+/// <b>Lazy, like the Marten module's store registry.</b> Holds the <see cref="IServiceCollection" /> captured at
 /// <c>AddPostgres</c> time and scans it on first use, because <c>AddPostgres()</c> may be called before
 /// <c>AddNpgsqlDataSource()</c>. Only a descriptor whose service type is exactly <see cref="NpgsqlDataSource" />, unkeyed,
 /// counts: <c>AddNpgsqlDataSource</c> also registers <c>DbDataSource</c> and a transient <c>NpgsqlConnection</c>, and
@@ -404,7 +404,7 @@ internal sealed class PostgresSourceRegistry
                 }
 
                 // The failure cache expires every ten seconds and every polling page asks again, so the Warning is
-                // throttled across them, as MartenStudio's store registry throttles the same event (9210).
+                // throttled across them, as the Marten module's store registry throttles the same event (9210).
                 LogLevel level = StudioLogThrottle.LevelOrWarning(
                     root.GetService<StudioLogThrottle>(),
                     "Store.Resolve",

@@ -1,7 +1,7 @@
 namespace DataStudio.Services.Settings;
 
 /// <summary>
-/// Links from a module's page into the studio's own record screens. Implemented by MartenStudio; absent in Postgres Studio,
+/// Links from a module's page into the studio's own record screens. Implemented by the Marten module; absent in the Postgres module,
 /// where the consumer gets <see langword="null" /> from <c>GetService</c> and draws plain text.
 /// </summary>
 /// <remarks>

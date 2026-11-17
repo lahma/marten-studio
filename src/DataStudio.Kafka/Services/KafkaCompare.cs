@@ -301,7 +301,7 @@ internal static class KafkaCompare
     {
         try
         {
-            // PostgresStudio's canonicalizer, which keeps the last of a repeated member name (JsonNode.Parse would throw on it) and sorts members.
+            // The Postgres module's canonicalizer, which keeps the last of a repeated member name (JsonNode.Parse would throw on it) and sorts members.
             JsonNode? a = JsonCanonicalizer.Canonicalize(left);
             JsonNode? b = JsonCanonicalizer.Canonicalize(right);
 

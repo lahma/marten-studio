@@ -22,7 +22,7 @@ namespace DataStudio.Kafka.Internal;
 /// </remarks>
 internal static class KafkaWolverineVersionGuard
 {
-    /// <summary>KStudio's engine assembly name: a string, never a type, for the reason in the remarks.</summary>
+    /// <summary>The Kafka module's engine assembly name: a string, never a type, for the reason in the remarks.</summary>
     internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
 
     /// <summary>Throws unless the DataStudio.Kafka.Core this process loads is the build this DataStudio.Kafka.Wolverine was packed with.</summary>

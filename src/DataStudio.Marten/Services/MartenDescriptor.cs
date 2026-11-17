@@ -19,7 +19,7 @@ using DataStudio.Services.Settings;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="StudioDescriptor" />: its pages, its sidebar, its nouns and its authorization resource.
+/// The Marten module's <see cref="StudioDescriptor" />: its pages, its sidebar, its nouns and its authorization resource.
 /// </summary>
 /// <remarks>
 /// One instance per process, immutable: everything on it is a constant of the package. Every string here is the one
@@ -28,7 +28,7 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal static class MartenDescriptor
 {
-    /// <summary>MartenStudio's descriptor key, and its registration marker's.</summary>
+    /// <summary>The Marten module's descriptor key, and its registration marker's.</summary>
     public const string Key = MartenRoutes.Root;
 
     /// <summary>The query-string parameter a store key travels under.</summary>
@@ -46,11 +46,11 @@ internal static class MartenDescriptor
     /// <summary>The projections entry's badge key.</summary>
     public const string ProjectionsBadge = "projections";
 
-    /// <summary>The source kinds MartenStudio's own health checks run against: a Marten store, and nothing else.</summary>
+    /// <summary>The source kinds the Marten module's own health checks run against: a Marten store, and nothing else.</summary>
     internal static IReadOnlySet<StudioSourceKind> MartenStoreOnly { get; } =
         FrozenSet.Create(StudioSourceKind.MartenStore);
 
-    /// <summary>The descriptor every MartenStudio service and component reads.</summary>
+    /// <summary>The descriptor every Marten module service and component reads.</summary>
     public static StudioDescriptor Instance { get; } = Create();
 
     /// <summary>The compile-time root every Marten page's <c>@page</c> starts with, and the first segment of its address.</summary>
@@ -68,8 +68,8 @@ internal static class MartenDescriptor
             new StudioPageAssembly(typeof(Components.Pages.Overview).Assembly, PageRoot),
             new StudioPageAssembly(typeof(DataStudio.Postgres.Components.Pages.StudioHome).Assembly, "/" + PostgresRoutes.Root),
         ],
-        // The shared checks, the diagnostics engine's and PostgresStudio's own (the studio-posture ones), run against any source;
-        // MartenStudio's own read the store and only ever run against one. Every source MartenStudio has is a Marten store, so
+        // The shared checks, the diagnostics engine's and the Postgres module's own (the studio-posture ones), run against any source;
+        // The Marten module's own read the store and only ever run against one. Every source the Marten module has is a Marten store, so
         // here every set runs against all of them.
         HealthCheckAssemblies =
         [
@@ -115,7 +115,7 @@ internal static class MartenDescriptor
             // needs no capability, and LINQ mode, which has its own (RunLinqQueries).
             new("Query", PostgresRoutes.Page("query"), "query"),
 
-            // X3 (issue #28): PostgresStudio's Plan page, which the studio re-roots under /marten like every shared page. Running a
+            // X3 (issue #28): the Postgres module's Plan page, which the studio re-roots under /marten like every shared page. Running a
             // plan is the console's gate; pasting one reads nothing and is every visitor's (1.0-P3A), so the entry is always drawn.
             new("Plan", PlanLinks.Route, "plan", Title: "A statement's plan, drawn every way, with what to fix"),
         ]),
@@ -128,7 +128,7 @@ internal static class MartenDescriptor
         [
             new("Tables", StudioPageRoutes.DatabaseBrowser, "table", Title: "Tables, views, functions, triggers, sequences and types"),
 
-            // 1.1-NP3: PostgresStudio's Connection page, re-rooted under /marten like every shared page: how the store connects.
+            // 1.1-NP3: the Postgres module's Connection page, re-rooted under /marten like every shared page: how the store connects.
             new("Connection", DataStudio.Postgres.Services.Connection.ConnectionLinks.Route, "plug", Title: "How the store connects: its Npgsql settings, where each came from, what the server saw and what to change"),
             new("Relationships", DatabaseLinks.RelationshipsRoute, "graph"),
         ]),
