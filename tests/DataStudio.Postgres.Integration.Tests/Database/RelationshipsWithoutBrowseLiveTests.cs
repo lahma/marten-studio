@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Postgres.Integration.Tests.Database;
 
 /// <summary>
-/// Issue #18: Postgres Studio's Relationships draws the keys between the schemas <c>BrowsableSchemas</c> names exactly
+/// Issue #18: The Postgres module's Relationships draws the keys between the schemas <c>BrowsableSchemas</c> names exactly
 /// with <c>BrowseDatabase</c> off, as they are the source's own structure; only <c>"*"</c> waits for the capability.
 /// </summary>
 public class RelationshipsWithoutBrowseLiveTests(RelationshipsWithoutBrowseLiveTests.Fixture databases)

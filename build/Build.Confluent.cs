@@ -6,7 +6,7 @@ using Fallout.Common;
 using Serilog;
 
 /// <summary>
-/// Which Confluent.Kafka the KStudio projects are restored, compiled and tested against - the floor DataStudio.Kafka.Core
+/// Which Confluent.Kafka the Kafka projects are restored, compiled and tested against - the floor DataStudio.Kafka.Core
 /// depends on, or the newest release CI also tests (docs/maintainers/package-budget-changes.md, 2026-11-09).
 /// </summary>
 /// <remarks>
@@ -20,15 +20,15 @@ using Serilog;
 /// </para>
 /// <para>
 /// Unlike Npgsql's, the property may go to the whole solution and there is no second pass: the central
-/// <c>Confluent.Kafka</c> row is unconditional, and only the KStudio projects reference the package, so a MartenStudio
-/// or PostgresStudio project never reads it. It is passed to Restore, Compile and Test <em>always</em>, the floor
+/// <c>Confluent.Kafka</c> row is unconditional, and only the Kafka projects reference the package, so a Marten module
+/// or the Postgres module project never reads it. It is passed to Restore, Compile and Test <em>always</em>, the floor
 /// included, so that an environment variable of that name (MSBuild reads every environment variable as a property)
 /// cannot quietly change what a Fallout run tests; Restore needs it as much as Compile does, because Compile runs
 /// <c>--no-restore</c>.
 /// </para>
 /// <para>
-/// <c>Pack</c> refuses any version but the floor (<see cref="AssertPackingAtTheConfluentFloor"/>). Nothing KStudio
-/// ships is packed before plan K8, but the guard exists now so that the first KStudio package cannot raise a
+/// <c>Pack</c> refuses any version but the floor (<see cref="AssertPackingAtTheConfluentFloor"/>). Nothing the Kafka module
+/// ships is packed before plan K8, but the guard exists now so that the first Kafka package cannot raise a
 /// Wolverine host's Confluent.Kafka by being packed on the latest leg.
 /// </para>
 /// </remarks>
@@ -37,7 +37,7 @@ partial class Build
     /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the Confluent.Kafka version from.</summary>
     const string ConfluentVersionProperty = "DataStudioConfluentVersion";
 
-    [Parameter("The Confluent.Kafka version the KStudio projects are restored, compiled and tested against: 'floor' " +
+    [Parameter("The Confluent.Kafka version the Kafka projects are restored, compiled and tested against: 'floor' " +
                "(the default - the version DataStudio.Kafka.Core depends on, and the only one Pack packs at), 'latest' (the " +
                "newest release CI tests, pinned in Directory.Packages.props), or an exact version such as 2.16.0. " +
                "(env: CONFLUENT_VERSION)")]
@@ -86,13 +86,13 @@ partial class Build
     }
 
     /// <summary>
-    /// KStudio is packed at the Confluent.Kafka floor or not at all: a nuspec written at a newer version would say
+    /// The Kafka module is packed at the Confluent.Kafka floor or not at all: a nuspec written at a newer version would say
     /// <c>Confluent.Kafka &gt;= {that version}</c> and raise every host's Confluent.Kafka.
     /// </summary>
     void AssertPackingAtTheConfluentFloor()
     {
         Assert.True(ResolvedConfluentVersion == ConfluentFloor,
-            $"Refusing to pack with --confluent-version {ResolvedConfluentVersion}: KStudio is packed only at the " +
+            $"Refusing to pack with --confluent-version {ResolvedConfluentVersion}: the Kafka module is packed only at the " +
             $"Confluent.Kafka floor ({ConfluentFloor}, DataStudioConfluentFloor in Directory.Packages.props). The nuspec " +
             $"would say 'Confluent.Kafka >= {ResolvedConfluentVersion}' and raise every host's Confluent.Kafka (a " +
             "Wolverine host pins the floor). Run Pack without --confluent-version (and without CONFLUENT_VERSION in " +

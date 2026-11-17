@@ -9,7 +9,7 @@ namespace DataStudio.Sample.Postgres.Auth;
 /// </summary>
 /// <remarks>
 /// Passwords equal to user names, in a sample that starts a throwaway database. This exists so the demo can show what
-/// a <c>viewer</c> sees that an <c>admin</c> does not - capability by capability, since Postgres Studio asks its write
+/// a <c>viewer</c> sees that an <c>admin</c> does not - capability by capability, since the Postgres module asks its write
 /// policy about each one by name - which is the whole point of the capability and policy design, not an example of
 /// how to store a credential.
 /// </remarks>

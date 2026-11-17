@@ -8,14 +8,14 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Postgres.Integration.Tests.Health;
 
 /// <summary>
-/// Every health check Postgres Studio ships is accounted for: proven here, on a plain database, by a live test that fires
+/// Every health check the Postgres module ships is accounted for: proven here, on a plain database, by a live test that fires
 /// it and one that proves it quiet - or named, with the reason, as proven in <c>DataStudio.Marten.Integration.Tests</c> on a
 /// server set up for it.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Why two homes.</b> The checks are the shared studio's and run unchanged against both kinds of source; what PS-3b
-/// gave Postgres Studio of its own is the table source - every table of the browsable schemas, each the host's, a
+/// gave the Postgres module of its own is the table source - every table of the browsable schemas, each the host's, a
 /// library's or somebody else's - and the remedies' migration SQL. So the checks that read the table source are proven
 /// here, through it. The others read the server or the database as a whole, the same statements for either studio, and
 /// each needs what a shared plain container cannot give: a server setting of its own, an extension preloaded, or a
@@ -87,7 +87,7 @@ public class HealthLiveTestConventionTests
         }
 
         problems.AddRange(ProvenHere.Concat(ProvenElsewhere.Keys).Where(x => !codes.Contains(x, StringComparer.Ordinal))
-            .Select(static x => x + " is listed but is not a check Postgres Studio ships."));
+            .Select(static x => x + " is listed but is not a check the Postgres module ships."));
 
         problems.AddRange(Problems(ProvenHere, typeof(HealthLiveTestConventionTests).Assembly.GetTypes().Where(static x => !x.IsAbstract)));
 
@@ -115,7 +115,7 @@ public class HealthLiveTestConventionTests
         }
     }
 
-    /// <summary>The codes of the checks a Postgres Studio container registers, as a host's builds it.</summary>
+    /// <summary>The codes of the checks a Postgres module container registers, as a host's builds it.</summary>
     private static IReadOnlyList<string> ShippedCodes()
     {
         ServiceCollection services = new();

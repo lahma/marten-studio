@@ -9,7 +9,7 @@ using DataStudio.Postgres.Services.Health.Checks;
 namespace DataStudio.Postgres.Integration.Tests.Health;
 
 /// <summary>
-/// W5-B1's checks on a plain database, through Postgres Studio's whole-database table source: T15 (a foreign key no index
+/// W5-B1's checks on a plain database, through the Postgres module's whole-database table source: T15 (a foreign key no index
 /// covers), T19 (partitions against the lock table), T20 (range partitions running out), T25 (a bloated index) and T26 (an
 /// integer key running out) each made to fire with plain SQL in the test's own schema, and all of them quiet on healthy
 /// tables - with a sweep that locks nothing it lists and writes nothing.

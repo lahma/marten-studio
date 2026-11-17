@@ -177,7 +177,7 @@ public class StatisticsWindowCrashLiveTests
         return StatisticsWindow.Compute(reading, services.GetRequiredService<HealthHistory>().Read(resolved.Source.Key, resolved.Target.Identity));
     }
 
-    /// <summary>A Postgres Studio host over the one data source, as <c>MatrixHost</c> builds one.</summary>
+    /// <summary>A Postgres module host over the one data source, as <c>MatrixHost</c> builds one.</summary>
     private static ServiceProvider Host(string connectionString)
     {
         NpgsqlConnectionStringBuilder own = new(connectionString) { ApplicationName = "ms-cap-crash-" + Guid.NewGuid().ToString("N")[..8] };

@@ -824,8 +824,8 @@ public class QueryPageTests
     [Fact]
     public void QueryComponentsUseTheSharedInteropPredicate()
     {
-        // Both studios' Components/Pages/Query: the shared editor, grid and console panel moved to PostgresStudio, and
-        // Query.razor and LinqQueryPanel.razor stayed in MartenStudio.
+        // Both studios' Components/Pages/Query: the shared editor, grid and console panel moved to the Postgres module, and
+        // Query.razor and LinqQueryPanel.razor stayed in the Marten module.
         string[] files = StudioProjects.Files("*.razor", SearchOption.AllDirectories, "Components", "Pages", "Query");
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");

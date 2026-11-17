@@ -5,7 +5,7 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// What K8 ships (design D-CORR 10.1 and 10.2): the three KStudio projects carry their package metadata and the exact pins, are
+/// What K8 ships (design D-CORR 10.1 and 10.2): the three Kafka projects carry their package metadata and the exact pins, are
 /// packable, take their version from the one preview label in Directory.Build.props (no other project does), and the build packs
 /// and pushes them after the family's three. Read as text, so a package cannot drift unseen.
 /// </summary>
@@ -40,7 +40,7 @@ public class PackReadinessTests
         Property(root, "Description").Should().EndWith(AsfLine);
         Property(root, "PackageTags").Should().Be(tags);
         Property(root, "PackageReadmeFile").Should().Be("README.md");
-        Property(root, "IsPackable").Should().Be("true", "K8: KStudio ships, as a preview");
+        Property(root, "IsPackable").Should().Be("true", "K8: The Kafka module ships, as a preview");
         Property(root, "EnablePackageValidation").Should().Be("true");
         root.Descendants().Where(static x => x.Name.LocalName == "PackageValidationBaselineVersion")
             .Should().ContainSingle("the element must be there, or Directory.Build.props' baseline (the family's last release) would apply to an id nuget.org does not have")
@@ -66,9 +66,9 @@ public class PackReadinessTests
     [Fact]
     public void The_pin_targets_pin_the_projects_below_each_package()
     {
-        var kstudio = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka", "DataStudio.Kafka.csproj"));
-        kstudio.Should().Contain("Condition=\"'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'\"");
-        kstudio.Should().Contain("<ProjectVersion>[%(ProjectVersion)]</ProjectVersion>");
+        var kafka = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka", "DataStudio.Kafka.csproj"));
+        kafka.Should().Contain("Condition=\"'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'\"");
+        kafka.Should().Contain("<ProjectVersion>[%(ProjectVersion)]</ProjectVersion>");
 
         var wolverine = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka.Wolverine", "DataStudio.Kafka.Wolverine.csproj"));
         wolverine.Should().Contain("Condition=\"'%(Filename)' == 'DataStudio.Kafka.Core'\"");
@@ -85,16 +85,16 @@ public class PackReadinessTests
     }
 
     [Fact]
-    public void The_build_packs_and_publishes_the_three_KStudio_projects_after_MartenStudio()
+    public void The_build_packs_and_publishes_the_three_Kafka_projects_after_Marten()
     {
         string publish = File.ReadAllText(RepositoryRoot.Combine("build", "Build.Publish.cs"));
 
-        publish.Should().Contain("const string KStudioCorePackageId = \"DataStudio.Kafka.Core\";")
-            .And.Contain("const string KStudioPackageId = \"DataStudio.Kafka\";")
-            .And.Contain("const string KStudioWolverinePackageId = \"DataStudio.Kafka.Wolverine\";");
+        publish.Should().Contain("const string KafkaCorePackageId = \"DataStudio.Kafka.Core\";")
+            .And.Contain("const string KafkaPackageId = \"DataStudio.Kafka\";")
+            .And.Contain("const string KafkaWolverinePackageId = \"DataStudio.Kafka.Wolverine\";");
 
         // Pack's loop runs the seven projects in dependency order, the three Kafka ones after the family's.
-        publish.Should().MatchRegex(@"StudioProject,\s*KStudioCoreProject, KStudioProject, KStudioWolverineProject");
+        publish.Should().MatchRegex(@"MartenProject,\s*KafkaCoreProject, KafkaProject, KafkaWolverineProject");
     }
 
     /// <summary>The label lives in Directory.Build.props and nowhere else; the three projects derive their version from it.</summary>
@@ -116,11 +116,11 @@ public class PackReadinessTests
         {
             string text = File.ReadAllText(RepositoryRoot.Combine("src", project, project + ".csproj"));
 
-            text.Should().Contain("<PackageVersion>$(KStudioBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>", $"{project} packs at <version>-<label>")
-                .And.Contain("<InformationalVersion>$(KStudioBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>")
+            text.Should().Contain("<PackageVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>", $"{project} packs at <version>-<label>")
+                .And.Contain("<InformationalVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>")
                 .And.Contain("<PropertyGroup Condition=\"'$(KafkaPrereleaseLabel)' != ''\">", "an empty label sets neither PackageVersion nor InformationalVersion")
                 .And.Contain("<ItemGroup Condition=\"'$(KafkaPrereleaseLabel)' != ''\">", "an empty label stamps no AssemblyMetadata")
-                .And.Contain("<KStudioBaseVersion>$(Version)</KStudioBaseVersion>", "the CHANGELOG's version, read and never set")
+                .And.Contain("<KafkaBaseVersion>$(Version)</KafkaBaseVersion>", "the CHANGELOG's version, read and never set")
                 .And.NotContain("<Version>", "Version is a global property that Pack passes");
             text.Should().NotContain("<AssemblyVersion>").And.NotContain("<FileVersion>", "both stay numeric");
         }
@@ -129,7 +129,7 @@ public class PackReadinessTests
     [Fact]
     public void No_other_project_reads_the_label_or_sets_its_own_package_version()
     {
-        string[] kstudio = [.. Names];
+        string[] kafka = [.. Names];
         string[] root = [RepositoryRoot.Combine("src"), RepositoryRoot.Combine("samples"), RepositoryRoot.Combine("tests"), RepositoryRoot.Combine("build")];
 
         foreach (string file in root.Where(Directory.Exists).SelectMany(static x => Directory.EnumerateFiles(x, "*.csproj", SearchOption.AllDirectories))
@@ -137,14 +137,14 @@ public class PackReadinessTests
         {
             string name = Path.GetFileNameWithoutExtension(file);
 
-            if (kstudio.Contains(name))
+            if (kafka.Contains(name))
             {
                 continue;
             }
 
             string text = File.ReadAllText(file);
 
-            text.Should().NotContain("KafkaPrereleaseLabel", $"{name}: only the three KStudio projects read the preview label");
+            text.Should().NotContain("KafkaPrereleaseLabel", $"{name}: only the three Kafka projects read the preview label");
             text.Should().NotContain("<PackageVersion>", $"{name}: the CHANGELOG is the one version authority for every other project");
         }
 

@@ -77,7 +77,7 @@ internal static class LintBuilders
         SharedView = "pg_stat_checkpointer",
     };
 
-    /// <summary>An evaluation in Postgres Studio's words, with its migration remedies, over <paramref name="window" />.</summary>
+    /// <summary>An evaluation in the Postgres module's words, with its migration remedies, over <paramref name="window" />.</summary>
     public static HealthEvaluation Evaluation(StatisticsWindow? window = null, HealthHistoryView? history = null) =>
         HealthEvaluation.At(Now, history: history, text: PostgresText.Instance) with
         {

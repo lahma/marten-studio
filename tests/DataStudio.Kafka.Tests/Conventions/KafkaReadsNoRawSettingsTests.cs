@@ -14,7 +14,7 @@ public class KafkaReadsNoRawSettingsTests
     private static readonly string[] RawGetters = ["get_ConsumerSettings", "get_AdminSettings", "get_TokenRefresh"];
 
     [Fact]
-    public void KStudio_never_refers_to_the_definitions_raw_settings()
+    public void Kafka_never_refers_to_the_definitions_raw_settings()
     {
         IReadOnlyList<string> offenders = MemberReferences(typeof(KafkaOptions).Assembly.Location)
             .Where(static x => x.Type == "DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition" && RawGetters.Contains(x.Member, StringComparer.Ordinal))
@@ -32,7 +32,7 @@ public class KafkaReadsNoRawSettingsTests
             .Should().Contain(("DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition", "get_ConsumerSettings"), "the scan resolves a getter on the definition when one is called");
 
         MemberReferences(typeof(KafkaOptions).Assembly.Location)
-            .Should().Contain(static x => x.Type == "DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition", "KStudio does use the definition, for its declared topics");
+            .Should().Contain(static x => x.Type == "DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition", "the Kafka module does use the definition, for its declared topics");
     }
 
     private static List<(string Type, string Member)> MemberReferences(string assemblyPath)

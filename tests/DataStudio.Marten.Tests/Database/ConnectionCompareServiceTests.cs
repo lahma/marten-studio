@@ -21,7 +21,7 @@ namespace DataStudio.Marten.Tests.Database;
 /// <summary>
 /// "Compare a connection string" (1.1-PASTE), through a real studio container: the page's gate asked first and with no tenant, the
 /// text never looked at for a visitor it refused, nothing audited, nothing logged, and no sentinel in anything that comes back.
-/// The same service serves Postgres Studio; this is the Data Studio wording of it.
+/// The same service serves the Postgres module; this is the Data Studio wording of it.
 /// </summary>
 public class ConnectionCompareServiceTests
 {
@@ -189,7 +189,7 @@ public class ConnectionCompareServiceTests
                     new ConnectionReadContext()),
                 ReadAt = new DateTimeOffset(2026, 11, 3, 9, 0, 0, TimeSpan.Zero),
                 Observed = new ConnectionObserved(
-                    "svc", "svc", "app", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "PostgresStudio",
+                    "svc", "svc", "app", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "Data Studio",
                     0, 0, 0, null, "scram-sha-256", true, "TLSv1.3", "TLS_AES_256_GCM_SHA384", 256, null, null,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
             });

@@ -10,7 +10,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Integration.Tests.Database;
 
 /// <summary>
-/// The database browser's catalog and gate (D27) on a plain database, through Postgres Studio's own services: what
+/// The database browser's catalog and gate (D27) on a plain database, through the Postgres module's own services: what
 /// <c>BrowsableSchemas</c> admits, rows refused without <c>BrowseDatabase</c> or the write policy and every refusal
 /// audited, Marten's rows refused whatever the options say, and a withheld schema masked.
 /// </summary>
@@ -200,7 +200,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
         ITableRowService rows = circuit.Get<ITableRowService>();
 
         TableRowPage document = await rows.ListRowsAsync(Scope, "public", "mt_doc_order", new TableRowRequest(), Token);
-        document.Refusal.Should().Be(DatabaseRefusal.MartenOwned, "PostgresStudio never reads a Marten table's rows (design R2)");
+        document.Refusal.Should().Be(DatabaseRefusal.MartenOwned, "the Postgres module never reads a Marten table's rows (design R2)");
         document.Rows.Should().BeEmpty();
 
         TableRowPage view = await rows.ListRowsAsync(Scope, "public", "order_docs", new TableRowRequest(), Token);

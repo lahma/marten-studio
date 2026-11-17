@@ -86,7 +86,7 @@ public class KafkaExportCapabilityTests
 
         harness.Context.ShellOptions.ReadOnly = true;
 
-        guard.Offered().Should().OnlyContain(c => !guard.IsEnabled(c), "the host studio's master switch turns every capability off");
+        guard.Offered().Should().OnlyContain(c => !guard.IsEnabled(c), "the shell's master switch turns every capability off");
     }
 
     [Fact]
@@ -149,6 +149,6 @@ public class KafkaExportCapabilityTests
 
 internal static class KafkaCapabilityGuardTestExtensions
 {
-    /// <summary>Every capability KStudio offers, for a test that loops over them.</summary>
+    /// <summary>Every capability the Kafka module offers, for a test that loops over them.</summary>
     public static IReadOnlyList<KafkaCapability> Offered(this KafkaCapabilityGuard guard) => KafkaCapabilityGuard.Offered;
 }

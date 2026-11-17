@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace DataStudio.Kafka.Integration.Tests.Sample;
 
 /// <summary>
-/// The KStudio sample host running on real Kestrel in a child process, started from its own build output with no connection string, so that it
+/// The Kafka sample host running on real Kestrel in a child process, started from its own build output with no connection string, so that it
 /// starts the throwaway Kafka and Postgres it would for a plain <c>dotnet run</c> (D18).
 /// </summary>
 /// <remarks>
@@ -14,7 +14,7 @@ namespace DataStudio.Kafka.Integration.Tests.Sample;
 /// port of the operating system's choosing, and the child stopped by handle (never by image name).
 /// </para>
 /// <para>
-/// <b>Its containers are this run's own.</b> <c>KSTUDIO_SAMPLE_REUSE</c> is removed from the child's environment, so both containers are fresh and
+/// <b>Its containers are this run's own.</b> <c>DATASTUDIO_KAFKA_SAMPLE_REUSE</c> is removed from the child's environment, so both containers are fresh and
 /// removed with the process; <c>KSTUDIO_PACKET</c>, when set, is inherited and labels them.
 /// </para>
 /// </remarks>
@@ -149,7 +149,7 @@ internal sealed class KafkaSampleProcess : IAsyncDisposable
         // Nothing configured: the zero-config start, with fresh containers of this run's own.
         startInfo.Environment.Remove("ConnectionStrings__Kafka");
         startInfo.Environment.Remove("ConnectionStrings__Postgres");
-        startInfo.Environment.Remove("KSTUDIO_SAMPLE_REUSE");
+        startInfo.Environment.Remove("DATASTUDIO_KAFKA_SAMPLE_REUSE");
 
         foreach ((string name, string? value) in environment ?? new Dictionary<string, string?>())
         {

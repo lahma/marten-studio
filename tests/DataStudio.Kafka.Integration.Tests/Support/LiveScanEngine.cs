@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Integration.Tests.Support;
 
 /// <summary>
-/// The engine's real container over a real broker, as one principal, for the scan tests: the same registration the host studio uses, the real
+/// The engine's real container over a real broker, as one principal, for the scan tests: the same registration the shell uses, the real
 /// Confluent wire, and (for the tests that need it) the scan observer seam. Seeding is always done by <see cref="LiveContractCluster" />, as
 /// <c>admin</c>.
 /// </summary>

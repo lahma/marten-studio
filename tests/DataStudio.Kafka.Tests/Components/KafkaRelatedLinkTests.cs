@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Components.Web;
 
 namespace DataStudio.Kafka.Tests.Components;
 
-/// <summary>How the rest of KStudio reaches related records, and the seed's address (decision 3.1 of D-CORR): a link, never a scan.</summary>
+/// <summary>How the rest of the Kafka module reaches related records, and the seed's address (decision 3.1 of D-CORR): a link, never a scan.</summary>
 public class KafkaRelatedLinkTests
 {
     private const string Window = "&topic=orders&from=2026-11-08T11%3A00%3A00Z&to=2026-11-08T13%3A00%3A00Z";

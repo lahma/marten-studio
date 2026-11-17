@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Integration.Tests;
 /// own name included, reads as a change.
 /// </para>
 /// <para>
-/// <b>Rows</b> are what the Marten suite's snapshot does not read, because PostgresStudio's hard-rule-14 analogue is "no
+/// <b>Rows</b> are what the Marten suite's snapshot does not read, because the Postgres module's hard-rule-14 analogue is "no
 /// DDL and no rows". Every ordinary table and materialized view is read whole as a count and a digest of each row's
 /// <c>xmin</c> and <c>ctid</c>: an insert, a delete, and an update that leaves every value as it was all move one or the
 /// other. A sequence is read by its <c>last_value</c> and <c>is_called</c>, so a <c>nextval</c> is a change.

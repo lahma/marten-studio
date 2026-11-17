@@ -90,7 +90,7 @@ internal sealed record KafkaTopicQuery(KafkaTopicName Topic, string PredicateTex
 
 /// <summary>What to scan (decision 9.1).</summary>
 /// <param name="Cluster">The cluster's key.</param>
-/// <param name="Topics">The topics, already authorized by the host studio.</param>
+/// <param name="Topics">The topics, already authorized by the shell.</param>
 /// <param name="Window">The half-open time window.</param>
 /// <param name="PredicateText">What the visitor typed; empty for every record in the window.</param>
 /// <param name="Grant">What the visitor may read.</param>
@@ -389,7 +389,7 @@ internal sealed class KafkaScanPlan
 /// pruning, no confirmation and no lowering: a tail reads what arrives, under the limits of the cluster's profile.
 /// </summary>
 /// <param name="Cluster">The cluster's key.</param>
-/// <param name="Topics">The topics, already authorized by the host studio.</param>
+/// <param name="Topics">The topics, already authorized by the shell.</param>
 /// <param name="PredicateText">What the visitor typed; empty for every record.</param>
 /// <param name="Grant">What the visitor may read.</param>
 /// <param name="Isolation">Whether uncommitted records are included: a tail starts at the last stable offset when they are not.</param>

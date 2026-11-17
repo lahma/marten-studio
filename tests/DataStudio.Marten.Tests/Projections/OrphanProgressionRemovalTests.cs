@@ -173,7 +173,7 @@ public class OrphanProgressionRemovalTests
                 options.KnownTenantIds.Add(SecondaryTenant);
             });
 
-            // After AddMartenStudio, so these win over anything the framework registrations contributed.
+            // After AddMarten, so these win over anything the framework registrations contributed.
             services.AddSingleton<IAuthorizationService>(policies);
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 

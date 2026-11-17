@@ -31,7 +31,7 @@ using DataStudio.Postgres.Tests.Support;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// A bUnit context wired as <c>AddPostgres()</c> wires a circuit: PostgresStudio's settings, descriptor, links and
+/// A bUnit context wired as <c>AddPostgres()</c> wires a circuit: The Postgres module's settings, descriptor, links and
 /// source provider - the real ones, over one <see cref="NpgsqlDataSource" /> registered as the application's unkeyed
 /// singleton, which nothing here ever opens - and fakes for every data service a page reads through.
 /// </summary>

@@ -13,14 +13,14 @@ using DataStudio.Kafka.Tests.Support;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// Hard rule 5 for KStudio's events (9600 to 9611, 9605 to 9609 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
+/// Hard rule 5 for the Kafka module's events (9600 to 9611, 9605 to 9609 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
 /// reaches the log only through <see cref="KafkaLogValue" /> (held equal to the diagnostics engine's <c>StudioLogValue</c> by the live project's parity test). Held three ways: every wrapper writes hostile values escaped and bounded, every
-/// <c>[LoggerMessage]</c> method is private to <c>KafkaLog</c>, and none is called from anywhere else in KStudio.
+/// <c>[LoggerMessage]</c> method is private to <c>KafkaLog</c>, and none is called from anywhere else in the Kafka module.
 /// </summary>
 public partial class KafkaRefusalLogValuesTests
 {
     private static readonly string Hostile =
-        "acme\r\n2026-11-12 12:00:00 warn: KStudio user admin was granted everything\u001b[2J\u202eesrever\u2028" + new string('x', 1_000);
+        "acme\r\n2026-11-12 12:00:00 warn: The Kafka module user admin was granted everything\u001b[2J\u202eesrever\u2028" + new string('x', 1_000);
 
     private static readonly string HostileText = "select 1;\r\n-- forged\u001b" + new string('z', 9_000);
 
@@ -28,7 +28,7 @@ public partial class KafkaRefusalLogValuesTests
     public void Every_wrapper_writes_its_values_escaped_and_bounded()
     {
         CapturingLoggerProvider captured = new();
-        ILogger logger = captured.CreateFactory().CreateLogger("kstudio");
+        ILogger logger = captured.CreateFactory().CreateLogger("DataStudio.Kafka");
         DateTimeOffset when = DateTimeOffset.UnixEpoch;
 
         logger.SearchRan(Hostile, Hostile, Hostile, Hostile, when, when, 1, 2, Hostile, HostileText);
@@ -58,7 +58,7 @@ public partial class KafkaRefusalLogValuesTests
     public void A_missing_tenant_is_written_as_none_and_a_missing_topic_as_the_cluster()
     {
         CapturingLoggerProvider captured = new();
-        ILogger logger = captured.CreateFactory().CreateLogger("kstudio");
+        ILogger logger = captured.CreateFactory().CreateLogger("DataStudio.Kafka");
 
         logger.ClusterRefused("ann", "primary", null, null, "kafka-topics");
 
@@ -69,7 +69,7 @@ public partial class KafkaRefusalLogValuesTests
     public void The_events_keep_their_ids_and_levels()
     {
         CapturingLoggerProvider captured = new();
-        ILogger logger = captured.CreateFactory().CreateLogger("kstudio");
+        ILogger logger = captured.CreateFactory().CreateLogger("DataStudio.Kafka");
         DateTimeOffset when = DateTimeOffset.UnixEpoch;
 
         logger.SearchRan("u", "t", "c", null, when, when, 0, 0, "limit", "key = 'x'");

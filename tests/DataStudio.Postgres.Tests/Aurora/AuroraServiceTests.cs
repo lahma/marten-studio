@@ -18,7 +18,7 @@ using DataStudio.Postgres.Tests.Support;
 namespace DataStudio.Postgres.Tests.Aurora;
 
 /// <summary>
-/// <see cref="AuroraService" />'s gates and audit (W5-AUR-fix F3), over a real Postgres Studio container whose data source never
+/// <see cref="AuroraService" />'s gates and audit (W5-AUR-fix F3), over a real the Postgres module container whose data source never
 /// connects, with the facts reader faked: the store policy for the database as a whole, which reads nothing when it refuses;
 /// the activity gate in its order (capability, <c>ReadOnly</c>, write policy), which reads no session unless it passes; the
 /// audit once per circuit, and never for a view with no session; and the tenant dropped, because a server belongs to none.
@@ -149,7 +149,7 @@ public class AuroraServiceTests
     {
         await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
 
-        // Postgres Studio's source has no tenant called acme, so a resolution that kept it would refuse: the view answers
+        // The Postgres module's source has no tenant called acme, so a resolution that kept it would refuse: the view answers
         // because the service asks for the database as a whole.
         AuroraView view = await harness.Service.GetAsync(Scope with { TenantId = "acme" }, Token);
 

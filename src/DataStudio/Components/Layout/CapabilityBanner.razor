@@ -47,10 +47,12 @@ else
                     <code>@ownSwitch</code> is true, so every capability of this module is off.
                 </p>
             }
-            @if (last && module.AllCapabilitiesOption is { } allOption)
+            @if (last && module.ReadOnlyOption is null && module.AllCapabilitiesOption is { } allOption)
             {
                 @* The module's own opt-in, under the module's own last group and about nothing else: the other modules' capabilities are not
-                   turned on by it, so no line that sums the chip up may name one module's call. *@
+                   turned on by it, so no line that sums the chip up may name one module's call. While a read-only switch is on - the module's
+                   own, which the line above names, or the shell's, which draws no popover at all - the call turns nothing on, so the line is
+                   not drawn. *@
                 <p class="ms-popover-footnote">
                     <code>@allOption</code> turns every capability of this module on.
                 </p>

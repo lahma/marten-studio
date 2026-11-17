@@ -106,7 +106,7 @@ public class KafkaEndpointTests
     /// <summary>
     /// D-SHELL 2.1: at a root mount a Kafka page is served at <c>/kafka</c>. <c>Path = "/"</c> normalizes to the default mount through the public
     /// options (<c>StudioPath.Of</c> reads a path of slashes only as unset), so no option spells a root mount today; the test reaches the mapper's
-    /// own answer (<c>TrimmedPath</c> empty) as Postgres Studio's root-mount test does, by seeding the options' derived-path cache.
+    /// own answer (<c>TrimmedPath</c> empty) as the Postgres module's root-mount test does, by seeding the options' derived-path cache.
     /// </summary>
     [Fact]
     public async Task A_kafka_page_is_served_at_a_root_mount()

@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Integration.Tests.Sample;
 
 /// <summary>
-/// The sample's two KStudio policies (D35), asked the way KStudio asks them - about a <see cref="KafkaTopicResource" /> through the application's
+/// The sample's two Kafka module policies (D35), asked the way the Kafka module asks them - about a <see cref="KafkaTopicResource" /> through the application's
 /// own <see cref="IAuthorizationService" /> - for the sample's two users (D-UI decision 18, OPEN-3): admin reaches everything, support reaches the
 /// cluster, <c>orders.*</c> and <c>checkout.*</c> (the Wolverine application's) and no other topic, and an anonymous visitor reaches nothing. No Docker.
 /// </summary>
@@ -52,7 +52,7 @@ public class SamplePolicyTests
     [InlineData("support", "payments.v1", false)]
     [InlineData("support", "customers.v1", false)]
     [InlineData("support", "secrets.v1", false)]
-    [InlineData("support", "kstudio-sample.seed-v2", false)]
+    [InlineData("support", "data-studio-sample.seed-v3", false)]
     [InlineData("support", "xorders.v1", false)]
     [InlineData(null, null, false)]
     [InlineData(null, "orders.v1", false)]

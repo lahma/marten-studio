@@ -130,7 +130,7 @@ internal static class StatementsLive
     public static Task SeedAsync(string connectionString) =>
         ExecuteAsync(connectionString, "create table public.orders (id int primary key, note text); insert into public.orders select g, 'n' || g from pg_catalog.generate_series(1, 50) g");
 
-    /// <summary>A Postgres Studio host over <paramref name="connectionString" />, with the activity gate open.</summary>
+    /// <summary>A Postgres module host over <paramref name="connectionString" />, with the activity gate open.</summary>
     /// <param name="connectionString">The application's database.</param>
     /// <param name="observer">The sweep probe, when a test watches the statements.</param>
     /// <param name="studio">Anything else the test sets on the options - the schemas it may browse, say.</param>

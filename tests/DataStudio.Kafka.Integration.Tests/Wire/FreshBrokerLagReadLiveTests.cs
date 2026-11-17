@@ -44,7 +44,7 @@ public abstract class FreshBrokerLagReadLiveTests(string image)
 
             // Nothing has asked the broker about a group yet: this is the request that makes it create the coordinator's topic.
             WireResult<IReadOnlyList<WireGroupOffset>> read = await cluster.Wire.ListGroupOffsetsAsync(
-                "kstudio-fresh-" + broker.RunId, [new WirePartition(topic, 0)], Token);
+                "data-studio-fresh-" + broker.RunId, [new WirePartition(topic, 0)], Token);
 
             // As admin, who may do everything, the broker either answers (a group nobody committed for has no offsets) or says it is not ready:
             // measured on both images, a pristine broker's coordinator is mostly "unavailable" (not elected yet) and sometimes

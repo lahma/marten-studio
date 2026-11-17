@@ -10,7 +10,7 @@ namespace DataStudio.Kafka.Tests.Services;
 
 /// <summary>
 /// A profile never grants (AGENTS.md D47, D-M5 decision 4.7): for every profile and every one of the sixteen combinations of the four capabilities, what is
-/// usable on the cluster is a subset of what the host switched on - and empty under the host studio's <c>ReadOnly</c> - so that a later limit, capability or
+/// usable on the cluster is a subset of what the host switched on - and empty under the shell's <c>ReadOnly</c> - so that a later limit, capability or
 /// profile cannot add a way through. Held where the operation is: the real export service is asked for every case and delivers only what the flags allow.
 /// </summary>
 public class KafkaProfileNeverGrantsTests

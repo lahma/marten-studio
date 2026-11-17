@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <!--
-    The Postgres Studio sample: a web host with no Marten, shaped like issue #8's host B - an admin database (the
+    The Postgres sample: a web host with no Marten, shaped like issue #8's host B - an admin database (the
     application's unkeyed NpgsqlDataSource) and one database per tenant, listed by the host itself through an
     IPostgresDatabaseSource. With no ConnectionStrings:Postgres it starts a throwaway Postgres (D18).
 
@@ -9,8 +9,8 @@
     reference to Microsoft.AspNetCore.App.Internal.Assets brings blazor.web.js here, which is the shape a real host
     has.
 
-    It sets DataStudioPostgresPinsNpgsql, as every PostgresStudio-only project does, so it restores the Npgsql the
-    PostgresStudio package is pinned to and joins the latest-Npgsql pass over data-studio-postgres.slnf (AGENTS.md D30).
+    It sets DataStudioPostgresPinsNpgsql, as every Postgres-only project does, so it restores the Npgsql the
+    The Postgres module package is pinned to and joins the latest-Npgsql pass over data-studio-postgres.slnf (AGENTS.md D30).
     Nothing here may reach Marten: PostgresSolutionFilterTests holds the filter closed.
   -->
   <PropertyGroup>

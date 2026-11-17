@@ -152,7 +152,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
             SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, "Session details need Capabilities.ViewDatabaseActivity."),
             new ReplicationView { MeasuredAt = At },
             Registry,
-            "PostgresStudio 1.1.0",
+            "Data Studio 1.1.0",
             At,
             view,
             applications).ToJson();
@@ -247,7 +247,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
     [Fact]
     public void A_snapshot_a_host_asks_the_api_for_writes_connection_null_the_key_is_always_present_and_the_section_studio_only()
     {
-        PostgresDiagnosticsSnapshot api = new() { SchemaVersion = 1, Producer = "PostgresStudio 1.1.0", GeneratedAt = At, Database = new PostgresDatabaseRef("default", "app") };
+        PostgresDiagnosticsSnapshot api = new() { SchemaVersion = 1, Producer = "Data Studio 1.1.0", GeneratedAt = At, Database = new PostgresDatabaseRef("default", "app") };
 
         using JsonDocument document = JsonDocument.Parse(api.ToJson());
 

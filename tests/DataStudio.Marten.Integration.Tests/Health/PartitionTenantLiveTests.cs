@@ -60,7 +60,7 @@ public class PartitionTenantLiveTests(PostgresFixture postgres)
 
     /// <remarks>
     /// Not marked <c>[HealthFires("T20")]</c>: T20 is a shared check, proven in <c>DataStudio.Postgres.Integration.Tests</c>
-    /// (<c>HealthLiveTestConventionTests.ProvenInPostgresStudioSuite</c>); this is the proof of its Marten remedy.
+    /// (<c>HealthLiveTestConventionTests.ProvenInPostgresSuite</c>); this is the proof of its Marten remedy.
     /// </remarks>
     [PostgresFact]
     public async Task A_static_ByRange_whose_rows_reach_its_newest_range_or_whose_time_runs_out_is_given_the_AddRange_line()

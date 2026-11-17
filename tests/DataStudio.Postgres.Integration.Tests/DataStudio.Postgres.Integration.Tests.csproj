@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- PostgresStudio's live suite: a Postgres of its own (PostgresFixture, with a container reuse identity of its own, so
+  <!-- The Postgres module's live suite: a Postgres of its own (PostgresFixture, with a container reuse identity of its own, so
        it never shares a reused container with DataStudio.Marten.Integration.Tests), the core pages' services against it, and
-       Playwright over samples/DataStudio.Sample.Postgres. No Marten anywhere in its graph: it references PostgresStudio, the
+       Playwright over samples/DataStudio.Sample.Postgres. No Marten anywhere in its graph: it references the Postgres module, the
        sample data and the sample, each of which sets DataStudioPostgresPinsNpgsql, so the latest-Npgsql pass over
        data-studio-postgres.slnf runs it too (PostgresSolutionFilterTests). -->
   <PropertyGroup>
@@ -38,7 +38,7 @@
   </ItemGroup>
 
   <!-- Two of the fast suite's test doubles, compiled in rather than copied, as tests/DataStudio.Postgres.Tests does: each one
-       names only PostgresStudio's and ASP.NET Core's types. -->
+       names only the Postgres module's and ASP.NET Core's types. -->
   <ItemGroup>
     <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Statements/PlanParity.cs" Link="Support/Linked/PlanParity.cs" />

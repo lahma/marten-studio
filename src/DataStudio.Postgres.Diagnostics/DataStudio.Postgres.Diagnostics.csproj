@@ -49,9 +49,9 @@
 
   <!--
     The package is packed at the Npgsql floor and nowhere else - the same refusal, for the same reason, as
-    MartenStudioPackOnlyAtTheMartenFloor in src/DataStudio.Marten/DataStudio.Marten.csproj. A nupkg packed after a
-    restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, every PostgresStudio and MartenStudio
-    host's included, since PostgresStudio depends on exactly this package. The build's Pack target refuses
+    MartenPackOnlyAtTheMartenFloor in src/DataStudio.Marten/DataStudio.Marten.csproj. A nupkg packed after a
+    restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, every Postgres module and the Marten module
+    host's included, since the Postgres module depends on exactly this package. The build's Pack target refuses
     first and names the Fallout parameter; this is the refusal for a bare `dotnet pack`.
 
     Two checks, because the property is not what NuGet packs from: the dependency range comes from
@@ -59,23 +59,23 @@
     followed by a pack with no-restore would pass a property-only check. The library key "Npgsql/<floor>",
     quotes included (\x22 in the pattern), must be in that file. No assets file is a refusal, not a pass.
   -->
-  <Target Name="PostgresStudioDiagnosticsPackOnlyAtTheNpgsqlFloor" BeforeTargets="GenerateNuspec">
+  <Target Name="PostgresDiagnosticsPackOnlyAtTheNpgsqlFloor" BeforeTargets="GenerateNuspec">
     <PropertyGroup>
-      <_PostgresStudioDiagnosticsAssetsFileExists>false</_PostgresStudioDiagnosticsAssetsFileExists>
-      <_PostgresStudioDiagnosticsAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_PostgresStudioDiagnosticsAssetsFileExists>
-      <_PostgresStudioDiagnosticsFloorLibraryKey>"Npgsql/$(DataStudioNpgsqlFloor)"</_PostgresStudioDiagnosticsFloorLibraryKey>
-      <_PostgresStudioDiagnosticsFloorLibraryPattern>\x22Npgsql/$(DataStudioNpgsqlFloor.Replace('.', '\.'))\x22</_PostgresStudioDiagnosticsFloorLibraryPattern>
-      <_PostgresStudioDiagnosticsAssets Condition="'$(_PostgresStudioDiagnosticsAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_PostgresStudioDiagnosticsAssets>
-      <_PostgresStudioDiagnosticsAssetsAtFloor>false</_PostgresStudioDiagnosticsAssetsAtFloor>
-      <_PostgresStudioDiagnosticsAssetsAtFloor Condition="'$(_PostgresStudioDiagnosticsAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_PostgresStudioDiagnosticsAssets), $(_PostgresStudioDiagnosticsFloorLibraryPattern)))">true</_PostgresStudioDiagnosticsAssetsAtFloor>
+      <_PostgresDiagnosticsAssetsFileExists>false</_PostgresDiagnosticsAssetsFileExists>
+      <_PostgresDiagnosticsAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_PostgresDiagnosticsAssetsFileExists>
+      <_PostgresDiagnosticsFloorLibraryKey>"Npgsql/$(DataStudioNpgsqlFloor)"</_PostgresDiagnosticsFloorLibraryKey>
+      <_PostgresDiagnosticsFloorLibraryPattern>\x22Npgsql/$(DataStudioNpgsqlFloor.Replace('.', '\.'))\x22</_PostgresDiagnosticsFloorLibraryPattern>
+      <_PostgresDiagnosticsAssets Condition="'$(_PostgresDiagnosticsAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_PostgresDiagnosticsAssets>
+      <_PostgresDiagnosticsAssetsAtFloor>false</_PostgresDiagnosticsAssetsAtFloor>
+      <_PostgresDiagnosticsAssetsAtFloor Condition="'$(_PostgresDiagnosticsAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_PostgresDiagnosticsAssets), $(_PostgresDiagnosticsFloorLibraryPattern)))">true</_PostgresDiagnosticsAssetsAtFloor>
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioNpgsqlVersion)' != '$(DataStudioNpgsqlFloor)'"
            Text="DataStudio.Postgres.Diagnostics is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor), Directory.Packages.props), and this pack asks for Npgsql $(DataStudioNpgsqlVersion). A package packed here would depend on Npgsql &gt;= $(DataStudioNpgsqlVersion) and raise every host's Npgsql. Pack without DataStudioNpgsqlVersion, or raise DataStudioNpgsqlFloor deliberately and record why in AGENTS.md, Package budget changes." />
-    <Error Condition="'$(_PostgresStudioDiagnosticsAssetsFileExists)' != 'true'"
+    <Error Condition="'$(_PostgresDiagnosticsAssetsFileExists)' != 'true'"
            Text="DataStudio.Postgres.Diagnostics is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
-    <Error Condition="'$(_PostgresStudioDiagnosticsAssetsFileExists)' == 'true' and '$(_PostgresStudioDiagnosticsAssetsAtFloor)' != 'true'"
-           Text="DataStudio.Postgres.Diagnostics is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Npgsql - it has no $(_PostgresStudioDiagnosticsFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Npgsql. Restore at the floor first: pack without --no-restore and without DataStudioNpgsqlVersion." />
+    <Error Condition="'$(_PostgresDiagnosticsAssetsFileExists)' == 'true' and '$(_PostgresDiagnosticsAssetsAtFloor)' != 'true'"
+           Text="DataStudio.Postgres.Diagnostics is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Npgsql - it has no $(_PostgresDiagnosticsFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Npgsql. Restore at the floor first: pack without --no-restore and without DataStudioNpgsqlVersion." />
   </Target>
 
 </Project>

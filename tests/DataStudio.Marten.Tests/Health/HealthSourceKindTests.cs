@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// PS-1e: a health check that reads a source through a studio's own types - MartenStudio's read the store, its options and
+/// PS-1e: a health check that reads a source through a studio's own types - the Marten module's read the store, its options and
 /// its daemon - is never run against another kind of source. It is not a "could not check" row there; it is no row at all.
 /// </summary>
 public class HealthSourceKindTests
@@ -69,15 +69,15 @@ public class HealthSourceKindTests
     }
 
     /// <summary>
-    /// MartenStudio's own registry: every check runs against a Marten store, and every check in MartenStudio's own
-    /// assembly runs against nothing else. While the shared engine and MartenStudio are one assembly (before PS-2) that is
-    /// all 49, the shared checks included - every source MartenStudio has is a Marten store; from the move on, the 23 in
-    /// the shared assembly run against every kind and MartenStudio's against Marten stores alone: 44 shared (23, W5-V1's
+    /// The Marten module's own registry: every check runs against a Marten store, and every check in the Marten module's own
+    /// assembly runs against nothing else. While the shared engine and the Marten module are one assembly (before PS-2) that is
+    /// all 49, the shared checks included - every source the Marten module has is a Marten store; from the move on, the 23 in
+    /// the shared assembly run against every kind and the Marten module's against Marten stores alone: 44 shared (23, W5-V1's
     /// T16 and T24, W5-CAP's C11, W5-R2's R02-R04, W5-S2's S04-S10 and K05-K07, W5-B1's T15, T19, T20, T25 and T26, and 0.6's
-    /// C12, X3; 45 in all) and 31 MartenStudio's (26, W5's D09, W5-S2's K08, W5-B1's T17, and 0.6's T18, X4, and D10, M4).
+    /// C12, X3; 45 in all) and 31 the Marten module's (26, W5's D09, W5-S2's K08, W5-B1's T17, and 0.6's T18, X4, and D10, M4).
     /// </summary>
     [Fact]
-    public void MartenStudios_own_checks_run_against_Marten_stores_only()
+    public void Marten_own_checks_run_against_Marten_stores_only()
     {
         HealthCheckRegistry registry = StudioHealthChecks.Registry;
         HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenDescriptor).Assembly)];
@@ -96,7 +96,7 @@ public class HealthSourceKindTests
         }
         else
         {
-            marten.Should().HaveCount(33, "MartenStudio keeps 26 of the 49 checks (design Appendix B), W5 adds D09, K08 and T17, 0.6 T18 (X4) and D10 (M4), 0.10 K09 (K10 was retired in 1.1), and 1.1 E09; W5-S2's S04-S10 and K05-K07 and W5-B1's T15, T19, T20, T25 and T26 are shared");
+            marten.Should().HaveCount(33, "the Marten module keeps 26 of the 49 checks (design Appendix B), W5 adds D09, K08 and T17, 0.6 T18 (X4) and D10 (M4), 0.10 K09 (K10 was retired in 1.1), and 1.1 E09; W5-S2's S04-S10 and K05-K07 and W5-B1's T15, T19, T20, T25 and T26 are shared");
             restricted.Should().BeEquivalentTo(marten,
                 "the shared engine's 45 (23, W5-V1's T16 and T24, W5-CAP's C11, W5-R2's R02-R04, W5-S2's ten, W5-B1's five and 0.6's C12) run against every kind of source");
         }

@@ -95,10 +95,13 @@ internal sealed class KafkaSeedPlan
     public const string HeartbeatsTopic = "heartbeats.v1";
 
     /// <summary>The topic whose presence says the sample seeded this cluster.</summary>
-    public const string MarkerTopic = "kstudio-sample.seed-v2";
+    public const string MarkerTopic = "data-studio-sample.seed-v3";
 
-    /// <summary>The marker of the sample's earlier seed (before values, JSON-path redaction and a declared partitioner): such a cluster is stopped at, not seeded again.</summary>
-    public const string EarlierMarkerTopic = "kstudio-sample.seed-v1";
+    /// <summary>
+    /// The markers of the sample's earlier seeds (1.x's, and before the sample was renamed): such a cluster is stopped at, not seeded again. They are
+    /// names a reused broker may still hold, so the judge has to recognise them as they were written.
+    /// </summary>
+    public static readonly IReadOnlyList<string> EarlierMarkerTopics = ["kstudio-sample.seed-v1", "kstudio-sample.seed-v2"];
 
     /// <summary>The partitions of <c>orders.v1</c>.</summary>
     public const int OrderPartitions = 6;
@@ -420,7 +423,7 @@ internal sealed class KafkaSeedPlan
             Json(static w =>
             {
                 w.WriteStartObject();
-                w.WriteString("seededBy", "KStudio.Sample");
+                w.WriteString("seededBy", "DataStudio.Sample");
                 w.WriteNumber("version", 2);
                 w.WriteEndObject();
             }),

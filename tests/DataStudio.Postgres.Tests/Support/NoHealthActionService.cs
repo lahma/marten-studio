@@ -4,7 +4,7 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Postgres.Tests.Support;
 
 /// <summary>
-/// The Health page's action seam with nothing registered, as Postgres Studio has it: no finding offers an action, and none is run.
+/// The Health page's action seam with nothing registered, as the Postgres module has it: no finding offers an action, and none is run.
 /// </summary>
 internal sealed class NoHealthActionService : IHealthActionService
 {

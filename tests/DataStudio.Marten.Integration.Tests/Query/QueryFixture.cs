@@ -58,7 +58,7 @@ public record QueryPersonJoined(string Name);
 /// <remarks>
 /// <para>
 /// Everything is built from a real <see cref="IServiceCollection" /> with <c>AddMarten</c> and
-/// <c>AddMartenStudio</c> on it: the registry discovers the store the way it does in a host, the resolver
+/// <c>AddMarten</c> on it: the registry discovers the store the way it does in a host, the resolver
 /// authorizes the way it does in a host, and <see cref="IQueryService" /> is the registered
 /// implementation. A harness that hand-built <see cref="QueryService" /> would test a different object
 /// from the one an application gets.

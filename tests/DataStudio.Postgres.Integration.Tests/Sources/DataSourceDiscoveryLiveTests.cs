@@ -15,7 +15,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Postgres.Integration.Tests.Sources;
 
 /// <summary>
-/// Where Postgres Studio finds its databases, against real ones: the application's unkeyed <see cref="NpgsqlDataSource" />
+/// Where the Postgres module finds its databases, against real ones: the application's unkeyed <see cref="NpgsqlDataSource" />
 /// as <c>default</c>, one added by name with <c>AddDataSource</c>, and a host <see cref="IPostgresDatabaseSource" /> that
 /// lists three tenant databases - and isolation between them, for a visitor the source policy allows one tenant alone,
 /// including through every cache the studio keeps across circuits.

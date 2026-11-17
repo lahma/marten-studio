@@ -41,7 +41,7 @@ namespace DataStudio.Marten.Tests.Documents;
 /// </remarks>
 public class DocumentWritePolicyTests
 {
-    private const string WritePolicy = "MartenStudioWriter";
+    private const string WritePolicy = "MartenWriter";
     private const string Id = "8f1d5a6e-1a2b-4c3d-9e8f-000000000001";
 
     // ------------------------------------------------------------------------------------------------

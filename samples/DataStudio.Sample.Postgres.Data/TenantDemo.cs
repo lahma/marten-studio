@@ -19,7 +19,7 @@ namespace DataStudio.Sample.Postgres.Data;
 public readonly record struct TenantDemoResult(IReadOnlyList<string> Tenants, IReadOnlyList<string> Skipped, int RowsWritten);
 
 /// <summary>
-/// The Postgres Studio sample's other half, the shape of a host that keeps one database per tenant beside an admin
+/// The Postgres sample's other half, the shape of a host that keeps one database per tenant beside an admin
 /// database (issue #8's host B): three tenant databases on the admin database's server, each with a small order book,
 /// and a directory of them in the admin database that the host lists them from.
 /// </summary>
@@ -89,7 +89,7 @@ public static class TenantDemo
 
     /// <summary>The comment the demo puts on a tenant database it created.</summary>
     private const string DatabaseComment =
-        DatabaseMarker + " - A tenant database the Postgres Studio sample created beside its admin database. Its tables are demo data.";
+        DatabaseMarker + " - A tenant database the Postgres sample created beside its admin database. Its tables are demo data.";
 
     /// <summary>
     /// Creates the directory in the admin database, the tenant databases on its server, and their tables and rows -
@@ -299,7 +299,7 @@ public static class TenantDemo
             if (logger.IsEnabled(LogLevel.Information))
             {
                 logger.LogInformation(
-                    "The Postgres Studio sample left the existing database '{Database}' alone: it was not created by the sample - "
+                    "The Postgres sample left the existing database '{Database}' alone: it was not created by the sample - "
                     + "its comment does not begin with '{Marker}' - so nothing was written to it and it is not listed as a tenant. "
                     + "Comment found: {Comment}",
                     tenant,
@@ -320,7 +320,7 @@ public static class TenantDemo
             if (logger.IsEnabled(LogLevel.Warning))
             {
                 logger.LogWarning(
-                    "The Postgres Studio sample could not create the tenant database '{Database}': the role it connects as may "
+                    "The Postgres sample could not create the tenant database '{Database}': the role it connects as may "
                     + "not create databases (CREATEDB). The tenants source lists only the tenant databases that exist. {Reason}",
                     tenant,
                     exception.MessageText);
@@ -398,7 +398,7 @@ public static class TenantDemo
         );
 
         COMMENT ON TABLE studio_sample.tenants IS
-            'The tenant directory: one row per tenant database. The Postgres Studio sample''s IPostgresDatabaseSource lists the tenants from it.';
+            'The tenant directory: one row per tenant database. The Postgres sample''s IPostgresDatabaseSource lists the tenants from it.';
         """;
 
     /// <summary>A tenant database's tables. The foreign key from orders to customers has no index, on purpose.</summary>
@@ -413,7 +413,7 @@ public static class TenantDemo
             created_at timestamptz NOT NULL
         );
 
-        COMMENT ON TABLE public.customers IS 'A tenant''s customers. Postgres Studio sample data.';
+        COMMENT ON TABLE public.customers IS 'A tenant''s customers. Postgres sample data.';
 
         CREATE TABLE IF NOT EXISTS public.orders
         (
@@ -427,7 +427,7 @@ public static class TenantDemo
 
         CREATE INDEX IF NOT EXISTS orders_placed_at_idx ON public.orders (placed_at);
 
-        COMMENT ON TABLE public.orders IS 'A tenant''s orders. Postgres Studio sample data.';
+        COMMENT ON TABLE public.orders IS 'A tenant''s orders. Postgres sample data.';
         COMMENT ON COLUMN public.orders.customer_id IS
             'Deliberately not indexed: deleting or re-keying a customer scans every order. The one finding the sample leaves for the studio''s checks.';
 
@@ -441,7 +441,7 @@ public static class TenantDemo
             PRIMARY KEY (order_id, line_no)
         );
 
-        COMMENT ON TABLE public.order_lines IS 'An order''s lines. Their foreign key is served by the primary key. Postgres Studio sample data.';
+        COMMENT ON TABLE public.order_lines IS 'An order''s lines. Their foreign key is served by the primary key. Postgres sample data.';
         """;
 
     private const string CustomersFill =

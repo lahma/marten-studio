@@ -13,7 +13,7 @@ namespace DataStudio.Sample.Marten.Generation;
 /// <remarks>
 /// <para>
 /// Raw SQL in the sample rather than a call into the studio, because the sample domain deliberately does
-/// not reference MartenStudio (D17) and the sample host must demonstrate what a host can do on its own.
+/// not reference the Marten module (D17) and the sample host must demonstrate what a host can do on its own.
 /// The studio's own projections screen answers the same question far better; this exists so the generate
 /// panel can say "the daemon is 400 000 events behind and catching up" on the page that just created
 /// that backlog, which is the moment somebody decides whether to go and watch it.

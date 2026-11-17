@@ -13,10 +13,10 @@ namespace DataStudio.Kafka;
 /// callback, and the fluent API is not duplicated here.
 /// </para>
 /// <para>
-/// <b>Who gets in</b> is the host studio's own <c>AuthorizationPolicy</c> (or the caller's <c>RequireAuthorization()</c> on the
+/// <b>Who gets in</b> is the shell's own <c>AuthorizationPolicy</c> (or the caller's <c>RequireAuthorization()</c> on the
 /// studio's map call): the Kafka pages are endpoints of that mapping. <b>Which cluster and topic</b> is
 /// <see cref="ClusterAuthorizationPolicy" />, and <b>each capability's use</b> is <see cref="CapabilityAuthorizationPolicy" />. Both
-/// are asked about a <see cref="KafkaTopicResource" />; neither falls back to the host studio's policies, whose handlers are written
+/// are asked about a <see cref="KafkaTopicResource" />; neither falls back to the shell's policies, whose handlers are written
 /// for other resources.
 /// </para>
 /// </remarks>

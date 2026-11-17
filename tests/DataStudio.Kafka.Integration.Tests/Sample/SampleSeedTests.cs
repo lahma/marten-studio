@@ -12,7 +12,7 @@ namespace DataStudio.Kafka.Integration.Tests.Sample;
 /// needle the README looks for exists, the marker is written last, and the judge refuses a cluster whose <c>orders.v1</c> the sample did not seed.
 /// </summary>
 /// <remarks>
-/// These live in the live suite's project, not the fast one: the sample hosts Marten Studio, and the fast suite is fenced from Marten
+/// These live in the live suite's project, not the fast one: the sample hosts the Marten module, and the fast suite is fenced from Marten
 /// (<c>KafkaFenceTests</c>). They start no container and read no broker.
 /// </remarks>
 public class SampleSeedTests
@@ -216,18 +216,23 @@ public class SampleSeedTests
     {
         SampleKafkaJudge.Judge(["__consumer_offsets", "billing.v2"]).Verdict.Should().Be(SampleKafkaVerdict.Empty);
         SampleKafkaJudge.Judge([]).Verdict.Should().Be(SampleKafkaVerdict.Empty);
-        SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
+        SampleKafkaJudge.Judge(["orders.v1", "payments.v1", KafkaSeedPlan.MarkerTopic]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
     }
 
     [Fact]
     public void The_judge_names_an_earlier_seed()
     {
-        SampleKafkaJudgement earlier = SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "kstudio-sample.seed-v1"]);
+        foreach (string marker in KafkaSeedPlan.EarlierMarkerTopics)
+        {
+            SampleKafkaJudge.Judge(["orders.v1", "payments.v1", marker]).Verdict.Should().Be(SampleKafkaVerdict.Refuse, marker + " is an earlier sample's marker");
+        }
+
+        SampleKafkaJudgement earlier = SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "data-studio-sample.seed-v2"]);
 
         earlier.Verdict.Should().Be(SampleKafkaVerdict.Refuse);
         earlier.Message.Should().Be(
-            "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset KSTUDIO_SAMPLE_REUSE) so that the sample can seed it again.");
-        SampleKafkaJudge.Judge(["orders.v1", "kstudio-sample.seed-v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
+            "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset DATASTUDIO_KAFKA_SAMPLE_REUSE) so that the sample can seed it again.");
+        SampleKafkaJudge.Judge(["orders.v1", "data-studio-sample.seed-v1", KafkaSeedPlan.MarkerTopic]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
     }
 
     [Fact]
@@ -252,7 +257,7 @@ public class SampleSeedTests
     public void The_banner_never_promises_a_reused_container_is_deleted()
     {
         SampleKafka.Banner("localhost:32770", "localhost:32771", reused: true).Should().Be(
-            "Data Studio Kafka sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are kept for the next run (KSTUDIO_SAMPLE_REUSE=true); docker rm -f removes a container when you are done. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
+            "Data Studio Kafka sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are kept for the next run (DATASTUDIO_KAFKA_SAMPLE_REUSE=true); docker rm -f removes a container when you are done. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
     }
 
     [Fact]
@@ -271,8 +276,8 @@ public class SampleSeedTests
         var fresh = SampleKafka.CreateContainer(reuse: false, packet: "SAMPLE");
         var reused = SampleKafka.CreateContainer(reuse: true, packet: null);
 
-        KafkaSampleContainers.Labels(fresh).Should().Contain("kstudio.sample", "true").And.Contain("kstudio.packet", "SAMPLE").And.NotContainKey("kstudio.sample.reuse");
-        KafkaSampleContainers.Labels(reused).Should().Contain("kstudio.sample.reuse", "kstudio-sample-kafka");
+        KafkaSampleContainers.Labels(fresh).Should().Contain("data-studio.sample", "true").And.Contain("kstudio.packet", "SAMPLE").And.NotContainKey("data-studio.sample.reuse");
+        KafkaSampleContainers.Labels(reused).Should().Contain("data-studio.sample.reuse", "data-studio-sample-kafka");
         KafkaSampleContainers.Labels(reused).Should().NotContainKey("marten-studio.tests", "the live suite's reuse identity is another container's");
     }
 

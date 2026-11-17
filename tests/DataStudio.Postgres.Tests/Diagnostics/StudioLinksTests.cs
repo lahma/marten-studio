@@ -96,7 +96,7 @@ public class StudioLinksTests
         string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresPage.Connection);
 
         // Issue #55: the one spelling the page's own link (ConnectionLinks) and the diagnostics API share, so a host's link and a
-        // visitor's cannot drift; both studios mount it (Marten Studio's navigation names the same route).
+        // visitor's cannot drift; both studios mount it (the Marten module's navigation names the same route).
         path.Should().StartWith(DataStudio.Postgres.Services.Connection.ConnectionLinks.Route + "?").And.Contain("store=main").And.Contain("db=db1");
         PostgresDescriptor.Instance.Navigation(PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "postgres/database/connection");
     }

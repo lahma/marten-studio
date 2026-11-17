@@ -81,7 +81,7 @@ public class LogLevelsTests
         ["StudioLogThrottle.LevelOrWarning"] =
             "The throttle's own answer, or Warning for an owner a test built without one (StudioScopeCatalog, MartenStoreRegistry, DatabaseLiveLogs); the container always supplies a throttle.",
         ["KafkaLogOnce.WarningOrDebug"] =
-            "DataStudio.Kafka.Core cannot use StudioLogThrottle across the fence (hard rule 16), and this helper is KStudio's own ten-minute throttle: Warning once per key per window, Debug in between.",
+            "DataStudio.Kafka.Core cannot use StudioLogThrottle across the fence (hard rule 16), and this helper is the Kafka module's own ten-minute throttle: Warning once per key per window, Debug in between.",
     };
 
     /// <summary>Why a site is allowed to be above Debug.</summary>
@@ -175,7 +175,7 @@ public class LogLevelsTests
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9464 ConnectionHistoryBacklogDropped"] = (Verdict.Throttled,
             "The sampler's backlog of samples the history's store refused (#46) outgrew its hour and dropped its oldest; every round that drops says so, so once per throttle window a Warning."),
         ["src/DataStudio.Postgres.Diagnostics/Services/Postgres/PostgresLog.cs : 9301 DatabaseNamesSkipped"] = (Verdict.Throttled,
-            "A host's database source listed names PostgresStudio left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
+            "A host's database source listed names the Postgres module left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
         // ---- StudioLog: the health export ------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
@@ -237,7 +237,7 @@ public class LogLevelsTests
         // ---- 1.2-H-C ----------------------------------------------------------------------------------
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.HealthActions.cs : 9223 HealthActionFailedRaw"] = (Verdict.VisitorAction,
             "A finding's action the visitor pressed failed after its gates passed; one line per press, never polled, and the card shows it."),
-        // ---- KS-SHELL: KStudio's own events (D34, D35) -------------------------------------------------
+        // ---- KS-SHELL: The Kafka module's own events (D34, D35) -------------------------------------------------
         ["src/DataStudio.Kafka/Services/KafkaLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
             "A Kafka capability refusal reaches the service only when a client drives a control the page disabled or hid."),
         ["src/DataStudio.Kafka/Services/KafkaLog.cs : 9603 ClusterRefusedCore"] = (Verdict.Refusal,
@@ -361,7 +361,7 @@ public class LogLevelsTests
         ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clusters.cs : 9677 ClusterSourceItemNotListed"] = (Verdict.Throttled,
             "A cluster, tenant or topic a source (Wolverine) found was not listed; the registry is built once, so Warning once per source, item and reason per ten minutes, Debug in between, with no tenant, topic or value in the line."),
         ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9655 AuthenticationFailed"] = (Verdict.Throttled,
-            "The cluster refused KStudio's credentials; every client meets it, so Warning once per cluster per ten minutes, Debug in between."),
+            "The cluster refused the Kafka module's credentials; every client meets it, so Warning once per cluster per ten minutes, Debug in between."),
         ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9658 ClientFatalError"] = (Verdict.Fault,
             "librdkafka declared a client fatally failed; the client is unusable until it is rebuilt."),
         ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9663 ShutdownTimedOut"] = (Verdict.Fault,

@@ -16,7 +16,7 @@ namespace DataStudio.Marten.Tests.Relationships;
 
 /// <summary>
 /// UI-fix: the Relationships screen's and the Relationships tab's sentences about document types now come from the studio's
-/// own words (<c>StudioText</c>), so that Postgres Studio can speak of tables alone - and MartenStudio reads every one of
+/// own words (<c>StudioText</c>), so that Postgres module can speak of tables alone - and the Marten module reads every one of
 /// them as the markup used to say it, laid out as a browser lays it out. Each expected value is the old literal, copied.
 /// </summary>
 public partial class RelationshipsWordsTests

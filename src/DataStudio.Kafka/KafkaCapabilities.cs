@@ -2,7 +2,7 @@ namespace DataStudio.Kafka;
 
 /// <summary>
 /// What the Kafka module may read beyond metadata (AGENTS.md D35). Every flag defaults to <see langword="false" /> (D4); describing clusters,
-/// topics, partitions and groups needs none of them (K5). The host studio's <c>ReadOnly</c> turns every flag off at once.
+/// topics, partitions and groups needs none of them (K5). <c>DataStudioOptions.ReadOnly</c> turns every flag off at once.
 /// </summary>
 public sealed class KafkaCapabilities
 {
@@ -31,6 +31,6 @@ public sealed class KafkaCapabilities
     /// <summary>No capability: the clusters and topics can be described and nothing is read.</summary>
     public static KafkaCapabilities None() => new();
 
-    /// <summary>Every capability on, including those a later version adds. Still subject to the host studio's ReadOnly.</summary>
+    /// <summary>Every capability on, including those a later version adds. Still subject to <c>DataStudioOptions.ReadOnly</c>.</summary>
     public static KafkaCapabilities All() => new() { SearchRecords = true, ReadPayloads = true, ExportRecords = true, LiveTail = true };
 }

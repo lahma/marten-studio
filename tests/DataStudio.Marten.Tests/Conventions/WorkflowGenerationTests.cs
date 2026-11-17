@@ -275,12 +275,12 @@ public class WorkflowGenerationTests
     }
 
     /// <summary>
-    /// The latest leg also runs PostgresStudio's projects at the latest-tested Npgsql. Without the env line the
-    /// second pass over <c>data-studio-postgres.slnf</c> never runs, and nothing would say so: PostgresStudio would be
+    /// The latest leg also runs the Postgres module's projects at the latest-tested Npgsql. Without the env line the
+    /// second pass over <c>data-studio-postgres.slnf</c> never runs, and nothing would say so: The Postgres module would be
     /// tested only at its floor while a host without Marten is on Npgsql 10.
     /// </summary>
     [Fact]
-    public void The_marten_latest_workflow_also_runs_PostgresStudio_at_the_latest_tested_npgsql()
+    public void The_marten_latest_workflow_also_runs_Postgres_at_the_latest_tested_npgsql()
     {
         var latest = ReadWorkflow("marten-latest.yml");
 
@@ -292,11 +292,11 @@ public class WorkflowGenerationTests
     }
 
     /// <summary>
-    /// The latest leg also runs KStudio at the latest-tested Confluent.Kafka. Without the env line KStudio would be
+    /// The latest leg also runs the Kafka module at the latest-tested Confluent.Kafka. Without the env line the Kafka module would be
     /// tested only at its floor, the version a Wolverine host pins, while a host free to move is on 2.16.
     /// </summary>
     [Fact]
-    public void The_marten_latest_workflow_also_runs_KStudio_at_the_latest_tested_confluent_kafka()
+    public void The_marten_latest_workflow_also_runs_Kafka_at_the_latest_tested_confluent_kafka()
     {
         var latest = ReadWorkflow("marten-latest.yml");
 

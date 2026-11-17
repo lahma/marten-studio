@@ -6,8 +6,8 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Postgres.Tests.Conventions;
 
 /// <summary>
-/// The other half of hard rule 16, for the Kafka module (D34): PostgresStudio and DataStudio.Postgres.Diagnostics reference no <c>Confluent.*</c>,
-/// <c>librdkafka</c>, <c>Wolverine*</c> or <c>KStudio*</c> assembly, package or project - at their project files, restore graphs, built references
+/// The other half of hard rule 16, for the Kafka module (D34): The Postgres module and DataStudio.Postgres.Diagnostics reference no <c>Confluent.*</c>,
+/// <c>librdkafka</c>, <c>Wolverine*</c> or <c>The Kafka module*</c> assembly, package or project - at their project files, restore graphs, built references
 /// and this suite's output folder - so a host with no Kafka never gets a Kafka client through the shell. (<c>InternalsVisibleTo</c> is an attribute,
 /// not a reference, and grants the module its seams without either assembly knowing it exists.)
 /// </summary>
@@ -21,7 +21,7 @@ public class PostgresKafkaFenceTests
     [Theory]
     [InlineData("DataStudio.Postgres.Diagnostics")]
     [InlineData("DataStudio.Postgres")]
-    public void The_project_file_references_no_Kafka_client_no_Wolverine_and_no_KStudio(string project)
+    public void The_project_file_references_no_Kafka_client_no_Wolverine_and_no_Kafka(string project)
     {
         XDocument document = XDocument.Load(RepositoryRoot.Combine("src", project, project + ".csproj"));
         string[] references =
@@ -38,7 +38,7 @@ public class PostgresKafkaFenceTests
     [Theory]
     [InlineData("DataStudio.Postgres.Diagnostics")]
     [InlineData("DataStudio.Postgres")]
-    public void What_the_project_restores_holds_no_Kafka_client_no_Wolverine_and_no_KStudio(string project)
+    public void What_the_project_restores_holds_no_Kafka_client_no_Wolverine_and_no_Kafka(string project)
     {
         string assets = RepositoryRoot.Combine("src", project, "obj", "project.assets.json");
         File.Exists(assets).Should().BeTrue($"{assets} is written by the restore that built this suite");
@@ -51,7 +51,7 @@ public class PostgresKafkaFenceTests
     }
 
     [Fact]
-    public void The_built_assemblies_reference_no_Kafka_client_no_Wolverine_and_no_KStudio()
+    public void The_built_assemblies_reference_no_Kafka_client_no_Wolverine_and_no_Kafka()
     {
         foreach (System.Reflection.Assembly assembly in new[] { typeof(PostgresOptions).Assembly, typeof(PostgresDiagnosticsOptions).Assembly })
         {
@@ -63,7 +63,7 @@ public class PostgresKafkaFenceTests
     }
 
     [Fact]
-    public void The_test_output_folder_holds_no_Kafka_client_no_Wolverine_and_no_KStudio()
+    public void The_test_output_folder_holds_no_Kafka_client_no_Wolverine_and_no_Kafka()
     {
         string[] assemblies = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(Path.GetFileNameWithoutExtension).OfType<string>()];
 

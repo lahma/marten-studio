@@ -6,14 +6,14 @@ using DataStudio.Postgres;
 namespace DataStudio.Marten.Tests;
 
 /// <summary>
-/// Design §5.2: every option PostgresStudio has, MartenStudio has too, with the same type and the same default - so a
+/// Design §5.2: every option the Postgres module has, the Marten module has too, with the same type and the same default - so a
 /// host that knows one studio knows the other - except the listed renames, the one type difference, the two values that
 /// name the studio, and the options only one studio has. The one project that references both packages is where this
 /// can be checked.
 /// </summary>
 public class OptionsParityTests
 {
-    /// <summary>PostgresStudio's name on the left, MartenStudio's on the right.</summary>
+    /// <summary>The Postgres module's name on the left, the Marten module's on the right.</summary>
     private static readonly Dictionary<string, string> Renames = new(StringComparer.Ordinal)
     {
         ["SourceAuthorizationPolicy"] = nameof(MartenOptions.StoreAuthorizationPolicy),
@@ -25,8 +25,7 @@ public class OptionsParityTests
     /// <summary>Defaults that name the studio, and the value each studio has.</summary>
     private static readonly Dictionary<string, (object Postgres, object Marten)> StudioValues = new(StringComparer.Ordinal)
     {
-        ["Path"] = ("/postgres", "/marten"),
-        ["Title"] = ("Postgres Studio", "Marten Studio"),
+        // Path and Title are the shell's (DataStudioOptions), so neither module's options carries a default that names it.
     };
 
     private static readonly string[] PostgresOnly = ["IncludeDefaultDataSource"];
@@ -47,7 +46,7 @@ public class OptionsParityTests
         [.. type.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderBy(static x => x.Name, StringComparer.Ordinal)];
 
     [Fact]
-    public void Every_PostgresStudio_option_has_a_MartenStudio_twin_with_the_same_type_and_default()
+    public void Every_Postgres_option_has_a_Marten_twin_with_the_same_type_and_default()
     {
         PostgresOptions postgres = new();
         MartenOptions marten = new();
@@ -78,7 +77,7 @@ public class OptionsParityTests
 
             if (option.PropertyType != twin.PropertyType)
             {
-                problems.Add(option.Name + ": " + option.PropertyType.Name + " here, " + twin.PropertyType.Name + " in MartenStudio");
+                problems.Add(option.Name + ": " + option.PropertyType.Name + " here, " + twin.PropertyType.Name + " in the Marten module");
                 continue;
             }
 
@@ -103,7 +102,7 @@ public class OptionsParityTests
     }
 
     [Fact]
-    public void The_options_only_MartenStudio_has_are_the_listed_ones()
+    public void The_options_only_Marten_has_are_the_listed_ones()
     {
         HashSet<string> shared =
         [

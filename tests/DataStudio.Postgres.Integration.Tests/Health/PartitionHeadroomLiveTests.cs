@@ -269,7 +269,7 @@ public class PartitionHeadroomLiveTests(PostgresFixture postgres)
         return database;
     }
 
-    /// <summary>A Postgres Studio host over <paramref name="connectionString" />, whose browsable schema is <c>x4</c>.</summary>
+    /// <summary>A Postgres module host over <paramref name="connectionString" />, whose browsable schema is <c>x4</c>.</summary>
     private static StudioHost Host(string connectionString, IHealthStatementObserver? observer = null) =>
         StudioHost.Create(
             services =>

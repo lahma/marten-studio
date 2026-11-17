@@ -28,8 +28,8 @@ using Npgsql;
 namespace DataStudio.Kafka.Integration.Tests.Shell;
 
 /// <summary>
-/// Hard rule 17 and Postgres Studio's read-never-writes rule, for the shell (D34): opening every Kafka page of a Postgres Studio host that also
-/// called <c>AddKafkaStudio()</c> - over a real, super-user, auto-creating broker and a real Postgres - creates no topic, commits no offset, leaves no
+/// Hard rule 17 and the Postgres module's read-never-writes rule, for the shell (D34): opening every Kafka page of a Postgres module host that also
+/// called <c>AddKafka()</c> - over a real, super-user, auto-creating broker and a real Postgres - creates no topic, commits no offset, leaves no
 /// group, writes no row, and makes no broker call while it prerenders.
 /// </summary>
 /// <remarks>
@@ -101,7 +101,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
             static app => app.MapDataStudio().AllowAnonymous());
 
     /// <summary>
-    /// The same walk on a Marten Studio host (D-SHELL 12.1): a Marten store over the same database, with Marten's own default of
+    /// The same walk on a Marten module host (D-SHELL 12.1): a Marten store over the same database, with Marten's own default of
     /// <c>CreateOrUpdate</c> said by leaving it alone, so a shell that ensured storage on a Kafka page's first navigation would have created
     /// <c>mt_</c> objects the snapshot compares.
     /// </summary>
@@ -223,7 +223,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
     /// <summary>A throwaway <c>postgres:17-alpine</c>, started for one test and removed with it, labelled for the packet that started it.</summary>
     internal sealed class PostgresContainer : IAsyncDisposable
     {
-        private const string Password = "kstudio-live";
+        private const string Password = "data-studio-live";
 
         private readonly IContainer container;
 
@@ -237,7 +237,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
             ContainerBuilder builder = new ContainerBuilder("postgres:17-alpine")
                 .WithEnvironment("POSTGRES_PASSWORD", Password)
                 .WithPortBinding(5432, true)
-                .WithLabel("kstudio.live", "KafkaFirstNavigationLiveTests")
+                .WithLabel("data-studio.live", "KafkaFirstNavigationLiveTests")
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("pg_isready", "-h", "127.0.0.1", "-U", "postgres"));
 
             if (Environment.GetEnvironmentVariable(KafkaFixture.PacketEnvironmentVariable) is { Length: > 0 } packet)

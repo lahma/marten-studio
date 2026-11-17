@@ -14,7 +14,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
-/// The seams PS-1a put between the shared studio and MartenStudio: the settings adapter, the descriptor, the source
+/// The seams PS-1a put between the shared studio and the Marten module: the settings adapter, the descriptor, the source
 /// provider, the registration marker and the pass-throughs - each answering exactly what the code it replaced did.
 /// </summary>
 public class StudioSpineTests
@@ -424,7 +424,7 @@ public class StudioSpineTests
         document.ExemptFromIndexDesign.Should().BeFalse();
     }
 
-    /// <summary>A Marten store over a connection string nothing connects to, and MartenStudio's sources over it.</summary>
+    /// <summary>A Marten store over a connection string nothing connects to, and the Marten module's sources over it.</summary>
     private sealed class SourceHarness : IAsyncDisposable
     {
         private readonly ServiceProvider provider;

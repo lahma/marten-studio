@@ -23,10 +23,10 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </para>
 /// <para>
 /// <b>Two packages since 0.5.</b> The static web assets moved with the shell into the shared studio
-/// (<c>src/DataStudio/wwwroot</c>, served as <c>_content/DataStudio/</c>), and MartenStudio ships no
-/// <c>wwwroot</c> of its own. Both are Razor Class Libraries a host references - MartenStudio directly,
-/// PostgresStudio through it - so the filename rule and the project-file rule hold for both: a
-/// <c>wwwroot</c> MartenStudio grew back would be loaded into the host's app just the same.
+/// (<c>src/DataStudio/wwwroot</c>, served as <c>_content/DataStudio/</c>), and the Marten module ships no
+/// <c>wwwroot</c> of its own. Both are Razor Class Libraries a host references - the Marten module directly,
+/// The Postgres module through it - so the filename rule and the project-file rule hold for both: a
+/// <c>wwwroot</c> the Marten module grew back would be loaded into the host's app just the same.
 /// </para>
 /// </remarks>
 public class NoJsInitializerTests
@@ -80,7 +80,7 @@ public class NoJsInitializerTests
     [Fact]
     public void Nothing_else_in_the_package_is_loaded_into_the_hosts_own_app_by_convention()
     {
-        // Both packages: a host references MartenStudio, and PostgresStudio through it.
+        // Both packages: a host references the Marten module, and the Postgres module through it.
         StudioProjects.Files("*.razor", SearchOption.AllDirectories).Select(SourceScanner.Relative)
             .Should().Contain(static x => StudioProjects.ProjectOf(x) == StudioProjects.Shared)
             .And.Contain(static x => StudioProjects.ProjectOf(x) == StudioProjects.Marten, "both projects have components to scan beside");
@@ -107,7 +107,7 @@ public class NoJsInitializerTests
     {
         File.Exists(Path.Combine(WebRoot, "js", "studio.js")).Should().BeTrue("the asset the shell asks for is the file the package ships");
 
-        // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
+        // The shared document every studio's root component renders (0.5, PS-1a): the shell's root component is its root only.
         string shell = File.ReadAllText(
             RepositoryRoot.Combine("src", "DataStudio", "Components", "StudioDocument.razor"));
 

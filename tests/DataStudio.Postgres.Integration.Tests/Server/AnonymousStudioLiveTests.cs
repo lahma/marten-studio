@@ -8,7 +8,7 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Postgres.Integration.Tests.Server;
 
 /// <summary>
-/// K07 on a real web host (W5-S2): Postgres Studio mapped on Kestrel and started, so the start-up guard reads the finished
+/// K07 on a real web host (W5-S2): The Postgres module mapped on Kestrel and started, so the start-up guard reads the finished
 /// endpoints, then swept - anonymous with a capability on fires, Critical in Production; authorized, it is quiet.
 /// </summary>
 public class AnonymousStudioLiveTests(PostgresFixture postgres)

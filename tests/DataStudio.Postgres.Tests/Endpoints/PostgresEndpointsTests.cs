@@ -22,8 +22,8 @@ namespace DataStudio.Postgres.Tests.Endpoints;
 
 /// <summary>
 /// An API-only host with only Npgsql - one <see cref="NpgsqlDataSource" />, no <c>.razor</c> of its own, no
-/// <c>UseAntiforgery()</c> - serves Postgres Studio at <c>/studio</c>: the page, its stylesheet, the framework script
-/// and the Blazor circuit's negotiate, all with 200; and its mapping serves PostgresStudio's pages and nothing else.
+/// <c>UseAntiforgery()</c> - serves the Postgres module at <c>/studio</c>: the page, its stylesheet, the framework script
+/// and the Blazor circuit's negotiate, all with 200; and its mapping serves the Postgres module's pages and nothing else.
 /// </summary>
 /// <remarks>
 /// The data source points at a port nothing listens on: serving the shell must not open a connection, because the
@@ -80,7 +80,7 @@ public class PostgresEndpointsTests
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio/css/studio.css\"");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
             body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/DataStudio/favicon.svg\"", "the document names its own icon (issue #33)");
-            body.Should().Contain("<h1 class=\"ms-page-title\">Overview</h1>", "the root page renders PostgresStudio's overview");
+            body.Should().Contain("<h1 class=\"ms-page-title\">Overview</h1>", "the root page renders the Postgres module's overview");
             body.Should().NotContain("__RequestVerificationToken");
 
             using HttpResponseMessage css = await client.GetAsync(new Uri("/studio/_content/DataStudio/css/studio.css", UriKind.Relative), Token);
@@ -746,7 +746,7 @@ public class PostgresEndpointsTests
     }
 
     /// <summary>
-    /// Registering the studio and never mapping it changes nothing about how the host starts, as MartenStudio's twin
+    /// Registering the studio and never mapping it changes nothing about how the host starts, as the Marten module's twin
     /// (<c>BrowseDatabaseOptionsTests</c>) holds: no options are built (the configure callback never runs), the
     /// application's data source is never resolved, and nothing is logged at Warning or above - with <c>"*"</c> and no
     /// <c>SqlConsoleRole</c> configured, which a host that did map the studio would be warned about (event 9230).

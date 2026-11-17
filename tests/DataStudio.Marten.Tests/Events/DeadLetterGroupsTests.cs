@@ -465,7 +465,7 @@ public class DeadLetterGroupsTests
 
         if (rule is not null)
         {
-            context.Options.WriteAuthorizationPolicy = "MartenStudioWriter";
+            context.Options.WriteAuthorizationPolicy = "MartenWriter";
             context.AuthorizationService.Allow(rule);
         }
 

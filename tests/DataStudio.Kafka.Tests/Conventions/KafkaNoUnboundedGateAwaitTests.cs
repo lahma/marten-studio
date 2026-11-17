@@ -5,11 +5,11 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// 1.2-HANG for KStudio (REVIEW-SCAF follow-up 3): a test that holds a gate shut never awaits it without a bound. xunit has no timeout of its
+/// 1.2-HANG for the Kafka module (REVIEW-SCAF follow-up 3): a test that holds a gate shut never awaits it without a bound. xunit has no timeout of its
 /// own, so a fast-suite test that waits on a <see cref="TaskCompletionSource" /> nobody completes is not a failure but a test host sitting idle
 /// until the CI job is cancelled, with no word about which test it was. A bound on the await - <c>Bounded()</c> (<c>TestBounds</c>), or
 /// <c>WaitAsync(cancellationToken)</c> where the caller's token ends the read - turns the same mistake into a
-/// <see cref="TimeoutException" /> on the test that held the gate. The scan covers both KStudio test projects' sources (the live suite links the
+/// <see cref="TimeoutException" /> on the test that held the gate. The scan covers both Kafka module test projects' sources (the live suite links the
 /// contract files, which are scanned where they live).
 /// </summary>
 public class KafkaNoUnboundedGateAwaitTests

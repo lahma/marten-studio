@@ -42,7 +42,7 @@ public class SampleBaselineLiveTests(PostgresFixture postgres)
     [HealthQuiet("K02")]
     [HealthQuiet("K03")]
     // K05 is asserted below but not marked: its fires and quiet proof is DataStudio.Postgres.Integration.Tests'
-    // (HealthLiveTestConventionTests.ProvenInPostgresStudioSuite), and a mark here would be a stale one.
+    // (HealthLiveTestConventionTests.ProvenInPostgresSuite), and a mark here would be a stale one.
     public async Task The_sample_store_starts_with_no_configuration_finding_at_all()
     {
         (await SampleConsoleRole.EnsureAsync(postgres.ConnectionString, cancellationToken: TestContext.Current.CancellationToken))

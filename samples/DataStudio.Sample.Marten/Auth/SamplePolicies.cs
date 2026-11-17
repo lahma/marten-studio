@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 namespace DataStudio.Sample.Marten.Auth;
 
 /// <summary>
-/// The two policies the demo hands Marten Studio, one per layer of the authorization contract.
+/// The two policies the demo hands the Marten module, one per layer of the authorization contract.
 /// </summary>
 /// <remarks>
 /// <see cref="Studio" /> decides who gets in at all - it is what the mapping requires and what

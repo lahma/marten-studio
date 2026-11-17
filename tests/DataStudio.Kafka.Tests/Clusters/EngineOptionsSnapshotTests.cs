@@ -47,7 +47,7 @@ public class EngineOptionsSnapshotTests
         KafkaEngineSnapshot settings = registry.Settings;
         settings.RequestTimeout.Should().Be(TimeSpan.FromSeconds(10));
         settings.AdminIdleTimeout.Should().Be(TimeSpan.FromMinutes(5));
-        settings.GroupIdPrefix.Should().Be("kstudio-");
+        settings.GroupIdPrefix.Should().Be("data-studio-");
         settings.Limits.CreateTimeMargin.Should().Be(TimeSpan.FromMinutes(2));
         settings.Limits.QueueKilobytes.Should().Be(8192);
         settings.Limits.FetchBytes.Should().Be(8 * 1024 * 1024);
@@ -84,7 +84,7 @@ public class EngineOptionsSnapshotTests
             new WireReaderOptions(Guid.Parse("11111111-2222-3333-4444-555555555555"), WireIsolation.ReadCommitted, new KafkaScanLimits()),
             new ConfluentClientEvents(new KafkaEngineLoggers(new CapturingLoggerProvider().CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System));
 
-        reader.GroupId.Should().Be("kstudio-11111111222233334444555555555555");
+        reader.GroupId.Should().Be("data-studio-11111111222233334444555555555555");
     }
 
     [Fact]

@@ -24,7 +24,7 @@ internal sealed class WindowResolver(
 {
     /// <summary>Resolves a window.</summary>
     /// <param name="cluster">The cluster's key.</param>
-    /// <param name="topics">The topics, already authorized by the host studio.</param>
+    /// <param name="topics">The topics, already authorized by the shell.</param>
     /// <param name="window">The window.</param>
     /// <param name="isolation">Whether uncommitted records are included.</param>
     /// <param name="margin">The margin past the end for <c>CreateTime</c> topics; the engine's default when <see langword="null" />.</param>

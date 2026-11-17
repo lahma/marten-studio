@@ -82,7 +82,7 @@ public static class MartenHealthChecksBuilderExtensions
     /// </exception>
     public static IHealthChecksBuilder AddMartenDiagnostics(
         this IHealthChecksBuilder builder,
-        string name = "marten-studio",
+        string name = "data-studio-marten",
         HealthStatus? failureStatus = null,
         IEnumerable<string>? tags = null,
         TimeSpan? timeout = null)

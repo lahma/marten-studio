@@ -12,7 +12,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Postgres.Integration.Tests;
 
 /// <summary>
-/// Postgres Studio's container exactly as <c>AddPostgresStudio()</c> builds it for a host with no Marten - the application's
+/// The Postgres module's container exactly as <c>AddPostgres()</c> builds it for a host with no Marten - the application's
 /// own <see cref="Npgsql.NpgsqlDataSource" />s and database sources, the host's authorization - and circuit-shaped scopes
 /// of it, each with a visitor of its own.
 /// </summary>
@@ -60,7 +60,7 @@ internal sealed class StudioHost : IAsyncDisposable
 
     /// <summary>Builds the container.</summary>
     /// <param name="services">The application's own registrations: its data sources, a clock, an observer.</param>
-    /// <param name="studio">Postgres Studio's options.</param>
+    /// <param name="studio">The Postgres module's options.</param>
     /// <param name="sourcePolicy">The source policy, or <see langword="null" /> for none (every source passes).</param>
     /// <param name="writePolicy">The write policy, or <see langword="null" /> for none (every capability passes).</param>
     public static StudioHost Create(
@@ -112,7 +112,7 @@ internal sealed class StudioHost : IAsyncDisposable
             studio?.Invoke(options);
         });
 
-        // After AddPostgresStudio, so the visitor is this one whatever the studio's own registrations add: one per
+        // After AddPostgres, so the visitor is this one whatever the studio's own registrations add: one per
         // circuit, as Blazor's is.
         collection.AddScoped<TestAuthenticationStateProvider>();
         collection.AddScoped<AuthenticationStateProvider>(static x => x.GetRequiredService<TestAuthenticationStateProvider>());
@@ -219,7 +219,7 @@ internal sealed class PolicyCalls
 /// <summary>One line the studio logged.</summary>
 internal sealed record StudioLogLine(string Category, LogLevel Level, EventId EventId, string Message);
 
-/// <summary>Captures what Postgres Studio logs - its own categories only, at every level.</summary>
+/// <summary>Captures what the Postgres module logs - its own categories only, at every level.</summary>
 internal sealed class LogCapture : ILoggerProvider
 {
     private readonly List<StudioLogLine> lines = [];

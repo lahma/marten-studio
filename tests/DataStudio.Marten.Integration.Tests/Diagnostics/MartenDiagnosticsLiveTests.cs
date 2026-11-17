@@ -21,7 +21,7 @@ using DataStudio.Postgres.Internal.Sql;
 namespace DataStudio.Marten.Integration.Tests.Diagnostics;
 
 /// <summary>
-/// The diagnostics API through <c>AddMartenStudio()</c>, live (API design §1.9, §5.4): host A's shape - a conjoined store whose
+/// The diagnostics API through <c>AddMarten()</c>, live (API design §1.9, §5.4): host A's shape - a conjoined store whose
 /// database the API lists, whose catalogue holds Marten's codes, and whose one tenant's hot stream (E03) is returned only with
 /// <c>IncludeActivity</c> - and a master-table tenancy that holds no database yet, which lists nothing and creates nothing.
 /// </summary>
@@ -58,7 +58,7 @@ public class MartenDiagnosticsLiveTests(PostgresFixture postgres)
         PostgresDatabaseRef target = listed.Should().ContainSingle().Subject;
         target.Should().Be(new PostgresDatabaseRef("default", store.Storage.Database.Id.Identity));
 
-        diagnostics.Checks.Select(static x => x.Code).Should().Contain(["D01", "D02", "E03", "K01", "T09", "C02"], "the registry is MartenStudio's");
+        diagnostics.Checks.Select(static x => x.Code).Should().Contain(["D01", "D02", "E03", "K01", "T09", "C02"], "the registry is the Marten module's");
 
         PostgresDiagnosticsSnapshot closed = await diagnostics.GetSnapshotAsync(
             target,

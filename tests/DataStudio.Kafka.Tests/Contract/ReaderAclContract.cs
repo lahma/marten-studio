@@ -51,7 +51,7 @@ public abstract class ReaderAclContract
 
         outcomes.OfType<WireReadOutcome.Record>().Select(static x => x.Value.Offset).Should().Equal(Enumerable.Range(0, 20).Select(static x => (long) x));
         WireReadOutcome.Failure failure = outcomes.OfType<WireReadOutcome.Failure>().Should().ContainSingle().Subject;
-        failure.Error.Should().Be(new WireError.NotAuthorized(KafkaAclOperation.Describe, KafkaResourceType.Group, "kstudio-" + scanId.ToString("N")));
+        failure.Error.Should().Be(new WireError.NotAuthorized(KafkaAclOperation.Describe, KafkaResourceType.Group, "data-studio-" + scanId.ToString("N")));
         failure.Partition.Should().BeNull("a group refusal is about the scan, not a partition");
         outcomes.OfType<WireReadOutcome.PartitionEnd>().Should().ContainSingle().Which.Offset.Should().Be(20);
     }

@@ -121,10 +121,10 @@ internal sealed class ReplicationServer : IAsyncDisposable
         }
     }
 
-    /// <summary>A Postgres Studio host over this server as <paramref name="role" />, on <paramref name="clock" />, every capability on.</summary>
+    /// <summary>A Postgres module host over this server as <paramref name="role" />, on <paramref name="clock" />, every capability on.</summary>
     public StudioHost Host(MatrixRole role, TimeProvider clock) => HostOver(ConnectionString(role), clock, dataSources);
 
-    /// <summary>A Postgres Studio host over <paramref name="connectionString" />, every capability on.</summary>
+    /// <summary>A Postgres module host over <paramref name="connectionString" />, every capability on.</summary>
     internal static StudioHost HostOver(string connectionString, TimeProvider clock, ConcurrentBag<NpgsqlDataSource>? owned = null) =>
         StudioHost.Create(
             services =>

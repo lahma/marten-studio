@@ -9,7 +9,7 @@ namespace DataStudio.Kafka.Tests.Conventions;
 /// <summary>
 /// The engine's fences (AGENTS.md D36, hard rule 16): DataStudio.Kafka.Core references no web stack, no studio, no Postgres driver,
 /// no Marten family and no Wolverine; and the shell and the three studio projects reference no Kafka client, no Wolverine and no
-/// KStudio.
+/// The Kafka module.
 /// </summary>
 /// <remarks>
 /// Names are matched exactly or as a dotted prefix (REVIEW-V2-R finding 1), never by a bare <c>DataStudio</c> prefix, which the shell, the module and
@@ -28,7 +28,7 @@ public class KafkaCoreFenceTests
     /// </summary>
     private static readonly string[] ForbiddenExactInCore = ["DataStudio", "DataStudio.Kafka"];
 
-    /// <summary>The projects the engine may never reference, exactly or below: Marten Studio, the database module and the engine under it, the Kafka adapter and the samples.</summary>
+    /// <summary>The projects the engine may never reference, exactly or below: The Marten module, the database module and the engine under it, the Kafka adapter and the samples.</summary>
     private static readonly string[] ForbiddenDottedInCore = ["DataStudio.Marten", "DataStudio.Postgres", "DataStudio.Kafka.Wolverine", "DataStudio.Sample"];
 
     /// <summary>What the shell and the database and Marten studios may never reference, by prefix: the client and the adapter's package.</summary>
@@ -101,12 +101,12 @@ public class KafkaCoreFenceTests
     [InlineData("src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj")]
     [InlineData("src/DataStudio.Postgres/DataStudio.Postgres.csproj")]
     [InlineData("src/DataStudio.Marten/DataStudio.Marten.csproj")]
-    public void A_studio_project_references_no_Kafka_client_no_Wolverine_and_no_KStudio(string project)
+    public void A_studio_project_references_no_Kafka_client_no_Wolverine_and_no_Kafka(string project)
     {
         var document = XDocument.Load(RepositoryRoot.Combine(project.Split('/')));
 
         References(document).Where(IsForbiddenInStudios).Should().BeEmpty(
-            "a host with no Kafka must never get a Kafka client, Wolverine or KStudio through a studio");
+            "a host with no Kafka must never get a Kafka client, Wolverine or the Kafka module through a studio");
     }
 
     /// <summary>One case per name the engine's fence must catch, and those it must let through: itself, the Confluent client it exists for and the framework's abstractions.</summary>

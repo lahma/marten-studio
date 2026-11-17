@@ -540,7 +540,7 @@ public class DaemonLogHygieneTests
                 builder.ClearProviders();
                 builder.SetMinimumLevel(LogLevel.Trace);
 
-                // The studio's own categories only - MartenStudio's and the shared studio's: what Marten logs about itself
+                // The studio's own categories only - the Marten module's and the shared studio's: what Marten logs about itself
                 // is not what is under test.
                 builder.AddFilter((category, _) =>
                     category?.StartsWith("DataStudio.Marten", StringComparison.Ordinal) == true

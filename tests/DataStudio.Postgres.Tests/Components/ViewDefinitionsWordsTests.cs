@@ -11,7 +11,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// Issue #22 in Postgres Studio's own words: <c>ViewDefinitions</c> shows the definitions of the schemas
+/// Issue #22 in the Postgres module's own words: <c>ViewDefinitions</c> shows the definitions of the schemas
 /// <c>BrowsableSchemas</c> names exactly - which are the data source's own, so their structure was already free - and no
 /// row; <c>BrowseDatabase</c> keeps the rows and implies it. Every sentence a refusal says names both ways in, and
 /// none of it is a Marten word.

@@ -10,10 +10,10 @@ using DataStudio.Postgres.Services.Server;
 namespace DataStudio.Postgres.Tests.Conventions;
 
 /// <summary>
-/// Wave 6: every shared health check speaks Postgres Studio's words. A plain Postgres host has no store, no documents, no
+/// Wave 6: every shared health check speaks the Postgres module's words. A plain Postgres host has no store, no documents, no
 /// events, no daemon and no Marten configuration, so nothing a shared check renders there - a finding's title, why, evidence,
 /// caveat, remedy and link, a quiet note, a status row's reason, the check's own title - may say so. The theory evaluates
-/// every shared check (<see cref="CheckWordCases" />) in Postgres Studio's words and scans what it renders; the coverage
+/// every shared check (<see cref="CheckWordCases" />) in the Postgres module's words and scans what it renders; the coverage
 /// fact holds the cases to every shared check, each with a finding and a quiet verdict, so a check added later is evaluated
 /// too or fails here; the anti-vacuity fact proves a planted "store" fails the scan.
 /// </summary>
@@ -23,15 +23,15 @@ public partial class PostgresWordsTests
     private static readonly (Regex Pattern, string Why)[] StoreWordsInChecks =
     [
         (Word(@"stores?|store's"), "a store is Marten's: a plain data source is a data source"),
-        (new Regex("Marten", RegexOptions.CultureInvariant), "Postgres Studio names Marten only where an mt_ table is the subject"),
+        (new Regex("Marten", RegexOptions.CultureInvariant), "the Postgres module names Marten only where an mt_ table is the subject"),
         (new Regex("StoreOptions", RegexOptions.CultureInvariant), "a store's configuration, which a data source does not have"),
         (Word("documents?|document type"), "documents are a Marten store's rows"),
         (new Regex("mt_", RegexOptions.CultureInvariant), "Marten's table prefix, never said of a table that does not carry it"),
         (Word("daemon|projections?"), "the async daemon and its projections are Marten's"),
         (new Regex("Weasel", RegexOptions.CultureInvariant), "Marten's schema library"),
         (new Regex(@"\bopts\.|IDocumentSession|LightweightSession|SaveChanges|ToListAsync|MartenOptions|AddMarten|StoreAuthorizationPolicy",
-            RegexOptions.CultureInvariant), "Marten Studio's configuration, or Marten's API"),
-        (new Regex(@"\b[DETCRSK][0-9]{2}\b", RegexOptions.CultureInvariant), "a check code - flagged only when Postgres Studio has no such check"),
+            RegexOptions.CultureInvariant), "the Marten module's configuration, or Marten's API"),
+        (new Regex(@"\b[DETCRSK][0-9]{2}\b", RegexOptions.CultureInvariant), "a check code - flagged only when the Postgres module has no such check"),
     ];
 
     /// <summary>The legitimate uses, each with its reason: the spans removed before the scan.</summary>
@@ -43,13 +43,13 @@ public partial class PostgresWordsTests
 
     /// <summary>
     /// The uses that are legitimate in a finding about a table named like Marten's (<see cref="CheckWordCase.AboutMartensTables" />),
-    /// which Postgres Studio's table source classifies by its name: what the table is, said as Marten Studio says it.
+    /// which the Postgres module's table source classifies by its name: what the table is, said as the Marten module says it.
     /// </summary>
     private static readonly (Regex Pattern, string Why)[] AllowedAboutMartensTables =
     [
         (new Regex(@"\bmt_\w+", RegexOptions.CultureInvariant), "the table's and its indexes' catalog names"),
-        (Word("the document table"), "what Postgres Studio's table source calls an mt_doc_ table (StudioTableText.Describe)"),
-        (Word("the event store's table"), "what Postgres Studio's table source calls an mt_events table (StudioTableText.Describe)"),
+        (Word("the document table"), "what the Postgres module's table source calls an mt_doc_ table (StudioTableText.Describe)"),
+        (Word("the event store's table"), "what the Postgres module's table source calls an mt_events table (StudioTableText.Describe)"),
         (Word("managed by a Marten store; change it in that store's StoreOptions"), "T03: the origin of an index on a Marten table"),
         (Word("It is on a table a Marten store manages: that store's next apply decides it, so change it in that store's StoreOptions"),
             "T03: a Marten table's index is its store's to rebuild"),
@@ -57,11 +57,11 @@ public partial class PostgresWordsTests
         (Word("so no upsert to it can be a HOT update"), "T06: the same"),
         (Word("No StoreOptions line the studio can suggest"), "T07, T08: a Marten event or bookkeeping table's settings"),
         (Word("no Marten apply resets it"), "T07, T08: the same"),
-        (new Regex(@"Marten Studio's Schema screen, over the store whose StoreOptions declare this table", RegexOptions.CultureInvariant),
-            "T07, T08: Postgres Studio's MartenTablePartitionParameters, which points at Marten Studio on purpose"),
+        (new Regex(@"the Marten module's Schema screen, over the store whose StoreOptions declare this table", RegexOptions.CultureInvariant),
+            "T07, T08: The Postgres module's MartenTablePartitionParameters, which points at the Marten module on purpose"),
     ];
 
-    /// <summary>Every shared check's code, for the code rule: a code Postgres Studio has is its own to name.</summary>
+    /// <summary>Every shared check's code, for the code rule: a code the Postgres module has is its own to name.</summary>
     private static readonly HashSet<string> SharedCodes =
         [.. HealthCheckRegistry.Discover(typeof(PostgresText).Assembly).Select(static x => HealthCheckRegistry.Describe(x).Code)];
 
@@ -85,7 +85,7 @@ public partial class PostgresWordsTests
         }
 
         Leaks(Rendered(info, verdict), checkCase.AboutMartensTables).Should().BeEmpty(
-            "{0} is Postgres Studio's, and a plain Postgres host has no store; allow a use only with a reason (AllowedInChecks)", name);
+            "{0} is the Postgres module's, and a plain Postgres host has no store; allow a use only with a reason (AllowedInChecks)", name);
     }
 
     /// <summary>
@@ -96,7 +96,7 @@ public partial class PostgresWordsTests
     public void Every_shared_check_is_evaluated_to_a_finding_and_to_quiet()
     {
         IReadOnlyList<Type> shared = HealthCheckRegistry.Discover(typeof(PostgresText).Assembly);
-        shared.Should().HaveCountGreaterThanOrEqualTo(39, "every shared check of 0.4 and of wave 5 is in the PostgresStudio assembly");
+        shared.Should().HaveCountGreaterThanOrEqualTo(39, "every shared check of 0.4 and of wave 5 is in the the Postgres module assembly");
 
         List<string> missing = [];
 
@@ -173,11 +173,11 @@ public partial class PostgresWordsTests
             }
         }
 
-        Leaks(reasons, aboutMartensTables: false).Should().BeEmpty("a status row's reason is Postgres Studio's too");
+        Leaks(reasons, aboutMartensTables: false).Should().BeEmpty("a status row's reason is the Postgres module's too");
     }
 
     /// <summary>
-    /// S02's and S10's titles name a store in Marten Studio's words; Postgres Studio titles them its own way - in the registry
+    /// S02's and S10's titles name a store in the Marten module's words; the Postgres module titles them its own way - in the registry
     /// its container builds, so the status rows and every finding's check title say so - while the docs link still finds the
     /// one heading the docs carry.
     /// </summary>
@@ -200,7 +200,7 @@ public partial class PostgresWordsTests
             runtime: null,
             PostgresSettings.Of(new PostgresOptions()));
         registry.All.Single(x => x.Info.CheckType == check).Info.Title.Should().Be(postgres, "the container hands the registry the studio's settings");
-        registry.All.Should().OnlyContain(static x => !Word(@"stores?|store's").IsMatch(x.Info.Title), "no check of Postgres Studio's is titled with a store");
+        registry.All.Should().OnlyContain(static x => !Word(@"stores?|store's").IsMatch(x.Info.Title), "no check of the Postgres module's is titled with a store");
     }
 
     /// <summary>The scan's anti-vacuity half: a planted "store" fails it, and its allowed uses and plain words pass.</summary>
@@ -225,7 +225,7 @@ public partial class PostgresWordsTests
         Leaks([("plain", "Restore it from a backup; the documented default; a leaf entry stores them; see S03 and T12")], aboutMartensTables: false)
             .Should().BeEmpty("words that merely contain a store noun, an allowed verb and shared codes are not leaks");
         Leaks([("code", "the async daemon is behind (D01, K08)")], aboutMartensTables: false)
-            .Should().HaveCount(3, "the daemon, and two codes Postgres Studio has no check for");
+            .Should().HaveCount(3, "the daemon, and two codes the Postgres module has no check for");
         Leaks([("Marten table", "the document table public.mt_doc_order")], aboutMartensTables: true)
             .Should().BeEmpty("said of a table named like Marten's, its name and kind are what it is");
         Leaks([("Marten table", "the document table public.mt_doc_order")], aboutMartensTables: false)

@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Integration.Tests.Server;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>No Marten type</b>, so these live here (W5-index); MartenStudio's suite names each code as proven in this one.
+/// <b>No Marten type</b>, so these live here (W5-index); the Marten module's suite names each code as proven in this one.
 /// </para>
 /// <para>
 /// <b>A login a test makes is made on a server of this class's own</b> (<see cref="RolesServerAsync" />), never on the

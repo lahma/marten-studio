@@ -10,7 +10,7 @@ namespace DataStudio.Kafka.Tests.Conventions;
 /// </summary>
 public partial class KafkaLinksStylesheetTests
 {
-    private const string Header = "/* ===== KS-UI-E: links to Marten records, external links, and what Wolverine told KStudio ===== */";
+    private const string Header = "/* ===== KS-UI-E: links to Marten records, external links, and what Wolverine told the Kafka module ===== */";
 
     private const string PreviousHeader = "/* ===== KS-UI-D: related records, the time strip and possible duplicates ===== */";
 

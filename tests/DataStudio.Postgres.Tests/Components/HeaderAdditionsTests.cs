@@ -11,9 +11,9 @@ using Microsoft.JSInterop;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// 1.2-HEADER over Postgres Studio's own context: the environment badge, the "Back to application" link and the copy-link button are the
+/// 1.2-HEADER over the Postgres module's own context: the environment badge, the "Back to application" link and the copy-link button are the
 /// shared shell's, so the same markup has to be there under this studio's descriptor and settings. (DataStudio.Marten.Tests holds the longer
-/// set, over Marten Studio's.)
+/// set, over the Marten module's.)
 /// </summary>
 public class HeaderAdditionsTests
 {

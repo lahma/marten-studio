@@ -25,7 +25,7 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 | Switch or variable | What it does |
 |---|---|
 | `--allow-data-generation` | Lets the sample create and seed its topics on a cluster you configured, and start its Wolverine application there (which creates three topics of its own and produces to them). Without it a configured cluster is only browsed, and no Wolverine application runs. A configured cluster that has an `orders.v1` the sample did not seed is refused either way. |
-| `KSTUDIO_SAMPLE_REUSE=true` | Reuses the two containers between runs instead of starting fresh ones, and the banner says they are kept; `docker rm -f` removes them. The seed is not repeated: the marker topic says it was done. |
+| `DATASTUDIO_KAFKA_SAMPLE_REUSE=true` | Reuses the two containers between runs instead of starting fresh ones, and the banner says they are kept; `docker rm -f` removes them. The seed is not repeated: the marker topic says it was done. |
 | `ConnectionStrings:Kafka` | The bootstrap servers of a cluster of your own. |
 | `ConnectionStrings:Postgres` | A Postgres of your own for the Marten half. |
 
@@ -47,7 +47,7 @@ Every timestamp is in the past, within the last six hours of when the sample sta
 | `customers.v1` | 1 | a compacted topic: 500 customers with a phone number (masked by the `phone` pattern, in `phone` and in `note`), then 50 tombstones |
 | `orders.v1.dlq` | 1 | 20 dead letters, with Wolverine's retry headers |
 | `secrets.v1` | 1 | headers `x-api-key` and `authorization`, which the built-in deny-list always masks |
-| `kstudio-sample.seed-v2` | 1 | the marker: the sample seeded this cluster (a cluster with `seed-v1` was seeded by an earlier sample and must be deleted) |
+| `data-studio-sample.seed-v3` | 1 | the marker: the sample seeded this cluster (a cluster with an earlier marker, `kstudio-sample.seed-v1` or `-v2`, was seeded by an earlier sample and must be deleted) |
 
 The sample application's own consumer group, `sample-orders-handler`, has committed 800 of the about 1,000 records in each partition of
 `orders.v1`, so the topic page shows a lag. That consumer is the sample's, not the Kafka module's: the Kafka module reads and never writes.
@@ -102,7 +102,7 @@ The demo lowers `Limits.MaxMatches` to 50 and `Limits.ConfirmAboveRecords` to 5,
 ## A Wolverine application, and the records around a record
 
 The sample also hosts a small [Wolverine](https://wolverinefx.net) application on topics of its own, so that the seed above and its walk-throughs stay as
-they were. It listens on `checkout.v1` (consumer group `KStudio.Sample`) and publishes to `checkout.confirmed.v1`, with Wolverine's native
+they were. It listens on `checkout.v1` (consumer group `DataStudio.Sample`) and publishes to `checkout.confirmed.v1`, with Wolverine's native
 dead-letter topic `wolverine-dead-letter-queue`. At start, when `checkout.confirmed.v1` is empty, the application's own sender (`CheckoutSender`)
 puts 25 `PlaceCheckout` commands on `checkout.v1`, keyed by the order id (`chk-0001` to `chk-0025`), alternately for tenant `acme` and tenant `globex`.
 `PlaceCheckoutHandler` stores a `CheckoutOrder` document in the demo's Marten store, **in the command's tenant**, and returns a `CheckoutConfirmed`
@@ -131,7 +131,7 @@ is a disabled button on the Production one, with the sentence that names `KafkaC
 
 ### Walk-through
 
-1. Sign in as `admin`. **Kafka › Topics**, cluster **Sample Kafka (Wolverine)**: `checkout.v1` (listener, group `KStudio.Sample`),
+1. Sign in as `admin`. **Kafka › Topics**, cluster **Sample Kafka (Wolverine)**: `checkout.v1` (listener, group `DataStudio.Sample`),
    `checkout.confirmed.v1` (sender) and `wolverine-dead-letter-queue` (dead letters).
 2. **Search**, `checkout.v1`, the last hour, no predicate: 26 records. Open `chk-0007`.
 3. **Related records**: the timeline shows the command on `checkout.v1` and its `CheckoutConfirmed` on `checkout.confirmed.v1` on one screen, matched by
@@ -148,5 +148,5 @@ for a record that has a value for every placeholder in the template. Wolverine w
 activity is current, so the sample registers an `ActivityListener` for Wolverine's source and sends each command inside an activity of its own
 (`SampleWolverine.ListenToTraces`); a host with OpenTelemetry has both already.
 
-If you reuse the broker between runs (`KSTUDIO_SAMPLE_REUSE=true`) and not the database, the sender finds `checkout.confirmed.v1` non-empty and sends
+If you reuse the broker between runs (`DATASTUDIO_KAFKA_SAMPLE_REUSE=true`) and not the database, the sender finds `checkout.confirmed.v1` non-empty and sends
 nothing, and the Wolverine listener has nothing new to store: delete the containers, or reuse both.

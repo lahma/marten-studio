@@ -42,9 +42,9 @@ public sealed record WolverineLiveFact(string Id);
 
 /// <summary>
 /// D43, decisions 5 and 6, against a real Wolverine host: Kafka 3.9 for the application's own cluster, Kafka 4.x for the broker of its tenant
-/// <c>acme</c>, a listener with the native dead-letter queue and a sender, <c>AddPostgresStudio()</c> with no data source beside
-/// <c>AddKafkaStudio(k =&gt; k.UseWolverineKafka())</c>. The adapter reads the started host's configuration; a scan of the tenant entry reads the tenant
-/// broker's record and not the parent's; and on both brokers KStudio created nothing, joined nothing and committed nothing, while Wolverine's own group
+/// <c>acme</c>, a listener with the native dead-letter queue and a sender, <c>AddPostgres()</c> with no data source beside
+/// <c>AddKafka(k =&gt; k.UseWolverineKafka())</c>. The adapter reads the started host's configuration; a scan of the tenant entry reads the tenant
+/// broker's record and not the parent's; and on both brokers the Kafka module created nothing, joined nothing and committed nothing, while Wolverine's own group
 /// offsets and every configuration of the host are as they were.
 /// </summary>
 [Collection(WolverineCollections.Pair)]
@@ -113,7 +113,7 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             await tenantProducer.ProduceAsync(send, new Message<string, string> { Key = "tenant-key", Value = "from the tenant broker" }, Token);
 
             // Wolverine's listeners join their groups a moment after the host starts, on each broker: wait until they have (a condition), so that
-            // "before" is Wolverine at rest and anything that changes afterwards is KStudio's.
+            // "before" is Wolverine at rest and anything that changes afterwards is the Kafka module's.
             await WaitForGroupAsync(parent, service);
             await WaitForGroupAsync(tenant, service);
 
@@ -127,7 +127,7 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             KafkaClusterRegistry registry = app.Services.GetRequiredService<KafkaClusterRegistry>();
 
             registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "wolverine/acme");
-            registry.Notes.Should().BeEmpty("the host had connected its tenant before KStudio read the configuration");
+            registry.Notes.Should().BeEmpty("the host had connected its tenant before the Kafka module read the configuration");
 
             KafkaClusterDefinition own = registry.Get("wolverine");
             KafkaClusterDefinition acme = registry.Get("wolverine/acme");
@@ -155,12 +155,12 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             (await ScanKeysAsync(scanner, "wolverine/acme", send)).Should().Equal("tenant-key");
             (await ScanKeysAsync(scanner, "wolverine", send)).Should().Equal("parent-key");
 
-            // Hard rule 17 / D37, on both brokers: no topic, no group, no committed offset of KStudio's, and Wolverine's own are as they were.
+            // Hard rule 17 / D37, on both brokers: no topic, no group, no committed offset of the Kafka module's, and Wolverine's own are as they were.
             Topics(parent).Should().Equal(topicsBefore);
             Topics(tenant).Should().Equal(tenantTopicsBefore);
             (await GroupsAsync(parent)).Should().Equal(groupsBefore);
             (await GroupsAsync(tenant)).Should().Equal(tenantGroupsBefore);
-            (await GroupsAsync(parent)).Concat(await GroupsAsync(tenant)).Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal));
+            (await GroupsAsync(parent)).Concat(await GroupsAsync(tenant)).Should().NotContain(static x => x.StartsWith("data-studio-", StringComparison.Ordinal));
 
             HostConfigurations(transport).Should().Equal(hostBefore, "the adapter and the scans wrote nothing into the host's configuration");
         }

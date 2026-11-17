@@ -14,7 +14,7 @@ namespace DataStudio.Marten.Integration.Tests.Relationships;
 
 /// <summary>
 /// The real Relationships service, built by hand from a studio's own container with a cache, settings or logger of
-/// the test's choosing: the shared graph service over the shared reads, and MartenStudio's node source over the same
+/// the test's choosing: the shared graph service over the shared reads, and the Marten module's node source over the same
 /// reads - exactly the parts the container wires, so nothing about the gating is bypassed.
 /// </summary>
 internal static class RelationshipServiceBuilder

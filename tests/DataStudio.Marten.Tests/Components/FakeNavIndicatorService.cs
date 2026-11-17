@@ -7,7 +7,7 @@ namespace DataStudio.Marten.Tests.Components;
 /// What the sidebar's badges are told, said outright by a test.
 /// </summary>
 /// <remarks>
-/// The real <c>NavIndicatorService</c> reads through MartenStudio's contributor, which reads through the events and
+/// The real <c>NavIndicatorService</c> reads through the Marten module's contributor, which reads through the events and
 /// projections services, which every layout test would then have to provide with a Postgres behind them - for two
 /// small numbers that no test about navigation is about. The numbers below are worded by the contributor's own
 /// <c>MartenNavBadges</c>, so the badges drawn are the ones the real contributor would draw. It answers nothing by default, which is also what it answers in a

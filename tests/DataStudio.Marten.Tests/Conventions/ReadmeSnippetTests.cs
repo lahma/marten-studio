@@ -4,7 +4,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
 /// Keeps the code blocks in <c>README.md</c> equal to the <c>#region</c> bodies they were taken from in
-/// <c>samples/DataStudio.Sample.Marten/Program.cs</c>, and those in <c>src/DataStudio.Postgres/README.md</c> - Postgres Studio's
+/// <c>samples/DataStudio.Sample.Marten/Program.cs</c>, and those in <c>src/DataStudio.Postgres/README.md</c> - the Postgres module's
 /// package readme - equal to the regions of <c>samples/DataStudio.Sample.Postgres/Program.cs</c>.
 /// </summary>
 /// <remarks>
@@ -45,7 +45,7 @@ public class ReadmeSnippetTests
         RegexOptions.Multiline | RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 
-    /// <summary>The Data Studio readme, the repository's own, and the Postgres Studio package's readme.</summary>
+    /// <summary>The Data Studio readme, the repository's own, and the Postgres module package's readme.</summary>
     public static TheoryData<string, string> Readmes => new()
     {
         { "README.md", "samples/DataStudio.Sample.Marten/Program.cs" },

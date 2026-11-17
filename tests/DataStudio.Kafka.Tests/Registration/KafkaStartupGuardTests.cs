@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace DataStudio.Kafka.Tests.Registration;
 
-/// <summary>D35: a capability that is on, with the host studio's master switch off and no Kafka policy to answer for it, is refused at start - with no escape hatch.</summary>
+/// <summary>D35: a capability that is on, with the shell's master switch off and no Kafka policy to answer for it, is refused at start - with no escape hatch.</summary>
 public class KafkaStartupGuardTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -18,7 +18,7 @@ using Wolverine.Runtime.Serialization;
 namespace DataStudio.Kafka.Wolverine.Tests.Discovery;
 
 /// <summary>
-/// D43, decision 5: what a Wolverine application's Kafka configuration becomes in KStudio, over a <see cref="WolverineOptions" /> built in the test.
+/// D43, decision 5: what a Wolverine application's Kafka configuration becomes in the Kafka module, over a <see cref="WolverineOptions" /> built in the test.
 /// Wolverine's fluent configuration of an endpoint is deferred until its runtime compiles it, so the topics are shaped through the endpoints' own
 /// public members, which is what the adapter reads.
 /// </summary>

@@ -17,7 +17,7 @@ using DataStudio.Postgres.Services.Database;
 namespace DataStudio.Marten.Tests.Connection;
 
 /// <summary>
-/// "How Marten uses this connection" (1.1-NP4): the real contributor, built by <c>AddMartenStudio()</c>, over real Marten stores that
+/// "How Marten uses this connection" (1.1-NP4): the real contributor, built by <c>AddMarten()</c>, over real Marten stores that
 /// never connect. The command timeout is Marten's resolution or an honest pair of figures, the data source's origin is Marten's own
 /// <c>OwnsDataSource</c> and the container's descriptors (nothing is built to compare), the hints get Marten's sentence, and no connection string reaches any of it.
 /// </summary>
@@ -700,7 +700,7 @@ public class MartenConnectionInsightTests
     };
 
     internal static ConnectionObserved Observed(long statementTimeoutMs = 0) => new(
-        "svc", "svc", "np4", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "PostgresStudio",
+        "svc", "svc", "np4", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "Data Studio",
         0, statementTimeoutMs, 0, null, "scram-sha-256", true, "TLSv1.3", "TLS_AES_256_GCM_SHA384", 256, null, null,
         new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
@@ -708,7 +708,7 @@ public class MartenConnectionInsightTests
         new DataStudio.Marten.Internal.Sql.TrafficProfileRow("total", null, null, events, bytes, null, null, null, null, null, null, null, null, null, null),
         [], [], [], "tombstone", JasperFx.Events.EventAppendMode.Quick, false);
 
-    /// <summary>A real container over a real store that never connects, with the Marten contributor AddMartenStudio registered.</summary>
+    /// <summary>A real container over a real store that never connects, with the Marten contributor AddMarten registered.</summary>
     internal sealed class Rig : IAsyncDisposable
     {
         private readonly ServiceProvider provider;

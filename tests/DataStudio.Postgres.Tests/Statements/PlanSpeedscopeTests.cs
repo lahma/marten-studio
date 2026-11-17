@@ -11,7 +11,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public class PlanSpeedscopeTests
 {
-    private const string Exporter = "Postgres Studio 0.9.0";
+    private const string Exporter = "Data Studio 0.9.0";
 
     private static JsonElement Build(string plan, string name = "select 1")
     {
@@ -197,9 +197,9 @@ public class PlanSpeedscopeTests
     [Fact]
     public void The_exporter_names_the_studio_and_its_version()
     {
-        string exporter = PlanSpeedscope.Exporter("Postgres Studio");
+        string exporter = PlanSpeedscope.Exporter("Data Studio");
 
-        exporter.Should().StartWith("Postgres Studio ").And.MatchRegex(@"^Postgres Studio [0-9]+\.[0-9]+\.[0-9]+", "the version is the package's, cut at the +");
+        exporter.Should().StartWith("Data Studio ").And.MatchRegex(@"^Data Studio [0-9]+\.[0-9]+\.[0-9]+", "the version is the package's, cut at the +");
         exporter.Should().NotContain("+");
         PlanSpeedscope.FileName.Should().Be("plan.speedscope.json");
     }

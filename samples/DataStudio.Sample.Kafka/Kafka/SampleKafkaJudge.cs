@@ -30,7 +30,7 @@ internal static class SampleKafkaJudge
 
     /// <summary>The line the host stops with on a cluster an earlier version of the sample seeded.</summary>
     public const string EarlierSeed =
-        "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset KSTUDIO_SAMPLE_REUSE) so that the sample can seed it again.";
+        "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset DATASTUDIO_KAFKA_SAMPLE_REUSE) so that the sample can seed it again.";
 
     /// <summary>Judges a cluster by the names of its topics.</summary>
     /// <param name="topics">Every topic of the cluster.</param>
@@ -45,7 +45,7 @@ internal static class SampleKafkaJudge
             return new SampleKafkaJudgement(SampleKafkaVerdict.AlreadySeeded);
         }
 
-        if (present.Contains(KafkaSeedPlan.EarlierMarkerTopic))
+        if (KafkaSeedPlan.EarlierMarkerTopics.Any(present.Contains))
         {
             return new SampleKafkaJudgement(SampleKafkaVerdict.Refuse, EarlierSeed);
         }

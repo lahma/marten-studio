@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- KStudio's live suite (AGENTS.md D36): real brokers in containers - apache/kafka 3.9 and 4.x, with SASL and ACLs -
+  <!-- The Kafka module's live suite (AGENTS.md D36): real brokers in containers - apache/kafka 3.9 and 4.x, with SASL and ACLs -
        through Testcontainers.Kafka. It needs Docker: without it every live test skips with a reason locally and fails on CI. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -34,7 +34,7 @@
     <ProjectReference Include="../../src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
     <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
     <ProjectReference Include="../../src/DataStudio.Kafka.Wolverine/DataStudio.Kafka.Wolverine.csproj" />
-    <!-- Only for KafkaFirstNavigationLiveTests' Marten Studio host case (D-SHELL 12.1): KStudio is a module of either studio. Marten arrives through it. -->
+    <!-- Only for KafkaFirstNavigationLiveTests' the Marten module host case (D-SHELL 12.1): The Kafka module is a module of either studio. Marten arrives through it. -->
     <ProjectReference Include="../../src/DataStudio.Marten/DataStudio.Marten.csproj" />
     <!-- Only for SampleSeedTests, SampleHostLiveTests and the sample's live search (SAMPLE): the demo's seed, judge and policies are internal to it
          (InternalsVisibleTo), and the host is started from its own build output as a child process, as DataStudio.Marten.Integration.Tests starts its sample. -->

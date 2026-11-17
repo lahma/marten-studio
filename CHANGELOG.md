@@ -53,7 +53,10 @@ and authorization is never widened, but a module's own `ReadOnly` no longer turn
   keys' storage key keep their names.
 - The diagnostics API's page paths (`GetStudioPath`, `PostgresPageLink`) are relative to the mount and start with
   `postgres/`. The health-check extensions are `AddHealthChecks().AddPostgresDiagnostics()` and
-  `AddHealthChecks().AddMartenDiagnostics()`. The engine alone is still `services.AddPostgresDiagnostics()`.
+  `AddHealthChecks().AddMartenDiagnostics()`. The engine alone is still `services.AddPostgresDiagnostics()`. The two
+  health checks register under the default names `data-studio-marten` and `data-studio-postgres` (1.x: `marten-studio`,
+  `postgres-studio`): a probe, dashboard or `HealthCheckOptions.Predicate` that selects the check by its default name, or
+  that reads it from `/health` output by name, must name the new one.
 - One wording and one log template per event. Every module has its own words, the shared ones are written once, and
   `StudioProduct` is gone: the product says "Data Studio" and a database a "source". `PostgresStudioLog` is gone: each
   event id has one template that names Data Studio. Event ids, levels and property names did not change, with three
@@ -66,6 +69,13 @@ and authorization is never widened, but a module's own `ReadOnly` no longer turn
   `(Data Studio Diagnostics)` replaces `(Postgres Studio Diagnostics)` and the connection history's session is
   `(Data Studio history)`: a monitor or an alert keyed on the old suffix no longer matches. A health snapshot's producer is "Data Studio
   {release}"; a snapshot a 1.x studio wrote still compares, with a notice.
+- The names the Kafka module's clients carry on a broker are Data Studio's: a scan consumer's group id starts with
+  `data-studio-` (was `kstudio-`), a client id ends with `.data-studio` (was `.kstudio`) and an exported file is named
+  `data-studio-{cluster}-…` (was `kstudio-{cluster}-…`). An operator whose ACLs name the `kstudio-` group prefix adds
+  `data-studio-`; reading needs no group ACL, so the only effect of leaving it out is the refused group lookup the broker's
+  authorizer log shows once per scan. A host that set `GroupIdPrefix` is unaffected. The Kafka sample's reuse variable is
+  `DATASTUDIO_KAFKA_SAMPLE_REUSE` (was `KSTUDIO_SAMPLE_REUSE`), and its marker topic is `data-studio-sample.seed-v3`, so a
+  broker an earlier sample seeded is refused with the usual line until it is deleted.
 - A host with only Kafka runs: `AddDataStudio().AddKafka(...)` needs no database module, and its output folder holds no
   Postgres, Marten, JasperFx, Weasel or Npgsql assembly.
 - What did not change: finding codes and `docs/health/codes.md`; the gates (the database browser's, the health advisor's

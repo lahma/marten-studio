@@ -620,7 +620,7 @@ public class TailRunTests
         reader.Assigns[0].Select(static x => (x.Key.Partition, x.Offset)).Should().BeEquivalentTo([(0, 4L), (1, 7L)]);
         reader.ThreadIds.Distinct().Should().ContainSingle();
         reader.CloseCount.Should().Be(1);
-        reader.GroupId.Should().StartWith("kstudio-");
+        reader.GroupId.Should().StartWith("data-studio-");
         reader.Options.Isolation.Should().Be(WireIsolation.ReadCommitted);
     }
 

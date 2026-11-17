@@ -166,7 +166,7 @@ public class StatementChecksFenceTests
 
     /// <summary>
     /// Both studio assemblies: the runner, the builders and the statement checks are the shared studio's, and
-    /// MartenStudio's own checks call the runner from the other side of an assembly boundary - where a caller of one of
+    /// The Marten module's own checks call the runner from the other side of an assembly boundary - where a caller of one of
     /// the three doors would be as much a caller as one beside them.
     /// </summary>
     private static Assembly[] StudioAssemblies => [typeof(HealthQuery).Assembly, StudioProjects.MartenAssembly];
@@ -175,14 +175,14 @@ public class StatementChecksFenceTests
     private static List<MethodBase> StudioSites(MethodBase target) => [.. StudioAssemblies.SelectMany(x => IlScan.Sites(x, target))];
 
     /// <summary>
-    /// The IL fences read both assemblies, and resolve a call across the boundary: MartenStudio's daemon and event checks
+    /// The IL fences read both assemblies, and resolve a call across the boundary: The Marten module's daemon and event checks
     /// call the shared runner's <c>QueryAsync</c>, so the scan of <c>DataStudio.Marten.dll</c> finds them. A token it could not
     /// resolve would be dropped silently, and every fence below would pass over that assembly for the wrong reason.
     /// </summary>
     [Fact]
     public void The_compiled_fences_read_both_studio_assemblies_and_resolve_calls_across_them()
     {
-        StudioAssemblies.Should().OnlyHaveUniqueItems("the shared studio and MartenStudio are two assemblies since the move");
+        StudioAssemblies.Should().OnlyHaveUniqueItems("the shared studio and the Marten module are two assemblies since the move");
 
         MethodInfo query = typeof(HealthSqlRunner).GetMethod(nameof(HealthSqlRunner.QueryAsync))!;
 
@@ -196,7 +196,7 @@ public class StatementChecksFenceTests
         IlScan.Sites(StudioProjects.MartenAssembly, query)
             .Should().OnlyContain(static x => x.DeclaringType!.Assembly == StudioProjects.MartenAssembly)
             .And.Contain(static x => x.DeclaringType!.Namespace!.StartsWith("DataStudio.Marten.Services.Health", StringComparison.Ordinal),
-                "MartenStudio's own checks are the callers on that side");
+                "the Marten module's own checks are the callers on that side");
     }
 
     [Fact]

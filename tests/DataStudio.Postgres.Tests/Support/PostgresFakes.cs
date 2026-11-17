@@ -55,7 +55,7 @@ public sealed class TestSourceAuthorizationService : IAuthorizationService
 }
 
 /// <summary>
-/// The Storage page's service (W5-CAP): a view built by the real per-visitor step, in Postgres Studio's settings, over a
+/// The Storage page's service (W5-CAP): a view built by the real per-visitor step, in the Postgres module's settings, over a
 /// table in its own schema and one in another whose gate could not be read - so the page draws a named row, a withheld row
 /// and the sentence that says why. Every request recorded.
 /// </summary>

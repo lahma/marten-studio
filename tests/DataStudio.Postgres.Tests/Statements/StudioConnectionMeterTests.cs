@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 
 /// <summary>
 /// The cost meter that counts every statement (W5-Q1, backlog §C), with no Postgres: a connection is timed from its open to
-/// its close - once, however often it is closed, and again when it is opened again - and Postgres Studio's databases hand out
+/// its close - once, however often it is closed, and again when it is opened again - and the Postgres module's databases hand out
 /// metered connections only.
 /// </summary>
 public class StudioConnectionMeterTests

@@ -27,10 +27,10 @@ using Wolverine;
 namespace DataStudio.Kafka.Integration.Tests.Sample;
 
 /// <summary>
-/// D-CORR decision 11, SAMPLE-M4: the KStudio sample with its Wolverine application, started once as a plain <c>dotnet run</c> would. The host's
+/// D-CORR decision 11, SAMPLE-M4: the Kafka sample with its Wolverine application, started once as a plain <c>dotnet run</c> would. The host's
 /// Wolverine listener handles 25 checkout commands the startup sender publishes, stores a <c>CheckoutOrder</c> in the sample's Marten store in each
-/// command's tenant and confirms it on another topic; KStudio discovers the application's cluster and topics from its Wolverine configuration, and the
-/// README's six-step walk-through is followed here through KStudio's and Marten Studio's real services (the browser is UI-VERIFY's).
+/// command's tenant and confirms it on another topic; the Kafka module discovers the application's cluster and topics from its Wolverine configuration, and the
+/// README's six-step walk-through is followed here through the Kafka module's and the Marten module's real services (the browser is UI-VERIFY's).
 /// </summary>
 /// <remarks>
 /// The services are the sample's own registrations (<see cref="SampleKafkaRegistration" />, <see cref="SampleWolverine" />, <see cref="SampleStore" />) in a
@@ -189,7 +189,7 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
         confirmedBy.Should().Contain(static x => x.StartsWith("correlation", StringComparison.Ordinal), "the confirmation shares the command's correlation id");
         confirmedBy.Should().Contain(static x => x.StartsWith("message", StringComparison.Ordinal), "the confirmation's conversation id is the command's message id");
 
-        // 4. In the record detail, "Document CheckoutOrder chk-0007" opens Marten Studio's document, in tenant acme.
+        // 4. In the record detail, "Document CheckoutOrder chk-0007" opens the Marten module's document, in tenant acme.
         IStudioRouteLinks routes = engine.Services.GetRequiredService<IStudioRouteLinks>();
         string tenant = Header(command, "tenant-id");
         tenant.Should().Be("acme");
@@ -248,8 +248,8 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
     }
 
     /// <summary>
-    /// The sample's registrations in a container of the test's: Marten (the sample's store), Marten Studio, Wolverine (configured, never started) and
-    /// KStudio, over the host's broker and database, with the sample's own policies and a signed-in user.
+    /// The sample's registrations in a container of the test's: Marten (the sample's store), the Marten module, Wolverine (configured, never started) and
+    /// The Kafka module, over the host's broker and database, with the sample's own policies and a signed-in user.
     /// </summary>
     private sealed class WolverineEngine : IAsyncDisposable
     {
@@ -299,7 +299,7 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
                 }
             });
 
-            // Configured and never started: KStudio reads the options, and the host's own Wolverine is the one that runs.
+            // Configured and never started: The Kafka module reads the options, and the host's own Wolverine is the one that runs.
             services.AddWolverine(options => SampleWolverine.Configure(options, bootstrap));
             services.AddDataStudio().AddKafka(options =>
             {

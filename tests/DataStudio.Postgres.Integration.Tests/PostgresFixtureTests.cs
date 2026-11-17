@@ -52,7 +52,7 @@ public class PostgresFixtureTests
     }
 
     /// <summary>
-    /// The suite's container and the Postgres Studio sample's throwaway one hash differently whether or not reuse is asked
+    /// The suite's container and the Postgres sample's throwaway one hash differently whether or not reuse is asked
     /// for, and the suite's carries its label - which the Marten suite's fixture, built from the same image, does not, so
     /// the two suites' containers never hash alike either.
     /// </summary>

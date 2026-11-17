@@ -36,7 +36,7 @@ public class KafkaWolverineVersionGuardTests
     }
 
     [Fact]
-    public void A_missing_KStudio_Core_is_refused_and_the_central_pin_is_named()
+    public void A_missing_Kafka_Core_is_refused_and_the_central_pin_is_named()
     {
         FileNotFoundException notFound = new("Could not load file or assembly 'DataStudio.Kafka.Core'.", "DataStudio.Kafka.Core");
         string required = KafkaWolverineVersionGuard.ReleaseVersion(KafkaWolverineVersionGuard.InformationalVersion(Adapter));
@@ -79,7 +79,7 @@ public class KafkaWolverineVersionGuardTests
     [InlineData("1.3.0")]
     [InlineData("1.3.0-preview.2")]
     [InlineData("1.3.1-preview.1")]
-    public void A_KStudio_Core_that_is_not_the_previews_own_build_is_refused(string core)
+    public void A_Kafka_Core_that_is_not_the_previews_own_build_is_refused(string core)
     {
         AssemblyBuilder adapter = WithVersion("1.3.0-preview.1");
 

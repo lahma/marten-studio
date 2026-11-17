@@ -19,7 +19,7 @@ using static DataStudio.Postgres.Tests.Replication.ReplicationTestFacts;
 namespace DataStudio.Postgres.Tests.Replication;
 
 /// <summary>
-/// <see cref="ReplicationService" />'s gates and audit (W5-R2-fix 5), over a real Postgres Studio container whose data source
+/// <see cref="ReplicationService" />'s gates and audit (W5-R2-fix 5), over a real the Postgres module container whose data source
 /// never connects, with the facts reader faked: the store policy for the database as a whole, the activity gate in its
 /// order (capability, ReadOnly, write policy), the second question when the visitor's spelling is not the resolved
 /// identity, the audit once per circuit and never for a view without names, and the tablespace size one at a time.

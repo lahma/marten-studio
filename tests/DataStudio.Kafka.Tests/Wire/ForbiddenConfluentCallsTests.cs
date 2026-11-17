@@ -14,7 +14,7 @@ namespace DataStudio.Kafka.Tests.Wire;
 /// method), so a call in a lambda, a closure or an async state machine is found, and so is a method group converted to a delegate; a
 /// comment that mentions a call is not. A token that cannot be resolved is counted and the test fails on one, never skips it. A producer
 /// is recognised by the declaring type of the call (the type, its bases or its interfaces being a producer type), not by a substring of
-/// a formatted name. <b>Reflection is closed by <c>KStudio_Core_calls_no_reflection_entry_point</c></b>: the engine calls none of
+/// a formatted name. <b>Reflection is closed by <c>Kafka_Core_calls_no_reflection_entry_point</c></b>: the engine calls none of
 /// <c>MethodBase.Invoke</c>, <c>Delegate.DynamicInvoke</c>, <c>CreateDelegate</c>, <c>Type.InvokeMember</c>, <c>Type.GetMethod(s)</c>,
 /// <c>LambdaExpression.Compile</c> or <c>Activator.CreateInstance</c>, so a forbidden method cannot be reached by a name this scan never
 /// sees. <c>KafkaCoreFenceTests</c> checks assembly references, not reflection.
@@ -45,7 +45,7 @@ public class ForbiddenConfluentCallsTests
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodes();
 
     [Fact]
-    public void KStudio_Core_calls_no_forbidden_confluent_api()
+    public void Kafka_Core_calls_no_forbidden_confluent_api()
     {
         Assembly core = typeof(KafkaEngineOptions).Assembly;
         List<string> found = [.. Offenders(core.GetTypes())];
@@ -54,7 +54,7 @@ public class ForbiddenConfluentCallsTests
     }
 
     [Fact]
-    public void No_method_token_of_KStudio_Core_goes_unresolved()
+    public void No_method_token_of_Kafka_Core_goes_unresolved()
     {
         List<string> unresolved = [];
 
@@ -64,7 +64,7 @@ public class ForbiddenConfluentCallsTests
     }
 
     [Fact]
-    public void KStudio_Core_calls_no_reflection_entry_point()
+    public void Kafka_Core_calls_no_reflection_entry_point()
     {
         List<string> found = [.. ReflectionOffenders(typeof(KafkaEngineOptions).Assembly.GetTypes())];
 

@@ -10,7 +10,7 @@ using DataStudio.Postgres.Services.Live;
 namespace DataStudio.Marten.Tests.Components;
 
 /// <summary>
-/// 1.2-SCOPE-1 S1: a sidebar entry can be shown only for some scope states (<c>StudioNavItem.ShownWhen</c>, answered by the database's rail), and MartenStudio's
+/// 1.2-SCOPE-1 S1: a sidebar entry can be shown only for some scope states (<c>StudioNavItem.ShownWhen</c>, answered by the database's rail), and the Marten module's
 /// Stores entry is shown only while the visitor may see two or more stores - the header's store picker's own test.
 /// </summary>
 public class NavMenuScopeTests

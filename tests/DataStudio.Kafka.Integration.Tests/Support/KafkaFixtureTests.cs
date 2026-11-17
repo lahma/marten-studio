@@ -46,8 +46,8 @@ public class KafkaFixtureTests
     [Fact]
     public void Each_image_has_a_reuse_label_of_its_own()
     {
-        KafkaFixture.ReuseLabelValue(KafkaFixture.Image39).Should().Be("KStudio.Integration.Tests.3.9.2");
-        KafkaFixture.ReuseLabelValue(KafkaFixture.Image4).Should().Be("KStudio.Integration.Tests.4.4.0");
+        KafkaFixture.ReuseLabelValue(KafkaFixture.Image39).Should().Be("DataStudio.Kafka.Integration.Tests.3.9.2");
+        KafkaFixture.ReuseLabelValue(KafkaFixture.Image4).Should().Be("DataStudio.Kafka.Integration.Tests.4.4.0");
     }
 
     /// <summary>A <c>[KafkaFact]</c> only because Testcontainers' builder needs a Docker endpoint to build at all.</summary>
@@ -61,7 +61,7 @@ public class KafkaFixtureTests
             KafkaFixture.CreateContainer(KafkaFixture.Image4, reuse: true, packet: "ENG-B"),
             KafkaFixture.CreateContainer(KafkaFixture.Image4, reuse: false, packet: null));
 
-        ContainerReuse.ConfigurationOf(containers.All[0]).Labels.Should().Contain(KafkaFixture.ReuseLabel, "KStudio.Integration.Tests.3.9.2");
+        ContainerReuse.ConfigurationOf(containers.All[0]).Labels.Should().Contain(KafkaFixture.ReuseLabel, "DataStudio.Kafka.Integration.Tests.3.9.2");
         ContainerReuse.ConfigurationOf(containers.All[2]).Labels.Should().Contain("kstudio.packet", "ENG-A");
 
         string[] hashes = [.. containers.All.Take(4).Select(ContainerReuse.HashOf)];

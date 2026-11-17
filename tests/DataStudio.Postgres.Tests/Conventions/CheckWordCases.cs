@@ -18,15 +18,15 @@ using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
 
 namespace DataStudio.Postgres.Tests.Conventions;
 
-/// <summary>One evaluation of one shared health check, in Postgres Studio's words, over facts a plain data source can have.</summary>
+/// <summary>One evaluation of one shared health check, in the Postgres module's words, over facts a plain data source can have.</summary>
 /// <param name="Check">The check class.</param>
 /// <param name="Name">What the facts are, for the theory's display name.</param>
 /// <param name="Facts">The facts its evaluator judges.</param>
-/// <param name="Evaluation">The evaluation, always in Postgres Studio's words.</param>
+/// <param name="Evaluation">The evaluation, always in the Postgres module's words.</param>
 internal sealed record CheckWordCase(Type Check, string Name, object Facts, HealthEvaluation Evaluation)
 {
     /// <summary>
-    /// Whether the facts are about a table named like Marten's (<c>mt_</c>) - one Postgres Studio does classify, as
+    /// Whether the facts are about a table named like Marten's (<c>mt_</c>) - one Postgres module does classify, as
     /// <see cref="PostgresHealthTableSource.MartenKindOf" /> does, and whose findings may say so (the theory's allow-list).
     /// </summary>
     public bool AboutMartensTables { get; init; }
@@ -39,10 +39,10 @@ internal sealed record CheckWordCase(Type Check, string Name, object Facts, Heal
 }
 
 /// <summary>
-/// Facts that make every shared check's findings, caveats, quiet notes and remedies appear in Postgres Studio's words
+/// Facts that make every shared check's findings, caveats, quiet notes and remedies appear in the Postgres module's words
 /// (wave 6) - stated outright over a plain data source: relational tables, sessions with no daemon lock, statements of the
 /// application's own role, a server's settings and slots. Nothing here is Marten's but the cases marked
-/// <see cref="CheckWordCase.AboutMartensTables" />, which hold an <c>mt_</c> table as Postgres Studio's table source does.
+/// <see cref="CheckWordCase.AboutMartensTables" />, which hold an <c>mt_</c> table as the Postgres module's table source does.
 /// </summary>
 internal static class CheckWordCases
 {
@@ -56,7 +56,7 @@ internal static class CheckWordCases
     private static readonly StudioTable Events = new("public", "events", StudioTableKind.Relational, StudioTableOwnership.Owned);
     private static readonly StudioTable Parent = new("public", "customers", StudioTableKind.Relational, StudioTableOwnership.Owned);
 
-    /// <summary>A table named like a Marten document table, as Postgres Studio's table source classifies it.</summary>
+    /// <summary>A table named like a Marten document table, as the Postgres module's table source classifies it.</summary>
     private static readonly StudioTable MartenDocuments =
         new("public", "mt_doc_order", StudioTableKind.DocumentTable, StudioTableOwnership.Library) { Library = "Marten" };
 
@@ -74,7 +74,7 @@ internal static class CheckWordCases
     // ---------------------------------------------------------------------------------------------------------------
     // The evaluation and its builders.
 
-    /// <summary>An evaluation in Postgres Studio's words, with its table remedies, as its sweep hands one over.</summary>
+    /// <summary>An evaluation in the Postgres module's words, with its table remedies, as its sweep hands one over.</summary>
     private static HealthEvaluation Words(HealthHistoryView? history = null, StatisticsWindow? statistics = null) =>
         HealthEvaluation.At(At, history: history, text: PostgresText.Instance) with
         {
@@ -163,7 +163,7 @@ internal static class CheckWordCases
         ReferencedColumns = columns,
     };
 
-    /// <summary>The origin Postgres Studio's table source gives an index: a primary key, a Marten table's, or the host's.</summary>
+    /// <summary>The origin the Postgres module's table source gives an index: a primary key, a Marten table's, or the host's.</summary>
     private static IndexFacts Index(StudioTable table, HealthIndexRow row) =>
         new(table, row, row.IsPrimaryKey ? IndexOrigin.PrimaryKey : table.Kind == StudioTableKind.Relational ? IndexOrigin.Host : IndexOrigin.StoreManaged);
 
@@ -394,7 +394,7 @@ internal static class CheckWordCases
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Configuration: K05-K07, in Postgres Studio's options.
+    // Configuration: K05-K07, in the Postgres module's options.
 
     private static StudioLintFacts Options(bool readOnly = false, StudioCapability[]? on = null, bool consoleRole = false, bool everySchema = false) =>
         new(readOnly, on ?? [], consoleRole, everySchema, PostgresText.OptionsTypeName, "AddPostgres", "PostgresCapabilities", PostgresText.OptionsTypeName + ".ReadOnly");
@@ -721,7 +721,7 @@ internal static class CheckWordCases
         yield return Case<UnusedIndexCheck>("a young window", Unused(IndexRow(Orders, "orders_by_status", "status") with { Scans = 0 }), Words(statistics: Window(TimeSpan.FromDays(3))));
         yield return Case<UnusedIndexCheck>("used", Unused(IndexRow(Orders, "orders_by_status", "status")), Words(statistics: Month));
 
-        // T06 - a plain table is never judged; a table named like a Marten document table is, by Postgres Studio too.
+        // T06 - a plain table is never judged; a table named like a Marten document table is, by the Postgres module too.
         HealthHistoryView Updates(StudioTable table) => History(
             (TimeSpan.FromMinutes(20), [(HotUpdateCheck.UpdatesSeries + table.Key, 0), (HotUpdateCheck.HotUpdatesSeries + table.Key, 0)]),
             (TimeSpan.Zero, [(HotUpdateCheck.UpdatesSeries + table.Key, 20_000), (HotUpdateCheck.HotUpdatesSeries + table.Key, 2_000)]));

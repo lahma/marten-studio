@@ -11,7 +11,7 @@ namespace DataStudio.Marten.Tests.Services;
 public class DiagnosticsRegistrationTests
 {
     [Fact]
-    public void The_engine_after_MartenStudio_is_refused_with_the_sentence()
+    public void The_engine_after_Marten_is_refused_with_the_sentence()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();
@@ -23,7 +23,7 @@ public class DiagnosticsRegistrationTests
     }
 
     [Fact]
-    public void MartenStudio_after_the_engine_is_refused_with_the_sentence_and_registers_nothing_of_its_own()
+    public void Marten_after_the_engine_is_refused_with_the_sentence_and_registers_nothing_of_its_own()
     {
         ServiceCollection services = new();
         services.AddPostgresDiagnostics();
@@ -38,7 +38,7 @@ public class DiagnosticsRegistrationTests
     }
 
     [Fact]
-    public void MartenStudio_alone_registers_the_diagnostics_api_once()
+    public void Marten_alone_registers_the_diagnostics_api_once()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();

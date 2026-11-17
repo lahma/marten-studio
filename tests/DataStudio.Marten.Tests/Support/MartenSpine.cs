@@ -15,16 +15,16 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Support;
 
 /// <summary>
-/// The shared studio's services in MartenStudio's terms, for a test that builds them by hand rather than through
+/// The shared studio's services in the Marten module's terms, for a test that builds them by hand rather than through
 /// <c>AddMarten()</c> - so that the shared services' constructors, which take the studio's settings and
 /// descriptor rather than <see cref="MartenOptions" />, are spelled once.
 /// </summary>
 internal static class MartenSpine
 {
-    /// <summary>MartenStudio's descriptor.</summary>
+    /// <summary>The Marten module's descriptor.</summary>
     public static StudioDescriptor Descriptor => MartenDescriptor.Instance;
 
-    /// <summary>MartenStudio's route table.</summary>
+    /// <summary>The Marten module's route table.</summary>
     public static StudioRouteTable Routes => RouteTable.Value;
 
     private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable([.. Descriptor.PageAssemblies, StudioShellDescriptor.ShellPages]));
@@ -48,12 +48,12 @@ internal static class MartenSpine
     /// <summary>The capability guard, over <paramref name="options" />.</summary>
     public static StudioCapabilityGuard Guard(MartenOptions options) => new(Settings(options));
 
-    /// <summary>A capability refusal worded as MartenStudio words it.</summary>
+    /// <summary>A capability refusal worded as the Marten module words it.</summary>
     public static StudioCapabilityDeniedException Denied(StudioCapability capability, CapabilityDenialReason reason) =>
         new(capability, reason, Settings());
 
     /// <summary>
-    /// MartenStudio's source provider and the shared catalog and resolvers over it, built the way the container builds
+    /// The Marten module's source provider and the shared catalog and resolvers over it, built the way the container builds
     /// them for one circuit.
     /// </summary>
     public static (MartenSourceProvider Sources, StudioScopeCatalog Catalog, StudioScopeResolver Resolver) Scope(

@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Integration.Tests.Server;
 
 /// <summary>
-/// A Postgres Studio host over one connection string - any login, any database - for the server-posture live tests: the
+/// A Postgres module host over one connection string - any login, any database - for the server-posture live tests: the
 /// studio's own services resolved as a visitor's would be, so a sweep and the Server page's facts run exactly the code a page
 /// runs. <see cref="CreateAsync" /> builds a container; <see cref="ServeAsync" /> a real Kestrel web host with the studio
 /// mapped, for the checks that read the mapping (K07).

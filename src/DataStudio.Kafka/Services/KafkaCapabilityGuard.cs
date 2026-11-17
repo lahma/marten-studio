@@ -6,18 +6,18 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// Whether a Kafka capability is on (D35): the host studio's master switch is off and the host switched the flag on. The Kafka module has no
-/// <c>ReadOnly</c> of its own - the host studio's turns every capability off, here and in the chip - so there is one master switch and the
+/// Whether a Kafka capability is on (D35): the shell's master switch is off and the host switched the flag on. The Kafka module has no
+/// <c>ReadOnly</c> of its own - the shell's turns every capability off, here and in the chip - so there is one master switch and the
 /// chip's "every capability is off" stays true.
 /// </summary>
 /// <param name="options">The Kafka module's options.</param>
-/// <param name="settings">The host studio's settings, whose <c>ReadOnly</c> is the master switch.</param>
+/// <param name="settings">The shell's settings, whose <c>ReadOnly</c> is the master switch.</param>
 internal sealed class KafkaCapabilityGuard(IOptions<KafkaOptions> options, IShellSettings settings)
 {
     /// <summary>Every capability the Kafka module offers.</summary>
     public static IReadOnlyList<KafkaCapability> Offered { get; } = Enum.GetValues<KafkaCapability>();
 
-    /// <summary>Whether the host studio's master switch is on, which turns every capability off.</summary>
+    /// <summary>Whether the shell's master switch is on, which turns every capability off.</summary>
     public bool ReadOnly => settings.ReadOnly;
 
     /// <summary>The capabilities the host switched on, without the master switch.</summary>
@@ -103,7 +103,7 @@ internal sealed class KafkaCapabilityDeniedException : InvalidOperationException
     /// <summary>Creates the refusal.</summary>
     /// <param name="capability">The capability that was refused.</param>
     /// <param name="reason">Whether the master switch or the individual capability refused it.</param>
-    /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>
+    /// <param name="readOnlyOption">The shell's master switch, spelled as its options spell it.</param>
     public KafkaCapabilityDeniedException(KafkaCapability capability, CapabilityDenialReason reason, string readOnlyOption)
         : base(reason == CapabilityDenialReason.ReadOnly
             ? $"Data Studio refused '{capability}' because {readOnlyOption} is true, which turns every capability off."

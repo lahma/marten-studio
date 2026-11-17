@@ -142,7 +142,7 @@ internal sealed class EmptySchemaStudio : IAsyncDisposable
     }
 
     /// <summary>
-    /// The numbers MartenStudio's sidebar contributor draws its badges from, for the scope the layout settles - where
+    /// The numbers the Marten module's sidebar contributor draws its badges from, for the scope the layout settles - where
     /// "zero" and "could not tell" are still different answers, which no badge is.
     /// </summary>
     public async Task<MartenNavReading> NavNumbersAsync()

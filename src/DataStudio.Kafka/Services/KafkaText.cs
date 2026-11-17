@@ -5,7 +5,7 @@ using DataStudio.Kafka.Core.Predicates;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// The Kafka module's own sentences (D34): the host studio's <c>StudioText</c> does not change, so none of its words are borrowed. One place,
+/// The Kafka module's own sentences (D34): the shell's <c>StudioText</c> does not change, so none of its words are borrowed. One place,
 /// so that a rename of the product is one edit.
 /// </summary>
 internal static class KafkaText
@@ -22,7 +22,7 @@ internal static class KafkaText
     /// <summary>The capability chip's group name, under the module's: <c>Kafka: reads</c>.</summary>
     public const string CapabilitiesGroup = "reads";
 
-    /// <summary>The sentence the anonymous banner adds after the host studio's own.</summary>
+    /// <summary>The sentence the anonymous banner adds after the shell's own.</summary>
     public const string ExposedSentence =
         "The Kafka pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, "
         + "and whatever its capabilities read.";
@@ -97,7 +97,7 @@ internal static class KafkaText
 
     /// <summary>The refusal of a host that enabled a capability no policy answers, at start.</summary>
     /// <param name="capabilities">The capabilities enabled, comma separated.</param>
-    /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>
+    /// <param name="readOnlyOption">The shell's master switch, spelled as its options spell it.</param>
     public static string CapabilityWithoutPolicy(string capabilities, string readOnlyOption) =>
         $"Data Studio has {capabilities} enabled and no policy decides who may use them: every visitor admitted to the studio could read the "
         + "records of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each "

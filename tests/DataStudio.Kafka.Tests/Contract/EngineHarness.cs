@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace DataStudio.Kafka.Tests.Contract;
 
-/// <summary>What the engine takes from its host studio, for a test.</summary>
+/// <summary>What the engine takes from its shell, for a test.</summary>
 internal sealed class TestEngineSettings(TimeSpan catalogTimeToLive) : IKafkaEngineSettings
 {
     public TimeSpan CatalogTimeToLive { get; } = catalogTimeToLive;

@@ -16,20 +16,20 @@ namespace DataStudio.Sample.Kafka;
 /// <b>No fallback.</b> Either a connection string was configured, or a container is started, or the host stops saying how to fix it.
 /// </para>
 /// <para>
-/// <b>Reuse is opt-in</b> and follows the Kafka container: <c>KSTUDIO_SAMPLE_REUSE=true</c>. The banner promises both containers are deleted
+/// <b>Reuse is opt-in</b> and follows the Kafka container: <c>DATASTUDIO_KAFKA_SAMPLE_REUSE=true</c>. The banner promises both containers are deleted
 /// when the process stops, and a reused one is not.
 /// </para>
 /// </remarks>
 internal static class EphemeralPostgres
 {
     /// <summary>The label every container the sample starts carries.</summary>
-    internal const string SampleLabel = "kstudio.sample";
+    internal const string SampleLabel = "data-studio.sample";
 
     /// <summary>The label that gives a reused Postgres its identity.</summary>
-    internal const string ReuseLabel = "kstudio.sample.reuse";
+    internal const string ReuseLabel = "data-studio.sample.reuse";
 
     /// <summary>The label's value.</summary>
-    internal const string ReuseLabelValue = "kstudio-sample-postgres";
+    internal const string ReuseLabelValue = "data-studio-sample-kafka-postgres";
 
     /// <summary>The connection string of the container this process started, or <see langword="null" /> when it started none.</summary>
     private static string? Started { get; set; }

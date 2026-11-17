@@ -16,7 +16,7 @@ namespace DataStudio.Marten.Integration.Tests.Health;
 /// can still exist.
 /// </summary>
 /// <remarks>
-/// Not a <c>[HealthFires]</c>: T15's own proof is <c>IndexLintLiveTests</c> in the Postgres Studio suite. This is the
+/// Not a <c>[HealthFires]</c>: T15's own proof is <c>IndexLintLiveTests</c> in the Postgres module suite. This is the
 /// Marten half of its wording.
 /// </remarks>
 public class TagTableForeignKeyLiveTests(PostgresFixture postgres)

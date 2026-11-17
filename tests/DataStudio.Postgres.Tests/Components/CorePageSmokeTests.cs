@@ -19,8 +19,8 @@ using DetailPage = DataStudio.Postgres.Components.Pages.Database.RowDetail;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// Every core page renders under PostgresStudio's own wiring - its settings, descriptor and source provider over one
-/// <c>NpgsqlDataSource</c> - with no MartenStudio type anywhere: the shell, the Overview, Query, the database browser,
+/// Every core page renders under the Postgres module's own wiring - its settings, descriptor and source provider over one
+/// <c>NpgsqlDataSource</c> - with no Marten module type anywhere: the shell, the Overview, Query, the database browser,
 /// Sessions, Relationships, Health and Activity.
 /// </summary>
 public class CorePageSmokeTests
@@ -128,7 +128,7 @@ public class CorePageSmokeTests
     }
 
     [Fact]
-    public async Task Query_without_RunSql_names_PostgresStudios_own_option()
+    public async Task Query_without_RunSql_names_Postgres_own_option()
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
@@ -254,7 +254,7 @@ public class CorePageSmokeTests
     }
 
     [Fact]
-    public async Task The_sidebar_is_PostgresStudios_and_names_no_Marten_screen()
+    public async Task The_sidebar_is_Postgres_and_names_no_Marten_screen()
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 

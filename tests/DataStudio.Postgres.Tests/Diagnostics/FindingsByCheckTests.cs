@@ -36,7 +36,7 @@ public class FindingsByCheckTests
         params PostgresCheck[] checks) => new()
     {
         SchemaVersion = 1,
-        Producer = "PostgresStudio test",
+        Producer = "Data Studio test",
         GeneratedAt = At,
         Database = new PostgresDatabaseRef("default", "app"),
         Findings = [.. findings],

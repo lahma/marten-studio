@@ -40,7 +40,7 @@ namespace DataStudio.Marten.Integration.Tests.Health;
 /// </remarks>
 public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
 {
-    /// <summary>The reason a report gives for a finding withheld for its schema, in MartenStudio's words.</summary>
+    /// <summary>The reason a report gives for a finding withheld for its schema, in the Marten module's words.</summary>
     private static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenSettings.Of(new MartenOptions()));
 
     /// <summary>The extended table's name, in whichever schema a test gives it.</summary>

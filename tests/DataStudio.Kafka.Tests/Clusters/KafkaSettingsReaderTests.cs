@@ -114,7 +114,7 @@ public class KafkaSettingsReaderTests
 
         JsonSerializer.Serialize(view).Should().NotContain(Sentinel);
         view.Host.Select(static x => x.Shown).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
-        view.Overrides.Select(static x => x.KStudioValue + x.Why).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
+        view.Overrides.Select(static x => x.EngineValue + x.Why).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
         Row(view, "sasl.username").Shown.Should().Be("svc-account", "a user name is not a secret");
         Row(view, "custom.vendor.credential").Exposure.Should().Be(KafkaSettingExposure.Secret);
     }
@@ -212,7 +212,7 @@ public class KafkaSettingsReaderTests
         ConsumerConfig consumer = ConfluentClientSettings.BuildConsumerConfig(definition, Guid.Empty, WireIsolation.ReadCommitted, settings.Limits, settings.GroupIdPrefix);
         AdminClientConfig admin = ConfluentClientSettings.BuildAdminConfig(definition);
 
-        Dictionary<string, string> overrides = view.Overrides.Where(static x => x.KStudioValue != "removed").ToDictionary(static x => x.Key, static x => x.KStudioValue);
+        Dictionary<string, string> overrides = view.Overrides.Where(static x => x.EngineValue != "removed").ToDictionary(static x => x.Key, static x => x.EngineValue);
 
         foreach (string key in new[]
         {
@@ -223,7 +223,7 @@ public class KafkaSettingsReaderTests
             overrides[key].Should().Be(consumer.Get(key), key);
         }
 
-        overrides["group.id"].Should().Be("kstudio-{scan id}");
+        overrides["group.id"].Should().Be("data-studio-{scan id}");
         overrides["isolation.level"].Should().StartWith("read_committed");
         overrides.Keys.Should().BeEquivalentTo(
             [.. consumer.Where(static x => !x.Key.StartsWith("bootstrap", StringComparison.Ordinal)).Select(static x => x.Key)],
@@ -240,7 +240,7 @@ public class KafkaSettingsReaderTests
         KafkaClusterSettingsView view = Read(static config => config.Set("enable.auto.commit", "true"));
 
         Row(view, "enable.auto.commit").Shown.Should().Be("true");
-        view.Overrides.Single(static x => x.Key == "enable.auto.commit").KStudioValue.Should().Be("false");
+        view.Overrides.Single(static x => x.Key == "enable.auto.commit").EngineValue.Should().Be("false");
     }
 
     [Fact]

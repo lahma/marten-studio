@@ -174,7 +174,7 @@ public class KafkaProfileTests
     }
 
     [Fact]
-    public void The_test_table_caps_a_raised_host_at_kstudios_defaults()
+    public void The_test_table_caps_a_raised_host_at_the_kafka_modules_defaults()
     {
         KafkaScanLimits capped = KafkaProfileCeilings.Cap(KafkaProfile.Test, Highest());
 

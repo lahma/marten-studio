@@ -37,7 +37,7 @@ internal sealed class HealthExportHarness : IAsyncDisposable
     public const string SecretDatabase = "export_secret_db";
 
     /// <summary>The name a registration gets when the caller gives none.</summary>
-    public const string DefaultName = "marten-studio";
+    public const string DefaultName = "data-studio-marten";
 
     /// <summary>The scripted checks the export runs: two configuration, one catalog, one activity, one deeper.</summary>
     public static readonly Type[] ExportChecks =
@@ -82,9 +82,9 @@ internal sealed class HealthExportHarness : IAsyncDisposable
     /// How the store reaches its databases; one refused default database, named <see cref="SecretDatabase" />,
     /// unless a test sets a tenancy of its own.
     /// </param>
-    /// <param name="registerStudio">Whether the host called <c>AddMartenStudio()</c> (and <c>AddMarten()</c>) at all.</param>
+    /// <param name="registerStudio">Whether the host called <c>AddMarten()</c> (and <c>AddMarten()</c>) at all.</param>
     /// <param name="limits">How much a run may do, or the defaults.</param>
-    /// <param name="healthChecks">The host's health check registrations; one default <c>AddMartenStudio()</c> unless given.</param>
+    /// <param name="healthChecks">The host's health check registrations; one default <c>AddMarten()</c> unless given.</param>
     /// <param name="lifetime">The host's lifetime, for a test that stops the application.</param>
     /// <param name="hostServices">Anything else the host registers - a projection coordinator, say.</param>
     /// <param name="validateScopes">

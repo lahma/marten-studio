@@ -64,7 +64,7 @@ public partial class RefusalLogValuesTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // MartenStudio's own audit events.
+    // The Marten module's own audit events.
 
     [Fact]
     public void The_Marten_audit_events_write_the_user_and_the_scope_escaped_and_bounded()

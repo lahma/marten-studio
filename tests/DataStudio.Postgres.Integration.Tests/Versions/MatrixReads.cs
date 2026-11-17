@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Integration.Tests.Versions;
 /// <param name="Transaction">That transaction.</param>
 /// <param name="Schemas">The schemas a list reads: the fixture's <c>store</c> and <c>public</c>.</param>
 /// <param name="Timeout">A command timeout, in seconds.</param>
-/// <param name="Services">The PostgresStudio host the read's services come from.</param>
+/// <param name="Services">The Postgres module host the read's services come from.</param>
 /// <param name="Resolved">The host's source, resolved for the same role and database.</param>
 internal sealed record MatrixReadContext(
     NpgsqlConnection Connection,

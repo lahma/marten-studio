@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Tests.Components;
 
 /// <summary>
-/// What a cluster source told KStudio, shown (decision 5 of D-CORR, UI-E): a topic page's facts from Wolverine, and the Settings page's section with the
+/// What a cluster source told the Kafka module, shown (decision 5 of D-CORR, UI-E): a topic page's facts from Wolverine, and the Settings page's section with the
 /// notes of what could not be listed. A host's own registration draws neither.
 /// </summary>
 public class KafkaDiscoveredFactsTests

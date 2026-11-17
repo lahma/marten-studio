@@ -321,7 +321,7 @@ public class ConnectionHolderChecksTests
         facts.Holders.Limits.AvailableText.Should().StartWith("95 (max_connections 100").And.Contain("2 reserved_connections");
     }
 
-    /// <summary>The same facts in Postgres Studio's words: nothing of either check says a store or Marten.</summary>
+    /// <summary>The same facts in the Postgres module's words: nothing of either check says a store or Marten.</summary>
     [Fact]
     public void Neither_check_says_a_store_in_Postgres_Studios_words()
     {

@@ -26,7 +26,7 @@ namespace DataStudio.Marten.Tests.Health;
 /// </remarks>
 public class HealthCheckConventionTests
 {
-    /// <summary>Every check class in the studio's check assemblies - the engine's, the studio's own posture ones and MartenStudio's.</summary>
+    /// <summary>Every check class in the studio's check assemblies - the engine's, the studio's own posture ones and the Marten module's.</summary>
     private static IReadOnlyList<Type> Discovered =>
     [
         .. DataStudio.Marten.Services.MartenDescriptor.Instance.HealthCheckAssemblies
@@ -80,8 +80,8 @@ public class HealthCheckConventionTests
     [Fact]
     public void Every_check_lives_in_the_checks_folder()
     {
-        // Each assembly's own Services/Health/Checks: the engine's and the studio's share the root namespace PostgresStudio, and
-        // MartenStudio's has its own.
+        // Each assembly's own Services/Health/Checks: the engine's and the studio's share the root namespace the Postgres module, and
+        // The Marten module's has its own.
         Discovered.Should().OnlyContain(
             static x => x.Namespace == (x.Assembly == StudioProjects.DiagnosticsAssembly ? "DataStudio.Postgres" : x.Assembly.GetName().Name) + ".Services.Health.Checks",
             "a check is added by adding its file to its assembly's Services/Health/Checks, and nowhere else");

@@ -4,8 +4,8 @@ using DataStudio.Kafka.Tests.Support;
 namespace DataStudio.Kafka.Tests.Services;
 
 /// <summary>
-/// D35: every question KStudio's policies are asked is a <see cref="KafkaTopicResource" />, once per topic, with the capability named when one is
-/// being used, and the host studio's policies are never asked. The recording authorization service answers for both resources, so a host
+/// D35: every question the Kafka module's policies are asked is a <see cref="KafkaTopicResource" />, once per topic, with the capability named when one is
+/// being used, and the shell's policies are never asked. The recording authorization service answers for both resources, so a host
 /// question that leaked in would be seen.
 /// </summary>
 public class KafkaAuthorizationTests

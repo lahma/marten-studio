@@ -11,7 +11,7 @@ namespace DataStudio.Kafka.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>It never asks the host studio's policies, and never falls back to them.</b> <c>StoreAuthorizationPolicy</c>,
+/// <b>It never asks the shell's policies, and never falls back to them.</b> <c>StoreAuthorizationPolicy</c>,
 /// <c>SourceAuthorizationPolicy</c> and <c>WriteAuthorizationPolicy</c> are asked about <c>MartenStoreResource</c> or
 /// <c>PostgresResource</c>, and their handlers are written for those types: handing one a <see cref="KafkaTopicResource" /> under
 /// the same policy name is what D30 forbids. For the same reason the host's <c>StudioAuthorization</c> is not reused through a second

@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services.Statements;
 namespace DataStudio.Marten.Integration.Tests.Health;
 
 /// <summary>
-/// The Statements page in MartenStudio (W5-Q1), against a real <c>pg_stat_statements</c> on the statement checks' own server:
+/// The Statements page in the Marten module (W5-Q1), against a real <c>pg_stat_statements</c> on the statement checks' own server:
 /// Marten's own SQL grouped by operation and document type - a document upsert, an event append, a load - with a hidden type
 /// never named; and the cost meter counting every connection the studio opens - a sweep, a database-browser read and a
 /// document read - with C08's rollbacks still exactly the read-only sessions'.

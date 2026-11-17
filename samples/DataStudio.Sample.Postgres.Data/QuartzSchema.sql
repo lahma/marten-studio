@@ -1,4 +1,4 @@
--- Quartz.NET's own PostgreSQL job store schema, vendored into a `quartz` schema for the Marten Studio
+-- Quartz.NET's own PostgreSQL job store schema, vendored into a `quartz` schema for the Marten
 -- sample, so that the database browser has a real third-party schema to show next to the Marten store.
 --
 -- Source:  Quartz.NET, https://github.com/quartznet/quartznet
@@ -24,7 +24,7 @@
 
 CREATE SCHEMA IF NOT EXISTS quartz;
 
-COMMENT ON SCHEMA quartz IS 'marten-studio-sample:quartz - Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten Studio sample. Not a Marten schema.';
+COMMENT ON SCHEMA quartz IS 'marten-studio-sample:quartz - Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten sample. Not a Marten schema.';
 
 CREATE TABLE IF NOT EXISTS quartz.qrtz_job_details
   (

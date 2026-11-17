@@ -3,7 +3,7 @@ using Testcontainers.PostgreSql;
 namespace DataStudio.Sample.Postgres.Worker;
 
 /// <summary>
-/// The throwaway Postgres the worker starts when nothing configured a real one (AGENTS.md D18), as the Postgres Studio
+/// The throwaway Postgres the worker starts when nothing configured a real one (AGENTS.md D18), as the Postgres module
 /// sample host does: either a connection string was configured, or a container is started, or the host refuses to start and
 /// says how to fix it. It never falls back to <c>localhost</c> silently.
 /// </summary>

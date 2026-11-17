@@ -15,8 +15,8 @@ using Npgsql;
 namespace DataStudio.Kafka.Integration.Tests.Support;
 
 /// <summary>
-/// KStudio's real services over a real broker, composed by the real registrations (<c>AddPostgresStudio()</c> and <c>AddKafkaStudio()</c>) and used the way
-/// a circuit uses them - from one scope - for the tests of the search service (UI-B). The authorization is KStudio's own <c>KafkaAuthorization</c> over the
+/// The Kafka module's real services over a real broker, composed by the real registrations (<c>AddPostgres()</c> and <c>AddKafka()</c>) and used the way
+/// a circuit uses them - from one scope - for the tests of the search service (UI-B). The authorization is the Kafka module's own <c>KafkaAuthorization</c> over the
 /// application's real <c>IAuthorizationService</c> and a real policy that is asked about the <c>KafkaTopicResource</c>; the ring is the studio's own. Nothing
 /// here connects to Postgres: the data source is only registered, and no hosted service is started.
 /// </summary>
@@ -35,7 +35,7 @@ internal sealed class LiveSearchHost : IAsyncDisposable
         scope = provider.CreateScope();
     }
 
-    /// <summary>Everything KStudio and the studio logged.</summary>
+    /// <summary>Everything the Kafka module and the studio logged.</summary>
     public CapturingLoggerProvider Logs { get; }
 
     /// <summary>The cluster entry the host registered.</summary>
@@ -68,7 +68,7 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     /// <summary>Builds the host for a principal of the fixture's broker.</summary>
     /// <param name="fixture">The broker.</param>
     /// <param name="user">The Kafka principal the engine reads as.</param>
-    /// <param name="configure">Sets KStudio's options (topics, limits).</param>
+    /// <param name="configure">Sets the Kafka module's options (topics, limits).</param>
     /// <param name="profile">The cluster's profile, or <see langword="null" /> for none.</param>
     public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaOptions>? configure = null, KafkaProfile? profile = null)
     {

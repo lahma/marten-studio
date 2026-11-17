@@ -10,7 +10,7 @@ namespace DataStudio.Sample.Postgres;
 /// (which needs <c>CREATEDB</c>), the admin database's directory of them, and the <c>quartz</c>, <c>legacy</c> and
 /// <c>studio_sample</c> schemas - only on the throwaway container it started itself
 /// (<see cref="EphemeralPostgres.IsThrowaway" />), or on a configured database when this switch says outright that the server is
-/// the demo's to write to. Anywhere else it writes nothing and says so in one line: Postgres Studio itself never writes, so
+/// the demo's to write to. Anywhere else it writes nothing and says so in one line: The Postgres module itself never writes, so
 /// the sample is then as read-only as the studio is. The same rule, and the same switch, as the Marten sample's.
 /// </para>
 /// <para>

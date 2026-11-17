@@ -192,7 +192,7 @@ public partial class StylesheetTests
     /// <remarks>
     /// <para>
     /// It is not a host leak: this stylesheet is linked from exactly one document — the studio's own
-    /// shell, whose <c>&lt;body&gt;</c> <c>MartenStudioApp</c> renders — and a host page never loads it.
+    /// shell, whose <c>&lt;body&gt;</c> the shell's root component renders — and a host page never loads it.
     /// Nor can it be scoped: <c>.ms-studio</c> is on a <c>&lt;div&gt;</c> <em>inside</em> that body, and
     /// the only selector that reaches a descendant's ancestor is <c>:has()</c>, which would re-evaluate
     /// on every DOM mutation to fix a leak that does not exist.

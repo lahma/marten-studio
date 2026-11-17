@@ -18,7 +18,7 @@ namespace DataStudio.Kafka.Tests.Components;
 /// <summary>
 /// The Export control on the search results and the record page, the profile on the Settings page and in the cluster selector (AGENTS.md D45 and D47,
 /// D-M5 decisions 2.8, 2.9 and 4.6): the menu offers what the page holds, the click is what the service gates, the disabled states name the setting a
-/// host would change, and there is no <c>data:</c> link anywhere in what KStudio draws.
+/// host would change, and there is no <c>data:</c> link anywhere in what the Kafka module draws.
 /// </summary>
 public class KafkaExportMenuTests
 {
@@ -76,9 +76,9 @@ public class KafkaExportMenuTests
 
         await Items(page)[0].ClickAsync(new MouseEventArgs());
 
-        page.WaitForAssertion(() => page.Find(".ms-k-export").TextContent.Should().Contain("Saved kstudio-test-orders-"));
+        page.WaitForAssertion(() => page.Find(".ms-k-export").TextContent.Should().Contain("Saved data-studio-test-orders-"));
         IReadOnlyList<object?> arguments = rig.Studio.Context.JSInterop.Invocations["martenStudio.download.stream"].Single().Arguments;
-        arguments[0].Should().BeOfType<string>().Which.Should().StartWith("kstudio-test-orders-").And.EndWith("Z.jsonl");
+        arguments[0].Should().BeOfType<string>().Which.Should().StartWith("data-studio-test-orders-").And.EndWith("Z.jsonl");
         arguments[1].Should().Be("application/x-ndjson");
         arguments[2].Should().BeOfType<Microsoft.JSInterop.DotNetStreamReference>();
         rig.Ring.Where(static x => x.Action == "ExportRecords").Should().ContainSingle().Which.Succeeded.Should().BeTrue();

@@ -100,7 +100,7 @@ partial class Build
     void AssertPackingAtTheMartenFloor()
     {
         Assert.True(ResolvedMartenVersion == MartenFloor,
-            $"Refusing to pack against Marten {ResolvedMartenVersion}: MartenStudio is packed only at the Marten " +
+            $"Refusing to pack against Marten {ResolvedMartenVersion}: the Marten module is packed only at the Marten " +
             $"floor ({MartenFloor}, DataStudioMartenFloor in Directory.Packages.props). The nuspec would say " +
             $"'Marten >= {ResolvedMartenVersion}' and raise every host's floor. Run Pack without --marten-version " +
             "(and without MARTEN_VERSION in the environment), or raise the floor deliberately and record why in " +

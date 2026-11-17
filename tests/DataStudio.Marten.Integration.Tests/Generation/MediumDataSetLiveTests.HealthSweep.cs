@@ -65,7 +65,7 @@ public partial class MediumDataSetLiveTests
     /// shape or under a <c>LIMIT</c> - none per table, per row, per shard or per tenant, and none of a data table:
     /// </para>
     /// <list type="bullet">
-    /// <item>W5-G1M, 1: the admitted-tables list every table check now shares, MartenStudio's judging the whole database
+    /// <item>W5-G1M, 1: the admitted-tables list every table check now shares, the Marten module's judging the whole database
     /// (<c>HealthTableQueries.UndeclaredTablesSql</c>: estimates, capped).</item>
     /// <item>W5-CAP, 3: the statistics window C08, C11 and T08 share - its signals, and, apart since CAP-fix2, the control
     /// functions' privilege probe and the call it allows (<c>StatisticsWindowQueries</c>).</item>

@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Marten.Tests.Database;
 
 /// <summary>
-/// PS-1b's seams, from the side a studio other than MartenStudio sees them: the source parameter every browser link
+/// PS-1b's seams, from the side a studio other than the Marten module sees them: the source parameter every browser link
 /// carries is the descriptor's, a lock label needs no Marten store, and a link into a screen the studio does not have
 /// is plain text rather than a link to nowhere.
 /// </summary>
@@ -49,7 +49,7 @@ public class DatabaseSeamTests
     }
 
     [Fact]
-    public void MartenStudios_descriptor_still_writes_store_exactly_as_before()
+    public void Marten_descriptor_still_writes_store_exactly_as_before()
     {
         DatabaseLinks.ToObject(MartenDescriptor.Instance, Scope, "public", "orders")
             .Should().Be("postgres/database/object?schema=public&name=orders&store=orders&db=db1.orders");
@@ -81,7 +81,7 @@ public class DatabaseSeamTests
     [InlineData(nameof(DatabaseObjectOwner.MartenDocument), "a.ms-db-owner-document")]
     [InlineData(nameof(DatabaseObjectOwner.MartenEventStore), "a.ms-db-owner-events")]
     [InlineData(nameof(DatabaseObjectOwner.MartenInfrastructure), "a.ms-db-owner-internal")]
-    public void The_owner_badge_is_a_link_in_MartenStudio(string owner, string selector)
+    public void The_owner_badge_is_a_link_in_Marten(string owner, string selector)
     {
         using var context = new StudioComponentContext();
 
@@ -107,7 +107,7 @@ public class DatabaseSeamTests
     }
 
     [Fact]
-    public void The_references_panel_links_a_document_in_MartenStudio()
+    public void The_references_panel_links_a_document_in_Marten()
     {
         using var context = new StudioComponentContext();
 
@@ -156,7 +156,7 @@ public class DatabaseSeamTests
         ],
     };
 
-    /// <summary>MartenStudio's descriptor, with another source parameter - a studio whose sources are not stores.</summary>
+    /// <summary>The Marten module's descriptor, with another source parameter - a studio whose sources are not stores.</summary>
     private static StudioDescriptor WithSourceParameter(string parameter)
     {
         StudioDescriptor marten = MartenDescriptor.Instance;

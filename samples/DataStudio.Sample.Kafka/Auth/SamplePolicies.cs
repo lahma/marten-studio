@@ -7,7 +7,7 @@ namespace DataStudio.Sample.Kafka.Auth;
 /// </summary>
 /// <remarks>
 /// <see cref="Studio" /> decides who gets in at all; it is what the mapping requires. <see cref="StudioWrite" /> decides each
-/// mutating call of the Marten screens. KStudio's two policies, which are asked about a topic, are
+/// mutating call of the Marten screens. The Kafka module's two policies, which are asked about a topic, are
 /// <see cref="Kafka.SampleKafkaPolicies" />'s.
 /// </remarks>
 internal static class SamplePolicies
@@ -21,7 +21,7 @@ internal static class SamplePolicies
     /// <summary>Who may change anything through the Marten screens.</summary>
     public const string StudioWrite = "DataStudioWrite";
 
-    /// <summary>Registers every policy the sample uses, KStudio's two included.</summary>
+    /// <summary>Registers every policy the sample uses, the Kafka module's two included.</summary>
     /// <param name="options">The application's authorization options.</param>
     public static void Configure(AuthorizationOptions options)
     {

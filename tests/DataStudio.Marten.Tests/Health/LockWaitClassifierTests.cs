@@ -83,12 +83,12 @@ public class LockWaitClassifierTests
     }
 
     /// <summary>
-    /// MartenStudio's declarations source resolves its authorization on the first policy question, not when it is built:
+    /// The Marten module's declarations source resolves its authorization on the first policy question, not when it is built:
     /// the sweep's scope has no circuit, and C06's read asks no policy. A scope whose authorization graph does not build
     /// still classifies.
     /// </summary>
     [Fact]
-    public async Task MartenStudios_declarations_are_read_in_a_scope_whose_authorization_graph_does_not_build()
+    public async Task Marten_declarations_are_read_in_a_scope_whose_authorization_graph_does_not_build()
     {
         ServiceCollection services = new();
         services.AddLogging();

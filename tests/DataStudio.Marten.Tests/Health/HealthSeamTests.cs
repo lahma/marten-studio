@@ -18,13 +18,13 @@ using DataStudio.Postgres.Services.Health.Checks;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// PS-1c: the health engine behind the shared seams - the table set, the remedy wording, the runtime - with MartenStudio's
+/// PS-1c: the health engine behind the shared seams - the table set, the remedy wording, the runtime - with the Marten module's
 /// answers exactly what the checks said before, and a table that is not a Marten table worded as what it is.
 /// </summary>
 public class HealthSeamTests
 {
     // -----------------------------------------------------------------------------------------------
-    // MartenStudio's table set: every declared table is the application's own (no behaviour change)
+    // The Marten module's table set: every declared table is the application's own (no behaviour change)
     // -----------------------------------------------------------------------------------------------
 
     /// <summary>
@@ -161,8 +161,8 @@ public class HealthSeamTests
 
         finding.Evidence.Should().Contain(new HealthEvidence("Table", "the table app.orders"));
 
-        // G1M (issue #8, G1): a table no store declares is the host's migrations' to change, so MartenStudio composes
-        // Postgres Studio's migration SQL for it - never a StoreOptions line.
+        // G1M (issue #8, G1): a table no store declares is the host's migrations' to change, so the Marten module composes
+        // The Postgres module's migration SQL for it - never a StoreOptions line.
         finding.Remedy.Should().NotBeNull();
         finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
         finding.Remedy.Code.Should().Be("ALTER TABLE \"app\".\"orders\" RESET (autovacuum_enabled);");
@@ -192,7 +192,7 @@ public class HealthSeamTests
     // -----------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Without_the_studios_wording_a_table_check_offers_no_remedy_and_with_it_MartenStudios_line()
+    public void Without_the_studios_wording_a_table_check_offers_no_remedy_and_with_it_Marten_line()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts single = Index(orders, IndexRow(orders, "by_status", "(data ->> 'Status'::text)"));
@@ -213,7 +213,7 @@ public class HealthSeamTests
     }
 
     [Fact]
-    public void MartenStudios_runtime_judges_its_own_probe_table_and_no_runtime_claims_nothing()
+    public void Marten_runtime_judges_its_own_probe_table_and_no_runtime_claims_nothing()
     {
         // The probe table is empty at 1.1.0, so the made-up feature (ScriptedStudioRuntime.Feature, Marten 9.99) is judged
         // through a runtime that adds it to the table.
@@ -251,7 +251,7 @@ public class HealthSeamTests
     }
 
     [Fact]
-    public void AddMartenStudio_registers_MartenStudios_answers_to_the_health_seams()
+    public void AddMarten_registers_Marten_answers_to_the_health_seams()
     {
         ServiceCollection services = new();
         services.AddSingleton(Floor);
@@ -266,7 +266,7 @@ public class HealthSeamTests
             "a test's made-up runtime, registered first, is the one the studio judges features against");
     }
 
-    /// <summary>T22 is MartenStudio's own; the shared statement read keeps the guarded writes it will judge, and no others.</summary>
+    /// <summary>T22 is the Marten module's own; the shared statement read keeps the guarded writes it will judge, and no others.</summary>
     [Fact]
     public void The_statement_reads_guarded_floor_is_the_concurrency_checks_own()
     {

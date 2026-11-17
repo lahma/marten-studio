@@ -3,7 +3,7 @@ using DataStudio.Sample.Postgres;
 namespace DataStudio.Postgres.Integration.Tests;
 
 /// <summary>
-/// How the Postgres Studio sample reads <c>--allow-data-generation</c> (SEC-fix F2): as the Marten sample reads its switches,
+/// How the Postgres sample reads <c>--allow-data-generation</c> (SEC-fix F2): as the Marten sample reads its switches,
 /// and handed to the host builder in a form that cannot swallow the next token. No database: the parser alone.
 /// </summary>
 public class SampleArgumentsTests

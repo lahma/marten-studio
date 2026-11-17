@@ -1,4 +1,4 @@
--- The Marten Studio sample's "legacy" schema: a small, hand-made relational database that lives in the
+-- The Marten sample's "legacy" schema: a small, hand-made relational database that lives in the
 -- same Postgres as the Marten store and exercises every catalog edge case the studio's database browser
 -- has to get right. Each object says in a comment which case it is there for.
 --

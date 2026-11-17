@@ -63,12 +63,12 @@ public abstract class PerTopicScanLiveTests(KafkaFixture fixture)
 
         TopicNames().Should().BeEquivalentTo(topicsBefore, "a scan creates no topic");
 
-        string group = $"kstudio-{result.ScanId:N}";
+        string group = $"data-studio-{result.ScanId:N}";
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
         listed.Should().NotContain(group, "the scan's one group id is never joined");
-        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "a per-topic scan leaves no group of any scan");
+        listed.Should().NotContain(static x => x.StartsWith("data-studio-", StringComparison.Ordinal) && x.Length == "data-studio-".Length + 32, "a per-topic scan leaves no group of any scan");
 
         LiveGroupOffsets.Committed(fixture, group, [new TopicPartition(orders, 0), new TopicPartition(orders, 1), new TopicPartition(audit, 0)])
             .Should().BeEmpty("the scan committed nothing");
@@ -98,7 +98,7 @@ public abstract class PerTopicScanLiveTests(KafkaFixture fixture)
     {
         using IAdminClient client = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();
 
-        // Internal topics are the broker's own (kstudio.md D37, "The group coordinator on a pristine cluster").
+        // Internal topics are the broker's own (kafka.md D37, "The group coordinator on a pristine cluster").
         return [.. client.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(static x => x.Topic)
             .Where(static x => !x.StartsWith("__", StringComparison.Ordinal)).Order(StringComparer.Ordinal)];
     }

@@ -159,7 +159,7 @@ internal static class ConfluentClientSettings
     ];
 
     /// <summary>
-    /// <c>{host client.id, or "rdkafka"}.kstudio</c>, each character outside <c>[A-Za-z0-9._-]</c> replaced by <c>-</c>, at most 255
+    /// <c>{host client.id, or "rdkafka"}.data-studio</c>, each character outside <c>[A-Za-z0-9._-]</c> replaced by <c>-</c>, at most 255
     /// characters, so that broker metrics and client-id quotas tell the studio apart.
     /// </summary>
     /// <param name="settings">The clone, which may hold the host's <c>client.id</c>.</param>
@@ -168,7 +168,7 @@ internal static class ConfluentClientSettings
         string host = settings.TryGetValue("client.id", out string? value) && !string.IsNullOrWhiteSpace(value) ? value : "rdkafka";
         StringBuilder id = new(host.Length + 8);
 
-        foreach (char c in host + ".kstudio")
+        foreach (char c in host + ".data-studio")
         {
             id.Append(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' ? c : '-');
         }

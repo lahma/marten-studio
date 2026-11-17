@@ -10,7 +10,7 @@ namespace DataStudio.Kafka.Integration.Tests.Catalog;
 
 /// <summary>
 /// The catalog as principals with different ACLs (decisions 5.2 and 5.4, SPIKE S1): <c>reader</c> has READ on <c>ks.</c> and on the
-/// <c>kstudio-</c> groups, <c>configreader</c> adds DESCRIBE_CONFIGS, <c>nogroup</c> has no group ACL. A refusal is a value with its sentence that
+/// <c>data-studio-</c> groups, <c>configreader</c> adds DESCRIBE_CONFIGS, <c>nogroup</c> has no group ACL. A refusal is a value with its sentence that
 /// never blanks the page, and it is logged once at Debug.
 /// </summary>
 public abstract class AclCatalogLiveTests(KafkaFixture fixture)
@@ -108,7 +108,7 @@ public abstract class AclCatalogLiveTests(KafkaFixture fixture)
     {
         (LiveContractCluster admin, string topic, _) = await SeedAsync("nogroup");
         await using LiveContractCluster seeded = admin;
-        string group = $"kstudio-nogroup-{fixture.RunId}";
+        string group = $"data-studio-nogroup-{fixture.RunId}";
         await using EngineHarness engine = As("nogroup", options => options.AddCluster("groups", fixture.Client("nogroup"), c => c.ConsumerGroup(group)));
 
         KafkaTopicOverview overview = (await engine.Catalog.GetTopicOverviewAsync("groups", new KafkaTopicName(topic), Token)).Value;
@@ -125,7 +125,7 @@ public abstract class AclCatalogLiveTests(KafkaFixture fixture)
     {
         (LiveContractCluster admin, string topic, _) = await SeedAsync("grouplag");
         await using LiveContractCluster seeded = admin;
-        string group = $"kstudio-lag-{fixture.RunId}";
+        string group = $"data-studio-lag-{fixture.RunId}";
         await admin.CommitGroupOffsetAsync(group, topic, 0, 2);
         await using EngineHarness engine = As("reader", options => options.AddCluster("groups", fixture.Client("reader"), c => c.ConsumerGroup(group)));
 

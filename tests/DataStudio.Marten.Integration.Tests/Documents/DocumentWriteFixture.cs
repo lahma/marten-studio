@@ -118,7 +118,7 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
 
         // The registry scans the collection the store was registered in and resolves from the provider
         // that built it, so it hands back the one store this fixture seeded rather than a second one. The
-        // shared catalog and resolver read it through MartenStudio's source provider, as the container wires them.
+        // shared catalog and resolver read it through the Marten module's source provider, as the container wires them.
         var sources = new MartenSourceProvider(
             wrapped, stores, tenants, RequireProvider(), NullLogger<MartenSourceProvider>.Instance);
         var resolver = new StudioScopeResolver(

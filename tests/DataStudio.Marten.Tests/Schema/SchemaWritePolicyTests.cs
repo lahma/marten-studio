@@ -32,7 +32,7 @@ namespace DataStudio.Marten.Tests.Schema;
 /// </remarks>
 public class SchemaWritePolicyTests
 {
-    private const string WritePolicy = "MartenStudioWriter";
+    private const string WritePolicy = "MartenWriter";
 
     [Fact]
     public void Apply_is_disabled_and_says_why_for_a_visitor_the_write_policy_refuses()

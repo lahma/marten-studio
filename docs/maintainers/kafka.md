@@ -178,10 +178,10 @@ never by value.
 |---|---|---|---|---|
 | `allow.auto.create.topics` | `false` | `false` | `false` | a metadata request must never create a topic |
 | `enable.auto.commit`, `enable.auto.offset.store` | `false` | `false` | - | nothing is committed or stored |
-| `group.id` | `{GroupIdPrefix}{scan id}`, `kstudio-` by default | `{GroupIdPrefix}{reader id}` | - | Confluent's consumer requires one; it is never subscribed and never committed |
+| `group.id` | `{GroupIdPrefix}{scan id}`, `data-studio-` by default | `{GroupIdPrefix}{reader id}` | - | Confluent's consumer requires one; it is never subscribed and never committed |
 | `group.instance.id` | removed | removed | - | no static membership |
 | `group.protocol` | `classic` | `classic` | - | one tested path |
-| `client.id` | `{host client.id or rdkafka}.kstudio` | the same | the same | broker metrics and client-id quotas tell the studio apart |
+| `client.id` | `{host client.id or rdkafka}.data-studio` | the same | the same | broker metrics and client-id quotas tell the studio apart |
 | `isolation.level` | `read_committed`, or `read_uncommitted` when a scan includes uncommitted records | always `read_committed` | - | explicit, never inherited |
 | `enable.partition.eof` | `true` | `true` | - | the engine must know a partition ran out |
 | `auto.offset.reset` | `error` | `error` | - | an offset deleted during a scan is reported, never skipped |
@@ -202,7 +202,7 @@ consumer groups, or call any produce, transaction, commit, create, alter or dele
 so neither the Confluent driver nor the fake can be asked for one. `ConfluentOverridesTests` asserts the table key by
 key against a host configuration that sets the opposite of every value; `ReadNeverWritesMetadataLiveTests` asks for a
 topic that does not exist on a broker that auto-creates topics, as a principal allowed to create them, and finds it still
-absent; `ReadNeverWritesScanLiveTests` finds no committed offset and no `kstudio-` group after scans.
+absent; `ReadNeverWritesScanLiveTests` finds no committed offset and no `data-studio-` group after scans.
 
 Of the admin client's requests, only the single-topic metadata request creates a topic (measured on 3.9.2 and 4.4.0,
 even for a default client); the engine never sends it (`ForbiddenConfluentCallsTests`), and
@@ -227,12 +227,12 @@ within about half a second of the assign, possibly after the first records; the 
 reader returns it as a failure naming the scan's group, and the scan counts it, logs 9671 once at Debug and goes on: it
 is never a stop and never a warning. Without a group ACL `Offset.Stored` stalls with no record, no end and no error, so
 the reader refuses every negative offset and the engine always assigns a concrete one. A `PREFIXED` `READ` ACL on group
-`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal on a scan, and reading never needs it. It matters more
+`data-studio-` (or on the host's own `GroupIdPrefix`) silences the one refusal on a scan, and reading never needs it. It matters more
 for the **offsets reader** (D36), which lives as long as its pool slot, up to `AdminIdleTimeout` after the last lag read: with no
 `DESCRIBE` on its own group, librdkafka keeps looking that group's coordinator up for as long as the reader exists. Measured on
 `apache/kafka` 4.4.0 and Confluent.Kafka 2.16.0 with the `nogroup` principal (`debug=cgrp,protocol` on a reader built from the
 engine's own table, ten lag reads over 30 s): 42 `FindCoordinator` requests, one a second for the reader's own group on top of the
-reads' own (the principal has no ACL on that group, so each is a refused lookup). With a `PREFIXED` ACL on `kstudio-` (`DESCRIBE` is enough, `READ` implies it) the same
+reads' own (the principal has no ACL on that group, so each is a refused lookup). With a `PREFIXED` ACL on `data-studio-` (`DESCRIBE` is enough, `READ` implies it) the same
 run sent 5, all in the first 100 ms, and none after. Grant it where lookups in the broker's authorizer log matter. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
 `DescribeConsumerGroups` and `ListConsumerGroupOffsets` fail with `GroupAuthorizationFailed`, which the overview shows
 as "Not available: needs `DESCRIBE` on group `orders-service`" while the topic's own fields still load.
@@ -822,7 +822,7 @@ an export from Related records, whose rows come from several topics with per-top
 **The writer** is `KafkaExportWriter` in `DataStudio.Kafka.Core/Export/` (pure; ENG-PROFILE): JSON Lines without a BOM, CSV with a UTF-8 BOM and `\r\n` (a
 spreadsheet opens a BOM-less UTF-8 file as the local code page and mangles every non-ASCII character), a cell that starts with `=`, `+`, `-`, `@`, a tab or
 a carriage return prefixed with `'` (OWASP's CSV injection rule; JSON Lines is never altered), whole rows only up to `MaxExportBytes`, and the file name
-`kstudio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}` holding no predicate, key or value.
+`data-studio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}` holding no predicate, key or value.
 
 **The service** is `KafkaExportService` (scoped; `KafkaExportGate` is its singleton). The order is hard rule 5's, and every exit from the profile on is audited
 once: the capability (`Require(ExportRecords)` requires `SearchRecords` first, so the refusal names the first missing option); the cluster's profile, asked of

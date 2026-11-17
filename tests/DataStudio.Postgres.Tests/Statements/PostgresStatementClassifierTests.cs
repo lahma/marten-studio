@@ -6,7 +6,7 @@ using static DataStudio.Postgres.Tests.Statements.StatementsTestFacts;
 namespace DataStudio.Postgres.Tests.Statements;
 
 /// <summary>
-/// Postgres Studio's statement groups (W5-Q1): the verb on <c>SqlLexer</c>'s tokens - a comment or a literal is never a verb,
+/// The Postgres module's statement groups (W5-Q1): the verb on <c>SqlLexer</c>'s tokens - a comment or a literal is never a verb,
 /// and a <c>with</c> is grouped by the statement it is for - and the first table of the judged set the text names.
 /// </summary>
 public class PostgresStatementClassifierTests

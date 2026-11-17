@@ -3,7 +3,7 @@ namespace DataStudio.Kafka.Core.Clusters;
 /// <summary>
 /// The ceilings of a cluster's profile (AGENTS.md D47, D-M5 decisions 4.3 and 4.4): data and one pure function. Every limit is
 /// <c>min(host, ceiling)</c>, so a profile only lowers and never raises, and a cluster with no profile (and a <see cref="KafkaProfile.Development" />
-/// one) gets the host's limits exactly. The table is copied into <c>docs/kstudio.md</c>.
+/// one) gets the host's limits exactly. The table is copied into <c>docs/kafka.md</c>.
 /// </summary>
 internal static class KafkaProfileCeilings
 {

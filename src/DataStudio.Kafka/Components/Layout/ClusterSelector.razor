@@ -164,7 +164,7 @@
 
     /// <summary>
     /// Whether <paramref name="uri" /> is a page of the Kafka module, by the page the route table matches, never by the address's text: this
-    /// selector is drawn on a module's page and goes away with it, and an address of the host studio must never be given a ?cluster=.
+    /// selector is drawn on a module's page and goes away with it, and an address of another module must never be given a ?cluster=.
     /// </summary>
     private bool IsKafkaAddress(string uri) =>
         StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is { } relative

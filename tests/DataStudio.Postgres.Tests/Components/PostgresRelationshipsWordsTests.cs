@@ -12,8 +12,8 @@ using GraphModel = DataStudio.Postgres.Services.Relationships.RelationshipGraph;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// UI-fix: Postgres Studio's Relationships screen and the object detail's Relationships tab speak of tables alone. A graph
-/// Postgres Studio reads has no document type - it has no node source - so the Documents · Tables · Both switch is not
+/// UI-fix: The Postgres module's Relationships screen and the object detail's Relationships tab speak of tables alone. A graph
+/// The Postgres module reads has no document type - it has no node source - so the Documents · Tables · Both switch is not
 /// drawn (Documents would draw nothing, and Tables is Both), and no caption, label, note or empty state names a document
 /// type, a store or Marten.
 /// </summary>
@@ -159,10 +159,10 @@ public class PostgresRelationshipsWordsTests
     /// <summary>The text as a browser lays it out: every run of whitespace one space.</summary>
     private static string Collapsed(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
 
-    /// <summary>The words a page of Postgres Studio's must not say of a graph it read: it has no document type and no store.</summary>
+    /// <summary>The words a page of the Postgres module's must not say of a graph it read: it has no document type and no store.</summary>
     private static void ShouldNameNoDocumentType(string markup)
     {
-        markup.Should().NotContainEquivalentOf("document", "a graph Postgres Studio reads has no document type")
+        markup.Should().NotContainEquivalentOf("document", "a graph the Postgres module reads has no document type")
             .And.NotContainEquivalentOf("Marten")
             .And.NotContain("this store")
             .And.NotContain("StoreOptions");
@@ -170,7 +170,7 @@ public class PostgresRelationshipsWordsTests
 
     /// <summary>
     /// <see cref="FakeRelationshipDataService.PlainTables" /> and one key into a table named like a Marten store's document
-    /// table, which Postgres Studio does not draw. Its reason is the graph builder's own sentence - a residual of the service
+    /// table, which the Postgres module does not draw. Its reason is the graph builder's own sentence - a residual of the service
     /// layer, outside these components - so the tests above read the notes the components write, and not the reason cell.
     /// </summary>
     private static GraphModel WithUnmatched() => FakeRelationshipDataService.PlainTables() with

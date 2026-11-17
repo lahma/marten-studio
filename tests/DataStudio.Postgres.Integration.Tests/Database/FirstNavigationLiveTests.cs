@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services.Relationships;
 namespace DataStudio.Postgres.Integration.Tests.Database;
 
 /// <summary>
-/// Hard rule 14's analogue for Postgres Studio: a first navigation over every core page - with every capability on and
+/// Hard rule 14's analogue for the Postgres module: a first navigation over every core page - with every capability on and
 /// every schema browsable - creates no object and writes no row, in a data source's database and in each database a host
 /// source lists.
 /// </summary>

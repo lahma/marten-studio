@@ -142,8 +142,8 @@ internal sealed class ScriptedDeeperCheck : ScriptedCheck;
 internal sealed class ScriptedLightUpCheck : ScriptedCheck;
 
 /// <summary>
-/// MartenStudio's runtime plus one made-up feature, found by name - so a check can require a feature while the real probe
-/// table is empty. Everything else is MartenStudio's own runtime's answer.
+/// The Marten module's runtime plus one made-up feature, found by name - so a check can require a feature while the real probe
+/// table is empty. Everything else is the Marten module's own runtime's answer.
 /// </summary>
 internal sealed class ScriptedStudioRuntime(DataStudio.Marten.Services.Configuration.MartenRuntime runtime) : IStudioRuntime
 {
@@ -287,11 +287,11 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// run every check against every kind.
     /// </param>
     /// <param name="before">
-    /// Registrations a test makes before <c>AddMartenStudio()</c>, whose <c>TryAdd</c> then keeps them - a seam's
+    /// Registrations a test makes before <c>AddMarten()</c>, whose <c>TryAdd</c> then keeps them - a seam's
     /// stand-in, say.
     /// </param>
     /// <param name="studioRuntime">
-    /// A runtime that answers for the checks' features instead of MartenStudio's own (see <see cref="ScriptedStudioRuntime" />),
+    /// A runtime that answers for the checks' features instead of the Marten module's own (see <see cref="ScriptedStudioRuntime" />),
     /// or <see langword="null" />.
     /// </param>
     public static HealthHarness Create(

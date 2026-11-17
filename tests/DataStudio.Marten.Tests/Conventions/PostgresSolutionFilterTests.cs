@@ -11,10 +11,10 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// <remarks>
 /// <para>
 /// The pass (<c>build/Build.Npgsql.cs</c>) hands <c>-p:DataStudioNpgsqlVersion=</c> to the filter alone, so that
-/// MartenStudio never meets that Npgsql. Both directions of the set matter. A PostgresStudio-only project missing from
+/// The Marten module never meets that Npgsql. Both directions of the set matter. A Postgres-only project missing from
 /// the filter - <c>tests/DataStudio.Postgres.Tests</c> the day it lands - is never tested at the latest Npgsql, and nothing
 /// would say so. A project in the filter that does not set the property ignores the version it was handed, and so does
-/// one it references: a <c>ProjectReference</c> to MartenStudio from inside the filter would restore MartenStudio at
+/// one it references: a <c>ProjectReference</c> to the Marten module from inside the filter would restore the Marten module at
 /// Npgsql 10 in exactly the way the second pass exists to avoid.
 /// </para>
 /// </remarks>
@@ -98,7 +98,7 @@ public class PostgresSolutionFilterTests
         }
 
         problems.Should().BeEmpty(
-            "the latest-Npgsql pass restores what the filter builds at that Npgsql, and MartenStudio - or Marten, whose Weasel " +
+            "the latest-Npgsql pass restores what the filter builds at that Npgsql, and the Marten module - or Marten, whose Weasel " +
             "chooses its own Npgsql - must never be part of it");
     }
 

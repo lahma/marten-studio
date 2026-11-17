@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DataStudio.Kafka.Tests.Services;
 
-/// <summary>Hard rule 5 for KStudio: a refusal is recorded on failure as well as on success, to the ring and to the log, and a value from the address is escaped.</summary>
+/// <summary>Hard rule 5 for the Kafka module: a refusal is recorded on failure as well as on success, to the ring and to the log, and a value from the address is escaped.</summary>
 public class KafkaActionLogTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -21,7 +21,7 @@ using Npgsql;
 namespace DataStudio.Kafka.Integration.Tests.Sample;
 
 /// <summary>
-/// The KStudio sample, started once as a plain <c>dotnet run</c> would (D-UI decision 18, SAMPLE's acceptance criteria 1 and 3): it starts both
+/// The Kafka sample, started once as a plain <c>dotnet run</c> would (D-UI decision 18, SAMPLE's acceptance criteria 1 and 3): it starts both
 /// throwaway containers, prints the banner, seeds the cluster deterministically and serves <c>/marten/kafka</c> - and the engine, configured by the
 /// sample's own registration and asked through its own policies, lets support find the needle and see only <c>orders.*</c>.
 /// </summary>
@@ -68,7 +68,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
                 ["orders.v1.dlq"] = 1,
                 ["secrets.v1"] = 1,
                 ["heartbeats.v1"] = 1,
-                ["kstudio-sample.seed-v2"] = 1,
+                [KafkaSeedPlan.MarkerTopic] = 1,
             });
 
         SampleKafkaJudge.Judge(metadata.Topics.Select(static x => x.Topic)).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
@@ -167,7 +167,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
         hidden.Should().BeOfType<KafkaSearchPlanResult.Refused>();
     }
 
-    /// <summary>KStudio's real services over the host's broker, configured by the sample's own registration and asked through the sample's own policies.</summary>
+    /// <summary>The Kafka module's real services over the host's broker, configured by the sample's own registration and asked through the sample's own policies.</summary>
     private sealed class SampleEngine : IAsyncDisposable
     {
         private readonly ServiceProvider provider;

@@ -5,10 +5,10 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Integration.Tests.Health;
 
 /// <summary>
-/// C11 through MartenStudio's own report, over a store's database of each test's own (W5-CAP, issue #8 G5): a million and
+/// C11 through the Marten module's own report, over a store's database of each test's own (W5-CAP, issue #8 G5): a million and
 /// more blocks read from outside shared buffers fire it once the statistics window has counted a day, and a warm database
-/// does not. The Postgres suite proves the same on the version matrix; this is the proof MartenStudio's convention asks of
-/// every code, through the sweep, the cache and the per-visitor report a MartenStudio host runs.
+/// does not. The Postgres suite proves the same on the version matrix; this is the proof the Marten module's convention asks of
+/// every code, through the sweep, the cache and the per-visitor report a Marten module host runs.
 /// </summary>
 /// <remarks>
 /// "A day" is the studio's clock moved to a day and a minute past the window's start, which is read from the server first: a

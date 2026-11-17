@@ -37,12 +37,12 @@ public class HealthExportTests
     // ---- Acceptance 1: nothing unless asked for ------------------------------------------------------
 
     [Fact]
-    public void AddMartenStudio_alone_registers_no_health_check_and_no_registration()
+    public void AddMarten_alone_registers_no_health_check_and_no_registration()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();
 
-        services.Should().NotContain(static x => x.ServiceType == typeof(HealthCheckService), "AddMartenStudio() does not call AddHealthChecks()");
+        services.Should().NotContain(static x => x.ServiceType == typeof(HealthCheckService), "AddMarten() does not call AddHealthChecks()");
         services.Should().NotContain(static x => x.ServiceType == typeof(HealthExportRunner));
         services.Should().NotContain(static x => x.ServiceType == typeof(IConfigureOptions<HealthCheckServiceOptions>));
         services.Should().NotContain(

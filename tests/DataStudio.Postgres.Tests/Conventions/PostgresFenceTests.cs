@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Tests.Conventions;
 /// <para>
 /// <b>Why it is needed when the compiler already refuses a lean.</b> The compiler refuses a <em>use</em> of Marten in a
 /// project that cannot see it. It says nothing when the project is given sight of it: a <c>PackageReference</c> to
-/// Marten, a <c>ProjectReference</c> to MartenStudio, or a package of our own that happens to depend on Weasel would make
+/// Marten, a <c>ProjectReference</c> to the Marten module, or a package of our own that happens to depend on Weasel would make
 /// every lean compile again, and the shared studio would be a Marten studio with a different name - one that drags
 /// Marten, JasperFx and Weasel into every host that installs it for a plain Postgres database. So the project files, the
 /// restores' own records of what they resolved, the built assemblies' references and this project's output folder are
@@ -30,7 +30,7 @@ namespace DataStudio.Postgres.Tests.Conventions;
 /// </para>
 /// <para>
 /// The text half - Razor markup, attribute values and crefs - is DataStudio.Marten.Tests' <c>CoreFenceTests</c>, and the fact
-/// that MartenStudio references this assembly is its <c>SharedStudioReferenceTests</c>.
+/// that Marten module references this assembly is its <c>SharedStudioReferenceTests</c>.
 /// </para>
 /// </remarks>
 public class PostgresFenceTests
@@ -45,7 +45,7 @@ public class PostgresFenceTests
     private const string TestProject = "DataStudio.Postgres.Tests";
 
     /// <summary>
-    /// The prefixes of the Marten family: Marten itself and every package it brings, MartenStudio (<c>DataStudio.Marten</c>, which is also the prefix of its
+    /// The prefixes of the Marten family: Marten itself and every package it brings, the Marten module (<c>DataStudio.Marten</c>, which is also the prefix of its
     /// tests) and the Marten samples (<c>DataStudio.Sample.Marten</c>, which is also the prefix of the demo domain). Never a bare <c>DataStudio</c>: the shell
     /// and the module below are named exactly, and a prefix they satisfy would fence them out.
     /// </summary>
@@ -89,7 +89,7 @@ public class PostgresFenceTests
 
         references.Where(IsMartenFamily).Should().BeEmpty(
             "DataStudio.Postgres.dll must run in a host with no Marten at all, so it may reference no Marten, JasperFx or Weasel "
-            + "assembly, MartenStudio's included");
+            + "assembly, the Marten module's included");
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public class PostgresFenceTests
 
     [Theory]
     [MemberData(nameof(ProjectFiles))]
-    public void The_project_references_no_Marten_family_package_and_not_MartenStudio(string root, string project, string expected)
+    public void The_project_references_no_Marten_family_package_and_not_Marten(string root, string project, string expected)
     {
         XDocument document = XDocument.Load(RepositoryRoot.Combine(root, project, project + ".csproj"));
 
@@ -271,7 +271,7 @@ public class PostgresFenceTests
         packages.Concat(projects).Should().Contain(expected.Split(','), "the project file is read");
 
         Offending(document).Should().BeEmpty(
-            "the project names no Marten-family package and no project of MartenStudio's: "
+            "the project names no Marten-family package and no project of the Marten module's: "
             + string.Join(", ", packages.Concat(projects)));
     }
 
@@ -291,7 +291,7 @@ public class PostgresFenceTests
 
     /// <summary>
     /// What the restore resolved for the project - every library of its transitive closure - holds no Marten-family
-    /// library and no MartenStudio project. The project file can be clean while something it references is not; the
+    /// library and no Marten module project. The project file can be clean while something it references is not; the
     /// assets file is NuGet's own record of the whole graph.
     /// </summary>
     [Theory]
@@ -311,7 +311,7 @@ public class PostgresFenceTests
         libraries.Select(static x => x.Split('/')[0]).Should().Contain(expected.Split(','), "the project's restore graph is read");
 
         libraries.Where(static x => IsMartenFamily(x.Split('/')[0])).Should().BeEmpty(
-            "the restore graph must not reach Marten, JasperFx or Weasel, or MartenStudio: " + string.Join(", ", libraries));
+            "the restore graph must not reach Marten, JasperFx or Weasel, or the Marten module: " + string.Join(", ", libraries));
     }
 
     /// <summary>The assets half, on a synthetic assets file shaped as NuGet writes one.</summary>

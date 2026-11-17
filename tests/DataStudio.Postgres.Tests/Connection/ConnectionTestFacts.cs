@@ -37,7 +37,7 @@ internal static class ConnectionTestFacts
         TimeZone: "UTC",
         ClientEncoding: "UTF8",
         SearchPath: "\"$user\", public",
-        ApplicationName: "PostgresStudio",
+        ApplicationName: "Data Studio",
         IdleSessionTimeoutMs: idleSessionTimeoutMs,
         StatementTimeoutMs: statementTimeoutMs,
         IdleInTransactionTimeoutMs: idleInTransactionMs,

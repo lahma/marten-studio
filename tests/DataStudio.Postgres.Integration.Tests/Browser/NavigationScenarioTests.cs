@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// 1.2-NAV: navigation inside Postgres Studio in a real browser. The studio intercepts its own navigation - a link, Back and
+/// 1.2-NAV: navigation inside the Postgres module in a real browser. The studio intercepts its own navigation - a link, Back and
 /// Forward and every address a page writes are rendered by the circuit - so a move fetches no page and cancels nothing.
 /// </summary>
 /// <remarks>

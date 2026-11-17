@@ -284,7 +284,7 @@ public partial class HealthTableQueriesTests
     }
 
     /// <summary>
-    /// G1M: MartenStudio's list of the tables beside the store is Postgres Studio's statement and two predicates more -
+    /// G1M: The Marten module's list of the tables beside the store is the Postgres module's statement and two predicates more -
     /// the same admission the database browser makes, the same estimates and cap - so the two cannot drift apart.
     /// </summary>
     [Fact]

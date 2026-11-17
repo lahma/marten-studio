@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// 1.2-SCOPE-3 in Postgres Studio's own shell: the header's Find box takes a table or view name under the database browser's gate, so a
+/// 1.2-SCOPE-3 in the Postgres module's own shell: the header's Find box takes a table or view name under the database browser's gate, so a
 /// host with no Marten has it too. <c>/</c> goes to it except where a character is being typed (the SQL console's editor), a name that
 /// matches opens the object, and the box is a magnifier and a popover on a phone.
 /// </summary>

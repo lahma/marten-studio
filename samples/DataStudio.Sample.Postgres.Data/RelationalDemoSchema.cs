@@ -80,7 +80,7 @@ public readonly record struct RelationalDemoResult(
 /// <c>studio_sample</c> schema; the Marten sample's <c>SampleDataSeeder</c> calls this last for exactly that
 /// reason. Against a database with no Marten store the Marten-anchored half is skipped rather than failed,
 /// and <see cref="RelationalDemoResult" /> says which parts are present: the foreign key needs Marten's
-/// table, while <c>app_settings</c> needs only the schema, which the Postgres Studio sample creates itself.
+/// table, while <c>app_settings</c> needs only the schema, which the Postgres sample creates itself.
 /// </para>
 /// <para>
 /// <b>Never into a schema it did not create.</b> <c>quartz</c> and <c>legacy</c> are ordinary names, and a
@@ -130,7 +130,7 @@ public static class RelationalDemoSchema
     /// The sample application's own schema, which <see cref="AppSettingsTable" /> is created in whenever it exists,
     /// and whose <c>mt_doc_customer</c> <see cref="CustomerCreditTable" />'s foreign key points at when Marten made
     /// one. In the Marten sample it is the store's document schema - <c>SampleStore.DocumentSchema</c> is this
-    /// constant - and in the Postgres Studio sample a plain schema of the admin database. The scripts spell it out,
+    /// constant - and in the Postgres sample a plain schema of the admin database. The scripts spell it out,
     /// so it is a constant here rather than a setting.
     /// </summary>
     public const string SampleSchemaName = "studio_sample";
@@ -377,7 +377,7 @@ public static class RelationalDemoSchema
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation(
-                "The Marten Studio sample left the existing '{Schema}' schema alone: it was not created by the sample - its "
+                "The Marten sample left the existing '{Schema}' schema alone: it was not created by the sample - its "
                 + "comment does not begin with '{Marker}' - so none of the demo's objects or rows were written to it. "
                 + "Comment found: {Comment}",
                 schema,

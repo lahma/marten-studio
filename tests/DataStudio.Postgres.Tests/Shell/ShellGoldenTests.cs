@@ -9,7 +9,7 @@ using Npgsql;
 namespace DataStudio.Postgres.Tests.Shell;
 
 /// <summary>
-/// The golden files of the chrome Postgres Studio prerenders around a page: the anonymous banner, the rail (every section and entry) and the
+/// The golden files of the chrome the Postgres module prerenders around a page: the anonymous banner, the rail (every section and entry) and the
 /// header (scope selector, capability chip, preferences). They hold the shell's markup still while it is restructured: no rendered word,
 /// attribute or class may move, so a later packet never re-accepts these baselines.
 /// </summary>

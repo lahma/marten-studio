@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Marten.Tests;
 
 /// <summary>
-/// MartenStudio's options validation, every sentence and its order, as literals: since PS-3a-fix the shared bounds come
-/// from one chain both studios use (<c>StudioOptionsValidation</c>), and nothing a MartenStudio host reads may have moved.
+/// The Marten module's options validation, every sentence and its order, as literals: since PS-3a-fix the shared bounds come
+/// from one chain both studios use (<c>StudioOptionsValidation</c>), and nothing a Marten module host reads may have moved.
 /// </summary>
 public class MartenValidationMessagesTests
 {

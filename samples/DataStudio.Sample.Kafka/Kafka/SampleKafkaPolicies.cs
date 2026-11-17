@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 namespace DataStudio.Sample.Kafka.Kafka;
 
 /// <summary>
-/// KStudio's two policies for the demo (D35), asked about a <see cref="KafkaTopicResource" /> and never about the host studio's own
+/// The Kafka module's two policies for the demo (D35), asked about a <see cref="KafkaTopicResource" /> and never about the shell's own
 /// resources: <see cref="Topics" /> for which cluster and topic a visitor may reach, and <see cref="Search" /> for the use of the
 /// <c>SearchRecords</c> capability, and of <c>ReadPayloads</c>.
 /// </summary>
@@ -23,7 +23,7 @@ namespace DataStudio.Sample.Kafka.Kafka;
 /// </para>
 /// <para>
 /// <b>Search admits admin and support</b> (orchestrator decision OPEN-3: M2's exit criterion is that a support user finds a record from a
-/// ticket). Support's reach stays bounded to <c>orders.*</c> by <see cref="Topics" />, which KStudio always asks first; the search handler
+/// ticket). Support's reach stays bounded to <c>orders.*</c> by <see cref="Topics" />, which the Kafka module always asks first; the search handler
 /// applies the same bound itself, so the sample would stay correct if a host set only the capability policy.
 /// </para>
 /// </remarks>

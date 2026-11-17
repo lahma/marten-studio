@@ -143,7 +143,7 @@ public abstract class RecordReadLiveTests(KafkaFixture fixture)
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         (groups.Valid ?? []).Select(static x => x.GroupId).Should().NotContain(
-            static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32,
+            static x => x.StartsWith("data-studio-", StringComparison.Ordinal) && x.Length == "data-studio-".Length + 32,
             "no group named for a scan survives a record read");
 
         engine.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0, "the read gave its slot back");

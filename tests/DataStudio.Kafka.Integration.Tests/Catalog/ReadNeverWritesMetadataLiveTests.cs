@@ -67,7 +67,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
 
         string grouped = cluster.NewTopic("ctl-group");
         // Read by a consumer that carries the group's id and is never subscribed (the tests' own helper, not an admin handle: librdkafka #5040).
-        await SwallowAsync(() => Task.Run(() => LiveGroupOffsets.Committed(fixture, "kstudio-ctl-" + fixture.RunId, [new TopicPartition(grouped, 0)])));
+        await SwallowAsync(() => Task.Run(() => LiveGroupOffsets.Committed(fixture, "data-studio-ctl-" + fixture.RunId, [new TopicPartition(grouped, 0)])));
         TopicsExist(fixture, grouped).Should().BeFalse("an OffsetFetch does not create");
     }
 
@@ -102,7 +102,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         await wire.DescribeTopicsAsync([new KafkaTopicName(topic)], Token);
         await wire.DescribeTopicConfigAsync(new KafkaTopicName(topic), Token);
         await wire.ListOffsetsAsync([new WirePartition(topic, 0)], WireOffsetSpec.Latest, WireIsolation.ReadCommitted, Token);
-        await wire.ListGroupOffsetsAsync("kstudio-absent-" + fixture.RunId, [new WirePartition(topic, 0)], Token);
+        await wire.ListGroupOffsetsAsync("data-studio-absent-" + fixture.RunId, [new WirePartition(topic, 0)], Token);
         await wire.GetMetadataAsync(Token);
 
         TopicsExist(fixture, topic).Should().BeFalse();
@@ -117,8 +117,8 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         string topic = cluster.NewTopic("lag");
         await cluster.CreateTopicAsync(topic, 1);
         await cluster.ProduceAsync(topic, 0, [LiveRecords.At(0, "k", "v")]);
-        // Not "kstudio-lag-{RunId}": AclCatalogLiveTests commits offsets for that name in the same fixture, so the group would be listed whenever it ran first.
-        string asked = "kstudio-never-joined-" + Guid.NewGuid().ToString("N")[..8];
+        // Not "data-studio-lag-{RunId}": AclCatalogLiveTests commits offsets for that name in the same fixture, so the group would be listed whenever it ran first.
+        string asked = "data-studio-never-joined-" + Guid.NewGuid().ToString("N")[..8];
 
         WireResult<IReadOnlyList<WireGroupOffset>> read = await cluster.Wire.ListGroupOffsetsAsync(asked, [new WirePartition(topic, 0)], Token);
         read.IsOk.Should().BeTrue("a group that does not exist has no committed offsets, which is an answer");
@@ -132,13 +132,13 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
             readerGroup = lease.Client.GroupId;
         }
 
-        readerGroup.Should().StartWith("kstudio-").And.NotBe(asked);
+        readerGroup.Should().StartWith("data-studio-").And.NotBe(asked);
 
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
         listed.Should().NotContain([asked, readerGroup], "neither the asked group nor the reader's own was ever joined");
-        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for the reader exists");
+        listed.Should().NotContain(static x => x.StartsWith("data-studio-", StringComparison.Ordinal) && x.Length == "data-studio-".Length + 32, "no group named for the reader exists");
         LiveGroupOffsets.Committed(fixture, readerGroup, [new TopicPartition(topic, 0)]).Should().BeEmpty("the reader committed nothing");
         TopicAppears(fixture, topic).Should().BeTrue();
     }
@@ -189,7 +189,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
 
         ConsumerConfig config = new(fixture.Client("admin"))
         {
-            GroupId = "kstudio-ctl-" + fixture.RunId,
+            GroupId = "data-studio-ctl-" + fixture.RunId,
             AllowAutoCreateTopics = true,
             EnableAutoCommit = false,
             EnablePartitionEof = true,

@@ -15,7 +15,7 @@ namespace DataStudio.Marten.Tests.Health;
 /// check's status note and to every caveat of its findings - and to nothing else, and to nothing when the set is whole.
 /// </summary>
 /// <remarks>
-/// The set comes from a stand-in <see cref="IHealthTableSource" /> registered before <c>AddMartenStudio()</c>, whose
+/// The set comes from a stand-in <see cref="IHealthTableSource" /> registered before <c>AddMarten()</c>, whose
 /// <c>TryAdd</c> then keeps it. It lists no table, so T07 - a real check, gathering through <see cref="HealthTables" /> -
 /// opens no connection against the harness's refused one: what is under test is the sweep carrying the set's coverage,
 /// not the cap, which <c>PostgresSeamTests</c> covers.

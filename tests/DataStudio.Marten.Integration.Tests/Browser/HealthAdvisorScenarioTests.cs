@@ -22,7 +22,7 @@ namespace DataStudio.Marten.Integration.Tests.Browser;
 /// <remarks>
 /// <para>
 /// <b>The switches are pressed the way a person presses them</b>: on the sample's landing page, as <c>admin</c> (the
-/// only demo user the sample's <c>MartenStudioAdmin</c> policy passes), whose panel then reports the switch's state
+/// only demo user the sample's <c>StudioAdmin</c> policy passes), whose panel then reports the switch's state
 /// from its status endpoint. Every switch a scenario turns on it turns off again in a <c>finally</c>, on a page of its
 /// own and one step at a time (<see cref="HealthBrowser.CleanUpAsync" />), so a failing scenario keeps its screenshot
 /// and its exception and still does not leave the next one an unhealthy database for the switch's ten-minute timeout.

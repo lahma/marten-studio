@@ -14,7 +14,7 @@ namespace DataStudio.Postgres.Integration.Tests.Versions;
 
 /// <summary>
 /// The studio's core reads on PostgreSQL 15 to 19 (19 on its release candidate until its general-availability image): every one of the shared
-/// studio's health checks - the regular and the statement checks; it has no deeper ones, and MartenStudio's checks are not
+/// studio's health checks - the regular and the statement checks; it has no deeper ones, and the Marten module's checks are not
 /// in the matrix - ends read, not applicable or not checked, never failed, never on an unknown column, function, relation
 /// or syntax, as the application's role and as a role with no grant at all, and C01 judges the host's pool; every
 /// database-browser, Sessions and relationship read runs;

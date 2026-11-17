@@ -144,7 +144,7 @@ public class ConfigurationFilteringTests
 
             services.AddDataStudio().AddMarten(options => options.StoreAuthorizationPolicy = storePolicy);
 
-            // After AddMartenStudio, so these win over what the framework registrations contributed. The
+            // After AddMarten, so these win over what the framework registrations contributed. The
             // Postgres version is the Overview's to fetch, and nothing here is listening for it.
             services.AddSingleton<IAuthorizationService>(policies);
             services.AddScoped<AuthenticationStateProvider>(_ => users);

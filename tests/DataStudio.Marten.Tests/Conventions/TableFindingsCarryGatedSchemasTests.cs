@@ -49,7 +49,7 @@ public class TableFindingsCarryGatedSchemasTests
         string[] checks = TablesCheckFiles();
         checks.Length.Should().BeGreaterThanOrEqualTo(15, "scanning too few check files would pass for the wrong reason");
 
-        // Both studios keep Tables-area checks since the move - the shared ones over any database, MartenStudio's over a
+        // Both studios keep Tables-area checks since the move - the shared ones over any database, the Marten module's over a
         // store (T11's mt_hilo) - so a scan of either folder alone would judge part of the area.
         // The shared studio's UI holds only the Configuration-area posture checks since the 0.11 split: the Tables ones are the
         // engine's, DataStudio.Postgres.Diagnostics.

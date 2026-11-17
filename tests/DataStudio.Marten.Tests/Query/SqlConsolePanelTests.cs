@@ -20,7 +20,7 @@ namespace DataStudio.Marten.Tests.Query;
 /// pages whose bodies the studio's descriptor names.
 /// </summary>
 /// <remarks>
-/// <see cref="QueryPageTests" /> drives the console as MartenStudio's Query page hosts it, and every one of its SQL
+/// <see cref="QueryPageTests" /> drives the console as the Marten module's Query page hosts it, and every one of its SQL
 /// tests is unchanged; these are the shapes that page does not show - the panel alone, as a studio with no document
 /// types renders it, the state the page keeps across a tab switch, and the two routed shells.
 /// </remarks>
@@ -159,7 +159,7 @@ public class SqlConsolePanelTests
         panel.FindAll(".ms-query-running").Should().BeEmpty();
     }
 
-    /// <summary>The shared query route renders the descriptor's body - MartenStudio's three-mode page.</summary>
+    /// <summary>The shared query route renders the descriptor's body - the Marten module's three-mode page.</summary>
     [Fact]
     public void The_shared_query_page_renders_the_descriptors_query_body()
     {

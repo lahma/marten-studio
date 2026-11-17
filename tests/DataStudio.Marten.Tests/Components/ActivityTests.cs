@@ -260,7 +260,7 @@ public class ActivityTests
     {
         using var context = new StudioComponentContext();
         context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
-        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.WriteAuthorizationPolicy = "MartenWrite";
         context.Options.Capabilities.ViewDefinitions = viewDefinitions;
         context.Options.Capabilities.BrowseDatabase = browseDatabase;
 
@@ -313,7 +313,7 @@ public class ActivityTests
     {
         var context = new StudioComponentContext();
         context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
-        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.WriteAuthorizationPolicy = "MartenWrite";
         context.Options.Capabilities.BrowseDatabase = capabilities;
         context.Options.Capabilities.RunSql = capabilities;
         context.Options.Capabilities.DeleteDocuments = true;
@@ -399,7 +399,7 @@ public class ActivityTests
     {
         var context = new StudioComponentContext();
         context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
-        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.WriteAuthorizationPolicy = "MartenWrite";
         context.Options.Capabilities.BrowseDatabase = true;
         context.AuthenticationState.SignIn("ops");
 

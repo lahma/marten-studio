@@ -4,7 +4,7 @@ using System.Text;
 namespace DataStudio.Kafka.Core.Export;
 
 /// <summary>
-/// The name of an export file (D-M5 decision 2.6): <c>kstudio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}</c>, every character outside
+/// The name of an export file (D-M5 decision 2.6): <c>data-studio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}</c>, every character outside
 /// <c>[A-Za-z0-9._-]</c> becoming <c>_</c>, at most 120 characters with the topic part cut first. The name holds no predicate, key or value.
 /// </summary>
 internal static class KafkaExportFileName
@@ -47,7 +47,7 @@ internal static class KafkaExportFileName
 
         string clusterText = Clean(cluster, MaxClusterChars);
         string suffix = "-" + now.UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "Z." + Clean(extension, 8);
-        string prefix = "kstudio-" + clusterText + "-";
+        string prefix = "data-studio-" + clusterText + "-";
 
         // The topic part gives way first, so the time and the extension always survive.
         int room = Math.Max(1, MaxLength - prefix.Length - suffix.Length);

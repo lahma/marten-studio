@@ -5,7 +5,7 @@ namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
 /// D-ENGINE 10.4, now that <c>DataStudio.Kafka.dll</c> calls the engine: the wire record, the reader and the evaluator's context are internal to
-/// <c>DataStudio.Kafka.Core</c> and are never returned from an API KStudio calls, so no facet, chip, export or view can be built from an unredacted record. The
+/// <c>DataStudio.Kafka.Core</c> and are never returned from an API the Kafka module calls, so no facet, chip, export or view can be built from an unredacted record. The
 /// scan reads the assembly's type references (<c>System.Reflection.Metadata</c>) and fails on any type of <c>DataStudio.Kafka.Core.Wire</c> that is not one of the
 /// value types the catalog's own records carry, and on <c>DataStudio.Kafka.Core.Decoding.RecordEvaluationContext</c>.
 /// </summary>
@@ -31,7 +31,7 @@ public class WireTypesStayInTheEngineTests
     ];
 
     [Fact]
-    public void KStudio_refers_to_no_wire_record_reader_or_evaluation_context()
+    public void Kafka_refers_to_no_wire_record_reader_or_evaluation_context()
     {
         string[] offenders =
         [
@@ -48,7 +48,7 @@ public class WireTypesStayInTheEngineTests
     [Fact]
     public void The_scan_sees_what_it_looks_for()
     {
-        // Anti-vacuity: the test assembly builds wire records on purpose (the fake broker), and KStudio uses a catalog value type.
+        // Anti-vacuity: the test assembly builds wire records on purpose (the fake broker), and the Kafka module uses a catalog value type.
         TypeReferences(typeof(WireTypesStayInTheEngineTests).Assembly.Location).Should().Contain("DataStudio.Kafka.Core.Wire.WireRecord");
         TypeReferences(typeof(KafkaOptions).Assembly.Location).Should().Contain(static x => x.StartsWith("DataStudio.Kafka.Core.Wire.WireError", StringComparison.Ordinal));
     }

@@ -3,7 +3,7 @@ using DataStudio.Services.Settings;
 namespace DataStudio.Kafka.Tests.Support;
 
 /// <summary>
-/// A studio's route links for a test (what MartenStudio implements): it records every call and answers from a function, so that a test can say that the
+/// A studio's route links for a test (what the Marten module implements): it records every call and answers from a function, so that a test can say that the
 /// module drew the address verbatim and what scope it passed.
 /// </summary>
 internal sealed class FakeRouteLinks : IStudioRouteLinks

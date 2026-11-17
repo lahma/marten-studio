@@ -1,5 +1,5 @@
 /*
- * Marten Studio stylesheet. Hand-rolled, prefixed ms-, driven by the design tokens below;
+ * Data Studio stylesheet. Hand-rolled, prefixed ms-, driven by the design tokens below;
  * ported from the Quartz.NET dashboard (Apache-2.0) and extended. No third-party CSS is ever
  * added here (AGENTS.md hard rule 3).
  */
@@ -2363,7 +2363,7 @@ body {
    ========================================================================== */
 
 /*
- * Marten Studio - JSON toolkit styles (packet W1).
+ * Data Studio - JSON toolkit styles (packet W1).
  *
  * This file is folded into wwwroot/css/studio.css by the orchestrator; it is kept separate only
  * so that three packets can be written at once without three of them editing the same stylesheet. It
@@ -3337,7 +3337,7 @@ a.ms-json-url {
    ========================================================================== */
 
 /*
- * Marten Studio - the projections screen.
+ * Data Studio - the projections screen.
  *
  * Every rule is prefixed ms- and every colour comes from the tokens above (AGENTS.md hard rule 3). The
  * three added here are lag thresholds, which have no equivalent token because they are a scale rather
@@ -13611,7 +13611,7 @@ a.ms-schema-health-mark:focus-visible {
 /*
    A check the host accepted keeps its row on the Health page and the Server page's posture table, marked "Accepted" with the
    host's reason, in the muted colour the rest of a row's detail uses: the finding is shown and counted nowhere. The list on the
-   Configuration page (Marten Studio) and the Server page (Postgres Studio) is a plain table in a scroll region (D25).
+   Configuration page (the Marten module) and the Server page (the Postgres module) is a plain table in a scroll region (D25).
 */
 
 .ms-health-accepted {
@@ -17572,7 +17572,7 @@ dialog.ms-modal::backdrop {
 }
 
 
-/* ===== KS-UI-E: links to Marten records, external links, and what Wolverine told KStudio ===== */
+/* ===== KS-UI-E: links to Marten records, external links, and what Wolverine told the Kafka module ===== */
 /* The Links section of a record, and the same links inline in a timeline row. */
 .ms-k-record-links {
     margin: 0 0 var(--ms-space-md);

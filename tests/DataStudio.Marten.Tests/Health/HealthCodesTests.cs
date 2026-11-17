@@ -52,7 +52,7 @@ public class HealthCodesTests
     internal sealed record RegisteredCode(string Code, string Title, string Area, IReadOnlyList<string> Variants, string Studios, string Link);
 
     /// <summary>
-    /// Every check either studio registers - <c>both</c> when Postgres Studio runs it too, <c>Marten</c> otherwise - and every
+    /// Every check either studio registers - <c>both</c> when the Postgres module runs it too, <c>Marten</c> otherwise - and every
     /// plan insight, which both studios evaluate wherever they draw a plan.
     /// </summary>
     internal static IReadOnlyList<RegisteredCode> Registered()
@@ -316,7 +316,7 @@ public class HealthCodesTests
         RetiredFor("Marten").Should().NotBeEmpty("K10 was retired in 1.1, or this compares nothing");
 
         MartenDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Data Studio's descriptor");
-        PostgresDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "Postgres Studio's descriptor");
+        PostgresDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "the Postgres module's descriptor");
         PostgresDiagnosticsDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "the diagnostics engine's descriptor");
     }
 

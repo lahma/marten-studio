@@ -166,7 +166,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
     /// <summary>
     /// T06 judges a Marten document table - the one kind of table whose every write rewrites its row - and on Postgres
     /// Studio a table the <c>mt_</c> rule calls Marten's is told what is wrong and given no migration SQL: its store
-    /// manages its storage, and Marten Studio is where its remedy is worded.
+    /// manages its storage, and the Marten module is where its remedy is worded.
     /// </summary>
     [PostgresFact]
     [HealthFires("T06")]

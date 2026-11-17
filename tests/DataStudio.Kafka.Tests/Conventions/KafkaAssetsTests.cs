@@ -5,7 +5,7 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// D34's words and assets: KStudio ships no static web asset and no Blazor JS initializer (D24), its stylesheet is a titled section of the one
+/// D34's words and assets: The Kafka module ships no static web asset and no Blazor JS initializer (D24), its stylesheet is a titled section of the one
 /// stylesheet (D26) whose classes are prefixed <c>ms-k-</c>, and every class the module's markup uses has a rule there.
 /// </summary>
 public partial class KafkaAssetsTests
@@ -13,14 +13,14 @@ public partial class KafkaAssetsTests
     private const string Header = "/* ===== KS-SHELL: the module seams (cluster selector, the Kafka capability group, the trademark line) ===== */";
 
     [Fact]
-    public void KStudio_ships_no_wwwroot()
+    public void Kafka_ships_no_wwwroot()
     {
         Directory.Exists(RepositoryRoot.Combine("src", "DataStudio.Kafka", "wwwroot")).Should().BeFalse(
             "StudioEndpointMapper mirrors only _content/DataStudio/ under the mount, so a _content/DataStudio.Kafka/ file would be unreachable under a path base");
     }
 
     [Fact]
-    public void KStudio_ships_no_js_initializer_and_no_script()
+    public void Kafka_ships_no_js_initializer_and_no_script()
     {
         string root = RepositoryRoot.Combine("src", "DataStudio.Kafka");
         string[] files = [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -29,7 +29,7 @@ public partial class KafkaAssetsTests
 
         files.Should().NotBeEmpty();
         files.Where(static x => x.EndsWith(".lib.module.js", StringComparison.OrdinalIgnoreCase) || x.EndsWith(".js", StringComparison.OrdinalIgnoreCase)).Should().BeEmpty(
-            "a *.lib.module.js in a package would be loaded into every Blazor app in the process (D24), and a helper belongs in PostgresStudio's studio.js");
+            "a *.lib.module.js in a package would be loaded into every Blazor app in the process (D24), and a helper belongs in the Postgres module's studio.js");
         File.ReadAllText(Path.Combine(root, "DataStudio.Kafka.csproj")).Should().NotContain("StaticWebAsset");
     }
 
@@ -41,7 +41,7 @@ public partial class KafkaAssetsTests
         css.Should().Contain(Header);
         css.IndexOf(Header, StringComparison.Ordinal).Should().BeGreaterThan(css.IndexOf("/* ===== 1.2-FINAL-FIX-4", StringComparison.Ordinal), "sections are appended in cascade order (D26)");
 
-        // KStudio's sections run from its first to the first one that is not its own (the shell's V2-C section is appended after them, D26).
+        // The Kafka module's sections run from its first to the first one that is not its own (the shell's V2-C section is appended after them, D26).
         int start = css.IndexOf(Header, StringComparison.Ordinal);
         int end = css.Length;
         foreach (Match header in SectionHeader().Matches(css, start + Header.Length))

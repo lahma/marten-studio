@@ -14,7 +14,7 @@ namespace DataStudio.Marten.Tests.Components;
 
 /// <summary>
 /// 1.2-HEADER: the environment badge, the "Back to application" link and the copy-link button, in the shell's header. The shell is
-/// PostgresStudio's and Data Studio's pages are built on it, so these run over Data Studio's context; DataStudio.Postgres.Tests has
+/// The Postgres module's and Data Studio's pages are built on it, so these run over Data Studio's context; DataStudio.Postgres.Tests has
 /// the same markup rendered over its own.
 /// </summary>
 public class HeaderAdditionsTests

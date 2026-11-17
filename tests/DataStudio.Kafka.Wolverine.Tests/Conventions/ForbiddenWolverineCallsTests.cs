@@ -67,7 +67,7 @@ public class ForbiddenWolverineCallsTests
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodes();
 
     [Fact]
-    public void KStudio_Wolverine_calls_nothing_that_connects_creates_completes_or_writes()
+    public void Kafka_Wolverine_calls_nothing_that_connects_creates_completes_or_writes()
     {
         List<string> found = [.. Offenders(Adapter.GetTypes())];
 

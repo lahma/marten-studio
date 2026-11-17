@@ -270,7 +270,7 @@ public class StudioEndpointsTest
     }
 
     /// <summary>
-    /// The convention filter, which is the reason <c>MapMartenStudio()</c> returns a builder of its own
+    /// The convention filter, which is the reason <c>MapDataStudio()</c> returns a builder of its own
     /// rather than the Razor components builder: what a caller says about the studio is about the studio.
     /// </summary>
     [Fact]

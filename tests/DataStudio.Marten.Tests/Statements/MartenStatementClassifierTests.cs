@@ -12,10 +12,10 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Marten.Tests.Statements;
 
 /// <summary>
-/// MartenStudio's statement groups (W5-Q1), with no Postgres: Marten's own SQL - as <c>pg_stat_statements</c> recorded it on
+/// The Marten module's statement groups (W5-Q1), with no Postgres: Marten's own SQL - as <c>pg_stat_statements</c> recorded it on
 /// a live server at the floor, and as Marten's sources write it at <c>V9.39.0</c> and <c>v9.51.0</c> (each shape at the
 /// same line at both tags; <see cref="MartenStatementClassifier" /> cites them) - grouped by operation and document type,
-/// plain SQL grouped as Postgres Studio groups it, and a hidden type never named.
+/// plain SQL grouped as the Postgres module groups it, and a hidden type never named.
 /// </summary>
 public class MartenStatementClassifierTests
 {
@@ -97,7 +97,7 @@ public class MartenStatementClassifierTests
     [InlineData("create table studio_sample.mt_doc_customer (id uuid not null, data jsonb not null)", "create · studio_sample.mt_doc_customer")]
     [InlineData("alter table studio_sample_events.mt_events add column x int", "alter · studio_sample_events.mt_events")]
     [InlineData("do $$ begin perform 1; end $$", "do · other")]
-    // The host's own tables beside the store (issue #8 G1): as Postgres Studio groups them.
+    // The host's own tables beside the store (issue #8 G1): as the Postgres module groups them.
     [InlineData("select * from public.audit_log where id = $1", "select · public.audit_log")]
     [InlineData("insert into public.audit_log (id) values ($1)", "insert · public.audit_log")]
     [InlineData("select 1", "select · other")]
@@ -139,7 +139,7 @@ public class MartenStatementClassifierTests
         (group.Key, group.Verb, group.Table).Should().Be(("doc|load/query|studio_sample.mt_doc_customer", "load/query", Customer));
     }
 
-    /// <summary>MartenStudio's database hands out metered connections, and so does the one way its own reads take one.</summary>
+    /// <summary>The Marten module's database hands out metered connections, and so does the one way its own reads take one.</summary>
     [Fact]
     public void A_Marten_database_hands_out_metered_connections()
     {

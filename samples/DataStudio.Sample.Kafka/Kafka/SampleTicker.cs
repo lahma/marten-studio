@@ -14,8 +14,8 @@ namespace DataStudio.Sample.Kafka.Kafka;
 /// rule masks: the tail shows both masked, as Search shows an order's.
 /// </summary>
 /// <remarks>
-/// <b>It is the application's, not KStudio's.</b> This class and the Confluent producer it uses are the sample's own, the way the seeder's and the
-/// checkout sender's are: KStudio reads and never writes (hard rule 17). It runs only where the sample owns the cluster (a throwaway broker, or
+/// <b>It is the application's, not the Kafka module's.</b> This class and the Confluent producer it uses are the sample's own, the way the seeder's and the
+/// checkout sender's are: The Kafka module reads and never writes (hard rule 17). It runs only where the sample owns the cluster (a throwaway broker, or
 /// <c>--allow-data-generation</c>), and a failure stops the ticker and leaves the pages up.
 /// </remarks>
 /// <param name="kafka">The cluster's bootstrap servers.</param>

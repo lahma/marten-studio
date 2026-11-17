@@ -109,7 +109,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
                 .And.Contain("idle in transaction").And.Contain("AccessExclusiveLock");
             finding.Evidence.Single(static x => x.Label == "Hand over 1").Value.Should().StartWith("select pg_terminate_backend(" + holder.ProcessID + ");");
             finding.Evidence.Should().NotContain(static x => x.Value.Contains("payroll", StringComparison.Ordinal) || x.Value.Contains("salaries", StringComparison.Ordinal),
-                "a finding names no relation Postgres Studio does not own; the tab names it, masked");
+                "a finding names no relation the Postgres module does not own; the tab names it, masked");
             finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
             finding.Remedy.Code.Should().EndWith("idle_in_transaction_session_timeout = '5min'");
 

@@ -34,7 +34,7 @@ internal sealed class KafkaModule(IOptions<KafkaOptions> options) : IStudioModul
 
     /// <summary>
     /// The rail's one section (D-UI decision 6): Topics, Search, Live tail and Cluster settings. Search is drawn only while the capability is effectively on -
-    /// read live from the options on every render, and failing closed under the host studio's <c>ReadOnly</c> - so an entry never promises a page that
+    /// read live from the options on every render, and failing closed under the shell's <c>ReadOnly</c> - so an entry never promises a page that
     /// would only say it is off. Live tail follows the same rule since 1.3.1 (#74); a page reached by its address says in one neutral sentence that it
     /// is not available, and Cluster settings names the option that turns it on. The topic overview and the record page have no entry: links reach them.
     /// </summary>

@@ -134,7 +134,7 @@ internal sealed class StubAuthenticationStateProvider : AuthenticationStateProvi
 /// <remarks>
 /// <para>
 /// Everything goes <em>through</em> <see cref="IEventDataService" /> resolved from a container that ran
-/// <c>AddMartenStudio</c>, so the scope resolution, the capability gate and the audit entry are all
+/// <c>AddMarten</c>, so the scope resolution, the capability gate and the audit entry are all
 /// exercised rather than bypassed (plan §5.4). Two containers are built over the same store: one with
 /// every capability on, one with none, so a refusal can be asserted without a second database.
 /// </para>

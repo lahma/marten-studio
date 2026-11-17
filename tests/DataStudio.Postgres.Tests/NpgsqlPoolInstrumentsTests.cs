@@ -348,7 +348,7 @@ public sealed class NpgsqlPoolInstrumentsTests
 
     /// <summary>
     /// The caveat names the instruments the pool was read from. Under Npgsql 8 and 9's names it is, byte for byte, the
-    /// sentence MartenStudio has always shown; under Npgsql 10's it names those.
+    /// sentence the Marten module has always shown; under Npgsql 10's it names those.
     /// </summary>
     [Fact]
     public void C01s_caveat_names_the_instruments_it_read()

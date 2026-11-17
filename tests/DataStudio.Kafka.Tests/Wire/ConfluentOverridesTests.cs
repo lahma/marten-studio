@@ -59,9 +59,9 @@ public class ConfluentOverridesTests
     [InlineData("allow.auto.create.topics", "false")]
     [InlineData("enable.auto.commit", "false")]
     [InlineData("enable.auto.offset.store", "false")]
-    [InlineData("group.id", "kstudio-11111111222233334444555555555555")]
+    [InlineData("group.id", "data-studio-11111111222233334444555555555555")]
     [InlineData("group.protocol", "classic")]
-    [InlineData("client.id", "my-app-1.kstudio")]
+    [InlineData("client.id", "my-app-1.data-studio")]
     [InlineData("isolation.level", "read_committed")]
     [InlineData("enable.partition.eof", "true")]
     [InlineData("auto.offset.reset", "error")]
@@ -73,7 +73,7 @@ public class ConfluentOverridesTests
     public void The_scan_consumer_gets_the_engines_value_whatever_the_host_set(string key, string expected)
     {
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
 
         config.Get(key).Should().Be(expected);
     }
@@ -82,7 +82,7 @@ public class ConfluentOverridesTests
     public void The_scan_consumer_loses_the_keys_the_engine_removes_and_keeps_the_rest()
     {
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
 
         config.Get("group.instance.id").Should().BeNull("no static membership");
         config.Get("debug").Should().BeNull("the host's debug contexts are not the studio's");
@@ -96,7 +96,7 @@ public class ConfluentOverridesTests
     public void An_isolation_that_includes_uncommitted_records_is_read_uncommitted()
     {
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadUncommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadUncommitted, new KafkaScanLimits(), "data-studio-");
 
         config.Get("isolation.level").Should().Be("read_uncommitted");
     }
@@ -118,7 +118,7 @@ public class ConfluentOverridesTests
         host.MessageMaxBytes = 20_000_000;
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
 
         config.Get("fetch.max.bytes").Should().Be("1999488", "receive.message.max.bytes - 512, which librdkafka requires");
         config.Get("max.partition.fetch.bytes").Should().Be("1048576");
@@ -131,7 +131,7 @@ public class ConfluentOverridesTests
         KafkaScanLimits limits = new() { QueueKilobytes = 2048, FetchBytes = 2 * 1024 * 1024 };
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, limits, "kstudio-");
+            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, limits, "data-studio-");
 
         config.Get("queued.max.messages.kbytes").Should().Be("2048");
         config.Get("fetch.max.bytes").Should().Be("2097152");
@@ -143,7 +143,7 @@ public class ConfluentOverridesTests
         List<string> reported = [];
 
         ConfluentClientSettings.BuildConsumerConfig(
-            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-", reported.Add);
+            Definition(HostConsumerConfig()), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-", reported.Add);
 
         reported.Should().Contain(
             ["enable.auto.commit", "group.id", "group.instance.id", "statistics.interval.ms", "debug", "client.id", "isolation.level", "enable.metrics.push"]);
@@ -168,7 +168,7 @@ public class ConfluentOverridesTests
         config.Get("allow.auto.create.topics").Should().Be("false", "a default admin client creates a topic on a single-topic metadata request (SPIKE S1.6)");
         config.Get("statistics.interval.ms").Should().Be("0");
         config.Get("enable.metrics.push").Should().Be("false");
-        config.Get("client.id").Should().Be("my-app-1.kstudio");
+        config.Get("client.id").Should().Be("my-app-1.data-studio");
         config.Get("debug").Should().BeNull();
         config.Get("bootstrap.servers").Should().Be("broker:9092");
     }
@@ -195,7 +195,7 @@ public class ConfluentOverridesTests
         host.Set("compression.type", "lz4");
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
 
         config.Select(static x => x.Key).Should().NotContain(ConfluentPropertyScopes.ProducerOnly);
     }
@@ -210,7 +210,7 @@ public class ConfluentOverridesTests
         List<string> reported = [];
 
         ConsumerConfig consumer = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-", reported.Add);
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-", reported.Add);
         AdminClientConfig admin = ConfluentClientSettings.BuildAdminConfig(Definition(host), reported.Add);
 
         foreach (string key in new[] { "plugin.library.paths", "confluent.monitoring.interceptor.bootstrap.servers", "confluent.monitoring.interceptor.sasl.password" })
@@ -233,7 +233,7 @@ public class ConfluentOverridesTests
         List<string> reported = [];
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-", reported.Add);
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-", reported.Add);
 
         config.Get("fetch.message.max.bytes").Should().BeNull();
         config.Get("auto.commit.enable").Should().BeNull();
@@ -250,7 +250,7 @@ public class ConfluentOverridesTests
         host.Set("fetch.message.max.bytes", "1");
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
 
         string[] keys = [.. config.Select(static x => x.Key)];
         string[] engineKeys = ["group.id", "enable.auto.commit", "isolation.level", "fetch.max.bytes", "max.partition.fetch.bytes", "auto.offset.reset"];
@@ -272,7 +272,7 @@ public class ConfluentOverridesTests
         KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("main");
 
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
-            definition, ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+            definition, ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "data-studio-");
         ConfluentClientSettings.BuildAdminConfig(definition);
 
         host.Where(static x => x.Key != "bootstrap.servers").Should().BeEquivalentTo(before.Where(static x => x.Key != "bootstrap.servers"));
@@ -281,9 +281,9 @@ public class ConfluentOverridesTests
     }
 
     [Theory]
-    [InlineData("rdkafka", "rdkafka.kstudio")]
-    [InlineData("my app/1", "my-app-1.kstudio")]
-    [InlineData("a_b.c-d", "a_b.c-d.kstudio")]
+    [InlineData("rdkafka", "rdkafka.data-studio")]
+    [InlineData("my app/1", "my-app-1.data-studio")]
+    [InlineData("a_b.c-d", "a_b.c-d.data-studio")]
     public void The_client_id_is_the_hosts_with_a_suffix_and_only_safe_characters(string host, string expected)
     {
         ConfluentClientSettings.ClientId(new Dictionary<string, string> { ["client.id"] = host }).Should().Be(expected);
@@ -292,17 +292,17 @@ public class ConfluentOverridesTests
     [Fact]
     public void A_missing_client_id_is_rdkafka_and_a_long_one_is_cut_to_255_characters()
     {
-        ConfluentClientSettings.ClientId(new Dictionary<string, string>()).Should().Be("rdkafka.kstudio");
-        ConfluentClientSettings.ClientId(new Dictionary<string, string> { ["client.id"] = new string('x', 400) }).Should().HaveLength(255).And.EndWith(".kstudio");
+        ConfluentClientSettings.ClientId(new Dictionary<string, string>()).Should().Be("rdkafka.data-studio");
+        ConfluentClientSettings.ClientId(new Dictionary<string, string> { ["client.id"] = new string('x', 400) }).Should().HaveLength(255).And.EndWith(".data-studio");
     }
 
     [Theory]
     [InlineData("allow.auto.create.topics", "false")]
     [InlineData("enable.auto.commit", "false")]
     [InlineData("enable.auto.offset.store", "false")]
-    [InlineData("group.id", "kstudio-11111111222233334444555555555555")]
+    [InlineData("group.id", "data-studio-11111111222233334444555555555555")]
     [InlineData("group.protocol", "classic")]
-    [InlineData("client.id", "my-app-1.kstudio")]
+    [InlineData("client.id", "my-app-1.data-studio")]
     [InlineData("auto.offset.reset", "error")]
     [InlineData("statistics.interval.ms", "0")]
     [InlineData("enable.metrics.push", "false")]
@@ -312,7 +312,7 @@ public class ConfluentOverridesTests
     {
         // The reader exists so that the lag read has a handle with a consumer group (librdkafka #5040). Hard rule 17 holds for it as for a scan:
         // it never commits, stores an offset or creates a topic, whatever the host set.
-        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "kstudio-");
+        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "data-studio-");
 
         config.Get(key).Should().Be(expected);
     }
@@ -322,7 +322,7 @@ public class ConfluentOverridesTests
     {
         List<string> reported = [];
 
-        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "kstudio-", reported.Add);
+        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "data-studio-", reported.Add);
 
         config.Get("group.instance.id").Should().BeNull("no static membership");
         config.Get("debug").Should().BeNull();

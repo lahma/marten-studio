@@ -15,8 +15,8 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Tests.Endpoints;
 
 /// <summary>
-/// A real <c>AddPostgresStudio()</c> host hands every service that takes its words optionally - the settings or the
-/// text, defaulting to MartenStudio's only so a test can build the service by hand - PostgresStudio's own (PS-3b-fix).
+/// A real <c>AddPostgres()</c> host hands every service that takes its words optionally - the settings or the
+/// text, defaulting to the Marten module's only so a test can build the service by hand - the Postgres module's own (PS-3b-fix).
 /// </summary>
 public sealed class PostgresWiringTests : IAsyncDisposable
 {
@@ -40,7 +40,7 @@ public sealed class PostgresWiringTests : IAsyncDisposable
     public async ValueTask DisposeAsync() => await services.DisposeAsync();
 
     [Fact]
-    public async Task Every_service_with_optional_words_is_given_PostgresStudios()
+    public async Task Every_service_with_optional_words_is_given_Postgres()
     {
         await using AsyncServiceScope circuit = services.CreateAsyncScope();
         IServiceProvider scope = circuit.ServiceProvider;
@@ -62,7 +62,7 @@ public sealed class PostgresWiringTests : IAsyncDisposable
             foreach (FieldInfo field in words)
             {
                 ReferenceEquals(field.GetValue(owner), PostgresText.Instance)
-                    .Should().BeTrue(owner.GetType().Name + "." + field.Name + " is PostgresStudio's, not MartenStudio's");
+                    .Should().BeTrue(owner.GetType().Name + "." + field.Name + " is the Postgres module's, not the Marten module's");
             }
         }
 

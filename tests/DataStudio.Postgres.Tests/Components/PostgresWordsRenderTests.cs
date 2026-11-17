@@ -11,8 +11,8 @@ using DataStudio.Postgres.Services.Postgres;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// The shared screens in PostgresStudio's own words (PS-3b): no <c>StoreOptions</c>, no MartenStudio option and no
-/// "Marten Studio" where the product is meant - and, where the database holds a Marten store's objects, one notice that
+/// The shared screens in the Postgres module's own words (PS-3b): no <c>StoreOptions</c>, no Marten module option and no
+/// "the Marten module" where the product is meant - and, where the database holds a Marten store's objects, one notice that
 /// says where they are browsed.
 /// </summary>
 public class PostgresWordsRenderTests
@@ -53,7 +53,7 @@ public class PostgresWordsRenderTests
     }
 
     [Fact]
-    public async Task The_database_page_points_a_Marten_stores_objects_at_Marten_Studio_and_names_no_MartenStudio_option()
+    public async Task The_database_page_points_a_Marten_stores_objects_at_Marten_Studio_and_names_no_Marten_option()
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Navigate("studio/postgres/database");
@@ -66,15 +66,15 @@ public class PostgresWordsRenderTests
         page.Markup.Should().NotContain("MartenOptions").And.NotContain("Declared by this Marten store");
     }
 
-    /// <summary>What a rendered PostgresStudio page must never say - MartenStudio's options, configuration and nouns.</summary>
-    private static readonly string[] MartenStudioWords =
+    /// <summary>What a rendered the Postgres module page must never say - the Marten module's options, configuration and nouns.</summary>
+    private static readonly string[] MartenWords =
         ["MartenOptions", "StoreOptions", "Marten Studio", "the store's", "this store", "LightweightSession", "AddMarten"];
 
     public static TheoryData<string> Pages() => ["overview", "query", "database", "sessions", "health", "storage", "activity"];
 
     [Theory]
     [MemberData(nameof(Pages))]
-    public async Task No_core_page_renders_MartenStudios_words(string page)
+    public async Task No_core_page_renders_Marten_words(string page)
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
@@ -89,7 +89,7 @@ public class PostgresWordsRenderTests
             _ => Rendered(context.Render<Activity>(), ".ms-page-title"),
         };
 
-        // The sentences that name Marten Studio on purpose: where a Marten store's objects are browsed.
+        // The sentences that name the Marten module on purpose: where a Marten store's objects are browsed.
         foreach (string onPurpose in new[]
                  {
                      PostgresText.Instance.MartenStoreNotice!, PostgresText.Instance.MartenInternalTitle,
@@ -100,9 +100,9 @@ public class PostgresWordsRenderTests
                 .Replace(System.Net.WebUtility.HtmlEncode(onPurpose), string.Empty, StringComparison.Ordinal);
         }
 
-        foreach (string word in MartenStudioWords)
+        foreach (string word in MartenWords)
         {
-            markup.Should().NotContain(word, "the " + page + " page is Postgres Studio's");
+            markup.Should().NotContain(word, "the " + page + " page is the Postgres module's");
         }
     }
 
@@ -128,7 +128,7 @@ public class PostgresWordsRenderTests
 
         page.WaitForAssertion(() => page.Find(".ms-page-title").TextContent.Should().Be("Relationships"));
 
-        // The lead only: the shared fake draws document edges too, which PostgresStudio - with no node source - never has,
+        // The lead only: the shared fake draws document edges too, which the Postgres module - with no node source - never has,
         // and whose drift states (declared, physical) only a store's configuration can produce.
         string lead = page.Find(".ms-schema-note").TextContent;
         lead.Should().Contain("as Postgres has them").And.NotContain("StoreOptions").And.NotContain("document types");

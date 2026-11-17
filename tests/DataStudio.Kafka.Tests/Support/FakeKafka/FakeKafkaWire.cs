@@ -232,7 +232,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
 
     public IWireScanReader OpenReader(WireReaderOptions options)
     {
-        FakeScanReader reader = new(Cluster, options, "kstudio-" + options.ScanId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
+        FakeScanReader reader = new(Cluster, options, "data-studio-" + options.ScanId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
         lock (Readers)
         {
             Readers.Add(reader);

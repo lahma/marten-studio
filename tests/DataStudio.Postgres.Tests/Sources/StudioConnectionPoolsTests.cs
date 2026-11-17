@@ -18,21 +18,21 @@ public class StudioConnectionPoolsTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Theory]
-    [InlineData("Host=db;Application Name=orders-api", null, "Marten Studio", "orders-api (Marten Studio)")]
-    [InlineData("Host=db", null, "Postgres Studio", "Postgres Studio")]
-    [InlineData("Host=db;Application Name=orders-api", "ops-console", "Marten Studio", "ops-console")]
-    [InlineData("Host=db;Application Name=orders-api", "", "Marten Studio", null)]
-    [InlineData("Host=db;Application Name=Bestellungen·API", null, "Marten Studio", "Bestellungen?API (Marten Studio)")]
+    [InlineData("Host=db;Application Name=orders-api", null, "Data Studio", "orders-api (Data Studio)")]
+    [InlineData("Host=db", null, "Data Studio", "Data Studio")]
+    [InlineData("Host=db;Application Name=orders-api", "ops-console", "Data Studio", "ops-console")]
+    [InlineData("Host=db;Application Name=orders-api", "", "Data Studio", null)]
+    [InlineData("Host=db;Application Name=Bestellungen·API", null, "Data Studio", "Bestellungen?API (Data Studio)")]
     public void The_session_name_is_the_hosts_or_the_applications_with_the_studios_after_it(string connectionString, string? configured, string product, string? expected) =>
         StudioConnectionPools.ApplicationNameFor(configured, connectionString, product).Should().Be(expected);
 
     [Fact]
     public void A_long_application_name_is_cut_and_the_studio_is_still_named()
     {
-        string name = StudioConnectionPools.ApplicationNameFor(null, "Host=db;Application Name=" + new string('a', 120), "Marten Studio")!;
+        string name = StudioConnectionPools.ApplicationNameFor(null, "Host=db;Application Name=" + new string('a', 120), "Data Studio")!;
 
         name.Length.Should().Be(StudioConnectionPools.MaxApplicationNameBytes);
-        name.Should().EndWith(" (Marten Studio)");
+        name.Should().EndWith(" (Data Studio)");
         StudioConnectionPools.IsValidApplicationName(name).Should().BeTrue();
     }
 
@@ -63,7 +63,7 @@ public class StudioConnectionPoolsTests
     [Fact]
     public async Task A_full_pool_makes_the_next_open_wait_and_a_freed_slot_lets_it_in()
     {
-        StudioConnectionPool pool = new(1, "app (Postgres Studio)", TimeSpan.FromSeconds(30));
+        StudioConnectionPool pool = new(1, "app (Data Studio)", TimeSpan.FromSeconds(30));
 
         StudioConnectionLease first = await pool.AcquireAsync(new StudioConnectionLease(pool, reentrant: false), Token);
         pool.InUse.Should().Be(1);
@@ -112,11 +112,11 @@ public class StudioConnectionPoolsTests
     {
         using NpgsqlDataSource source = NpgsqlDataSource.Create("Host=nowhere.invalid;Application Name=orders-api");
 
-        StudioConnectionPool registered = StudioConnectionPools.Register(source, 3, null, "Postgres Studio", TimeSpan.FromSeconds(5));
+        StudioConnectionPool registered = StudioConnectionPools.Register(source, 3, null, "Data Studio", TimeSpan.FromSeconds(5));
 
         StudioConnectionPools.Of(source).Should().BeSameAs(registered);
         registered.Max.Should().Be(3);
-        registered.ApplicationName.Should().Be("orders-api (Postgres Studio)");
+        registered.ApplicationName.Should().Be("orders-api (Data Studio)");
         StudioConnectionPools.Register(source, 9, "x", "y", TimeSpan.Zero).Should().BeSameAs(registered, "the first registration wins");
     }
 
@@ -133,7 +133,7 @@ public class StudioConnectionPoolsTests
     {
         using NpgsqlDataSource source = NpgsqlDataSource.Create(connectionString);
 
-        StudioConnectionPool pool = StudioConnectionPools.Register(source, option, null, "Postgres Studio", TimeSpan.FromSeconds(5));
+        StudioConnectionPool pool = StudioConnectionPools.Register(source, option, null, "Data Studio", TimeSpan.FromSeconds(5));
 
         StudioConnectionPools.EffectiveMax(connectionString, option).Should().Be(expectedMax);
         pool.Max.Should().Be(expectedMax);
@@ -153,7 +153,7 @@ public class StudioConnectionPoolsTests
     public void A_pool_reached_through_Of_after_Configure_is_held_to_the_data_sources_pool_size()
     {
         // No reset afterwards: every studio provider this suite builds calls Configure, and a reset would clear it under a parallel test.
-        StudioConnectionPools.Configure(2, null, "Marten Studio", TimeSpan.FromSeconds(5));
+        StudioConnectionPools.Configure(2, null, "Data Studio", TimeSpan.FromSeconds(5));
 
         using NpgsqlDataSource small = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=1");
         using NpgsqlDataSource large = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=50");

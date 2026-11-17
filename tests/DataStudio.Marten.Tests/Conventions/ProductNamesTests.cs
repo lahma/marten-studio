@@ -67,6 +67,57 @@ public class ProductNamesTests
         string.Join('\n', found).Should().BeEmpty("the product is Data Studio, and a module is Marten, Postgres or Kafka");
     }
 
+    /// <summary>
+    /// The samples are what the README's screenshots show and what a person trying the product reads, so the same scan covers them: every string
+    /// literal of their C# and the text of any Razor, <c>.cshtml</c> or <c>.html</c> file. What may keep a name is in <see cref="ProductNameScan.Allowed" />
+    /// with its reason.
+    /// </summary>
+    [Fact]
+    public void No_string_literal_or_markup_text_of_the_samples_says_a_removed_product_name()
+    {
+        string[] files =
+        [
+            .. Directory.EnumerateFiles(RepositoryRoot.Combine("samples"), "*.*", SearchOption.AllDirectories)
+                .Where(static x => !x.Replace('\\', '/').Contains("/obj/", StringComparison.Ordinal)
+                                   && !x.Replace('\\', '/').Contains("/bin/", StringComparison.Ordinal))
+                .Where(static x => x.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                                   || x.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)
+                                   || x.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase)
+                                   || x.EndsWith(".html", StringComparison.OrdinalIgnoreCase)),
+        ];
+        files.Should().Contain(static x => x.EndsWith("Program.cs", StringComparison.Ordinal), "the samples' own source is read");
+
+        List<string> found = [];
+        int texts = 0;
+
+        foreach (string file in files)
+        {
+            string relative = SourceScanner.Relative(file);
+
+            foreach (string literal in ProductNameScan.TextOf(file, File.ReadAllText(file)))
+            {
+                texts++;
+                string text = literal;
+
+                foreach ((string allowedFile, string allowed, _) in ProductNameScan.Allowed)
+                {
+                    if (allowedFile == "*" || allowedFile == relative)
+                    {
+                        text = text.Replace(allowed, " ", StringComparison.Ordinal);
+                    }
+                }
+
+                foreach (System.Text.RegularExpressions.Match match in ProductNameScan.Names.Matches(text))
+                {
+                    found.Add(relative + ": " + match.Value + " in \"" + Context(text, match.Index) + "\"");
+                }
+            }
+        }
+
+        texts.Should().BeGreaterThan(500, "the samples hold hundreds of literals and a scan that reads few has stopped working");
+        string.Join('\n', found).Should().BeEmpty("the samples say Data Studio, and a module is Marten, Postgres or Kafka");
+    }
+
     private static string Context(string text, int at) =>
         text[Math.Max(0, at - 30)..Math.Min(text.Length, at + 50)].ReplaceLineEndings(" ");
 

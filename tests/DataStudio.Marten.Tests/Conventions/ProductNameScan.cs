@@ -32,6 +32,9 @@ internal static partial class ProductNameScan
         ("*", "martenStudio",
             "The browser global studio.js defines and the interop calls name (martenStudio.prefs, .clipboard, .dialog ...): one identifier on both sides, "
             + "not a sentence a visitor reads, and kept so that a host's own script that reaches it keeps working"),
+        ("samples/DataStudio.Sample.Postgres.Data/RelationalDemoSchema.cs", "Marten Studio sample",
+            "Persisted: the exact comment the first version of the demo put on the quartz schema, which a reused database may still carry and which "
+            + "the demo matches so that it re-stamps its own schema instead of leaving it alone as a stranger's"),
     ];
 
     [GeneratedRegex(@"[Mm]arten Studio|Postgres Studio|(?:[Mm]artenStudio|PostgresStudio|\bKStudio)(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
@@ -52,7 +55,7 @@ internal static partial class ProductNameScan
     /// <param name="source">The file's text.</param>
     public static IEnumerable<string> TextOf(string path, string source)
     {
-        if (path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase) || ServedExtensions.Any(x => path.EndsWith(x, StringComparison.OrdinalIgnoreCase)))
+        if (path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) || ServedExtensions.Any(x => path.EndsWith(x, StringComparison.OrdinalIgnoreCase)))
         {
             string markup = BlockComments().Replace(source, " ");
 

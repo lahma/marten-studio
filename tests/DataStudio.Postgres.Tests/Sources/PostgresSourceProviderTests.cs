@@ -19,7 +19,7 @@ using DataStudio.Postgres.Tests.Support;
 namespace DataStudio.Postgres.Tests.Sources;
 
 /// <summary>
-/// PostgresStudio's sources over DI descriptors: the unkeyed singleton data source is <c>default</c>, a keyed one only
+/// The Postgres module's sources over DI descriptors: the unkeyed singleton data source is <c>default</c>, a keyed one only
 /// through <c>AddDataSource</c>, a host's database source after them; what each is named, how many databases it has,
 /// that nothing is disposed, what a host's list leaves out, its caches and timeouts, and that no scope without a
 /// database is ever completed.

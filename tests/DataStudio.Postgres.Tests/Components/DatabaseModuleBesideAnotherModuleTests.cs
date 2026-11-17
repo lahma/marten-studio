@@ -116,7 +116,7 @@ public sealed class DatabaseModuleBesideAnotherModuleTests
 
     /// <summary>
     /// Fails when <c>DatabaseScopeHost.OnInitializedAsync</c> reads the address's scope on a page that is not the database's (the <c>Active ? …</c> on the
-    /// read): the scope moves to <c>reporting</c> and the address is rewritten.
+    /// read): the scope moves to <c>reporting</c>.
     /// </summary>
     [Fact]
     public async Task An_address_naming_a_database_scope_on_the_other_modules_page_does_not_move_it_on_first_load()
@@ -134,7 +134,7 @@ public sealed class DatabaseModuleBesideAnotherModuleTests
 
     /// <summary>
     /// Fails when <c>DatabaseScopeHost.OnLocationChanged</c> does not return for a page that is not the database's (the <c>IsMine</c> guard): the clicked
-    /// address's scope is applied, the policy is asked and the address is rewritten.
+    /// address's scope is applied and the policy is asked.
     /// </summary>
     [Fact]
     public async Task A_click_from_a_database_page_to_the_other_modules_page_naming_another_scope_moves_nothing_and_asks_no_policy()

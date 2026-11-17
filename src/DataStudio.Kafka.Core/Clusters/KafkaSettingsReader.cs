@@ -27,9 +27,9 @@ internal sealed record KafkaSettingRow(string Key, KafkaSettingExposure Exposure
 
 /// <summary>A value the engine's clients set over the host's, or a key they drop (D37).</summary>
 /// <param name="Key">The configuration key.</param>
-/// <param name="KStudioValue">What the engine's clients use; <c>removed</c> for a key they drop.</param>
+/// <param name="EngineValue">What the engine's clients use; <c>removed</c> for a key they drop.</param>
 /// <param name="Why">The reason, in D37's words.</param>
-internal sealed record KafkaSettingOverride(string Key, string KStudioValue, string Why);
+internal sealed record KafkaSettingOverride(string Key, string EngineValue, string Why);
 
 /// <summary>A cluster's settings for the page.</summary>
 /// <param name="Host">What the host set, ordinal by key.</param>

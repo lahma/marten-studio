@@ -82,7 +82,7 @@ public abstract class KafkaFixture : IAsyncLifetime
 
     /// <summary>The label value of an image's reuse identity.</summary>
     /// <param name="image">The image.</param>
-    public static string ReuseLabelValue(string image) => "KStudio.Integration.Tests." + image[(image.IndexOf(':', StringComparison.Ordinal) + 1)..];
+    public static string ReuseLabelValue(string image) => "DataStudio.Kafka.Integration.Tests." + image[(image.IndexOf(':', StringComparison.Ordinal) + 1)..];
 
     /// <summary>
     /// Whether a <see cref="ReuseEnvironmentVariable" /> value turns reuse off: only <c>false</c> and <c>0</c> do, so an unset or misspelt value
@@ -215,7 +215,7 @@ public abstract class KafkaFixture : IAsyncLifetime
     /// </summary>
     private async Task WarmUpGroupCoordinatorAsync()
     {
-        ConsumerConfig config = new(Client("admin")) { GroupId = "kstudio-warmup-" + RunId, EnableAutoCommit = false };
+        ConsumerConfig config = new(Client("admin")) { GroupId = "data-studio-warmup-" + RunId, EnableAutoCommit = false };
         using IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
         DateTime deadline = DateTime.UtcNow.AddSeconds(60);
 
@@ -261,13 +261,13 @@ public abstract class KafkaFixture : IAsyncLifetime
 
         List<AclBinding> bindings = [];
         Allow(bindings, "reader", ResourceType.Topic, "ks.", AclOperation.Read);
-        Allow(bindings, "reader", ResourceType.Group, "kstudio-", AclOperation.Read);
+        Allow(bindings, "reader", ResourceType.Group, "data-studio-", AclOperation.Read);
         Allow(bindings, "configreader", ResourceType.Topic, "ks.", AclOperation.Read);
         Allow(bindings, "configreader", ResourceType.Topic, "ks.", AclOperation.DescribeConfigs);
-        Allow(bindings, "configreader", ResourceType.Group, "kstudio-", AclOperation.Read);
+        Allow(bindings, "configreader", ResourceType.Group, "data-studio-", AclOperation.Read);
         Allow(bindings, "nogroup", ResourceType.Topic, "ks.", AclOperation.Read);
         Allow(bindings, "describeonly", ResourceType.Topic, "ks.", AclOperation.Describe);
-        Allow(bindings, "describeonly", ResourceType.Group, "kstudio-", AclOperation.Read);
+        Allow(bindings, "describeonly", ResourceType.Group, "data-studio-", AclOperation.Read);
 
         // Creating an ACL that exists is not an error, so a reused container is fine.
         await admin.CreateAclsAsync(bindings);

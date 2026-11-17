@@ -14,7 +14,7 @@ namespace DataStudio.Sample.Marten.Domain;
 /// The demo domain's Marten configuration, shared by the sample host and the integration tests.
 /// </summary>
 /// <remarks>
-/// This project deliberately does not reference MartenStudio (AGENTS.md D17): the studio has to work
+/// This project deliberately does not reference the Marten module (AGENTS.md D17): the studio has to work
 /// against a store that knows nothing about it, and a reference here would let that invariant rot without
 /// anyone noticing. Everything the studio renders about this store, it learns from <c>StoreOptions</c>.
 /// </remarks>

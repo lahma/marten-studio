@@ -57,6 +57,12 @@ explicit offsets), no statistics or client metrics are sent, and your builder de
 settings page lists every change. A search reads at most a budget you set, at a byte rate you set, and stops with its
 reason.
 
+The broker tells the module's clients apart by two names. A consumer's group id starts with `data-studio-` (the engine's
+`GroupIdPrefix`, then the scan's id; the group is never subscribed, so none is created) and a client id ends with
+`.data-studio`. Reading needs no ACL on that group, but a cluster that names groups in its ACLs can grant `READ` and
+`DESCRIBE` on a `PREFIXED` group `data-studio-` (or the host's own prefix) to spare the broker's authorizer log one refused
+lookup per scan and per lag read. An exported file is named `data-studio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}`.
+
 ## Capabilities and policies
 
 Metadata needs no capability: the topic list, partitions, watermarks, configuration and your declared groups' lag.

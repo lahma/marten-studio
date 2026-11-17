@@ -6,7 +6,7 @@ using DataStudio.Kafka.Core.Scanning;
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
-/// One link from a record to a record of the host studio (D44): the text, and the address when the studio shows such a record.
+/// One link from a record to a record of another module (D44): the text, and the address when the studio shows such a record.
 /// </summary>
 /// <param name="Kind">What it refers to: <see cref="KafkaAddress.SeedDocument" /> or <see cref="KafkaAddress.SeedStream" />.</param>
 /// <param name="Text">The link's words: <c>Document Order 4711 →</c>, with the id cut at 24 characters.</param>

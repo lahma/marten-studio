@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <UserSecretsId>kstudio-sample</UserSecretsId>
+    <UserSecretsId>data-studio-sample-kafka</UserSecretsId>
     <IsPackable>false</IsPackable>
 
     <!--

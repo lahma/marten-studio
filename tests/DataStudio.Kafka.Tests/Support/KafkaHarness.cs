@@ -37,7 +37,7 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
     /// <summary>Every question asked, in order: the policy's name and the resource.</summary>
     public List<(string Policy, object? Resource)> Calls { get; } = [];
 
-    /// <summary>The questions about KStudio's resource.</summary>
+    /// <summary>The questions about the Kafka module's resource.</summary>
     public IEnumerable<(string Policy, KafkaTopicResource Resource)> KafkaCalls =>
         Calls.Where(static x => x.Resource is KafkaTopicResource).Select(static x => (x.Policy, (KafkaTopicResource) x.Resource!));
 
@@ -59,11 +59,11 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         return gate;
     }
 
-    /// <summary>What KStudio's policies allow; everything by default.</summary>
+    /// <summary>What the Kafka module's policies allow; everything by default.</summary>
     public void AllowKafka(Func<KafkaTopicResource, bool> predicate) => kafka = predicate;
 
     /// <summary>
-    /// Holds every question about KStudio's resource that <paramref name="held" /> picks until the returned source is completed - with whether the
+    /// Holds every question about the Kafka module's resource that <paramref name="held" /> picks until the returned source is completed - with whether the
     /// handler then allows it - so a test can look at a page while a check is pending.
     /// </summary>
     /// <param name="held">Which questions wait.</param>

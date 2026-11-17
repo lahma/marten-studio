@@ -69,7 +69,7 @@ builder.Services
     {
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/login";
-        options.Cookie.Name = "kstudio-sample";
+        options.Cookie.Name = "data-studio-sample-kafka";
     });
 
 builder.Services.AddAuthorization(SamplePolicies.Configure);
@@ -124,7 +124,7 @@ if (wolverine)
     builder.Services.AddSingleton(new SampleKafkaAddress(kafka.BootstrapServers));
     builder.Services.AddHostedService<CheckoutSender>();
 
-    // The sample's own heartbeat, one record every two seconds, for the live tail to follow. Written by this host's producer, never by KStudio.
+    // The sample's own heartbeat, one record every two seconds, for the live tail to follow. Written by this host's producer, never by the Kafka module.
     builder.Services.AddHostedService<SampleTicker>();
 }
 

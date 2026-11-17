@@ -15,8 +15,8 @@ namespace DataStudio.Sample.Kafka.Wolverine;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>It is the application's, not KStudio's.</b> This class and the Confluent clients it uses are the sample's own, the way the seeder's are:
-/// KStudio reads and never writes (hard rule 17).
+/// <b>It is the application's, not the Kafka module's.</b> This class and the Confluent clients it uses are the sample's own, the way the seeder's are:
+/// The Kafka module reads and never writes (hard rule 17).
 /// </para>
 /// <para>
 /// <b>The second delivery is a re-produced record.</b> Wolverine 6.61 has no public way to send an <see cref="Envelope" /> again with the same id,
@@ -106,7 +106,7 @@ public sealed class CheckoutSender(IServiceScopeFactory scopes, SampleKafkaAddre
                 return null;
             }
 
-            using IConsumer<Ignore, Ignore> consumer = new ConsumerBuilder<Ignore, Ignore>(new ConsumerConfig { BootstrapServers = config.BootstrapServers, GroupId = "kstudio-sample-sender", EnableAutoCommit = false }).Build();
+            using IConsumer<Ignore, Ignore> consumer = new ConsumerBuilder<Ignore, Ignore>(new ConsumerConfig { BootstrapServers = config.BootstrapServers, GroupId = "data-studio-sample-sender", EnableAutoCommit = false }).Build();
 
             return found.Partitions.Sum(partition =>
             {
@@ -124,7 +124,7 @@ public sealed class CheckoutSender(IServiceScopeFactory scopes, SampleKafkaAddre
     {
         Message<byte[], byte[]>? original = null;
 
-        using (IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(new ConsumerConfig { BootstrapServers = config.BootstrapServers, GroupId = "kstudio-sample-sender", EnableAutoCommit = false }).Build())
+        using (IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(new ConsumerConfig { BootstrapServers = config.BootstrapServers, GroupId = "data-studio-sample-sender", EnableAutoCommit = false }).Build())
         {
             using IAdminClient admin = new AdminClientBuilder(config).Build();
             Metadata metadata = admin.GetMetadata(SampleWolverine.CheckoutTopic, TimeSpan.FromSeconds(10));

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace DataStudio.Kafka.Tests.Services;
 
-/// <summary>D35: KStudio's capabilities default to off, and the host studio's <c>ReadOnly</c> is the one master switch.</summary>
+/// <summary>D35: The Kafka module's capabilities default to off, and the shell's <c>ReadOnly</c> is the one master switch.</summary>
 public class KafkaCapabilityGuardTests
 {
     [Fact]
@@ -46,7 +46,7 @@ public class KafkaCapabilityGuardTests
         guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeTrue();
 
         on.Context.ShellOptions.ReadOnly = true;
-        guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse("the host studio's master switch turns every capability off");
+        guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse("the shell's master switch turns every capability off");
         guard.IsConfigured(KafkaCapability.SearchRecords).Should().BeTrue();
     }
 

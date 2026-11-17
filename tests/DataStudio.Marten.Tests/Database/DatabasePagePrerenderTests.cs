@@ -272,7 +272,7 @@ public class DatabasePagePrerenderTests
             static options =>
             {
                 options.StoreAuthorizationPolicy = "MartenStoreOwner";
-                options.WriteAuthorizationPolicy = "MartenStudioWrite";
+                options.WriteAuthorizationPolicy = "MartenWrite";
                 options.Capabilities.BrowseDatabase = true;
                 options.BrowsableSchemas.Add("quartz");
             },

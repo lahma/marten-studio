@@ -35,7 +35,7 @@
          come from the shared framework, so the package pins no ASP.NET Core patch on its host. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!-- The JasperFx source generator Marten bundles is taken out of this compilation by the
-         MartenStudioWithoutTheJasperFxSourceGenerator target at the end of this file. -->
+         MartenWithoutTheJasperFxSourceGenerator target at the end of this file. -->
     <PackageReference Include="Marten" />
     <!-- The shared studio. The Microsoft.AspNetCore.App.Internal.Assets reference - blazor.web.js for the
          host, D22 - lives in DataStudio.csproj (the shell) and reaches the host through this reference and DataStudio.Postgres's: two
@@ -80,11 +80,11 @@
     BeforeTargets="CoreCompile", like JasperFx.Events' own dedupe target, so design-time builds see the
     same analyzer list as a real one.
   -->
-  <Target Name="MartenStudioWithoutTheJasperFxSourceGenerator" BeforeTargets="CoreCompile">
+  <Target Name="MartenWithoutTheJasperFxSourceGenerator" BeforeTargets="CoreCompile">
     <ItemGroup>
-      <_MartenStudioJasperFxGenerator Include="@(Analyzer)"
+      <_MartenJasperFxGenerator Include="@(Analyzer)"
                                       Condition="'%(Filename)%(Extension)' == 'JasperFx.Events.SourceGenerator.dll'" />
-      <Analyzer Remove="@(_MartenStudioJasperFxGenerator)" />
+      <Analyzer Remove="@(_MartenJasperFxGenerator)" />
     </ItemGroup>
   </Target>
 
@@ -108,29 +108,29 @@
     restore at 9.50.2, pack with no-restore and pack with no-build both fail here and write no nupkg,
     and a pack at the floor writes the same nuspec byte for byte.
   -->
-  <Target Name="MartenStudioPackOnlyAtTheMartenFloor" BeforeTargets="GenerateNuspec">
+  <Target Name="MartenPackOnlyAtTheMartenFloor" BeforeTargets="GenerateNuspec">
     <PropertyGroup>
-      <_MartenStudioAssetsFileExists>false</_MartenStudioAssetsFileExists>
-      <_MartenStudioAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_MartenStudioAssetsFileExists>
-      <_MartenStudioFloorLibraryKey>"Marten/$(DataStudioMartenFloor)"</_MartenStudioFloorLibraryKey>
-      <_MartenStudioFloorLibraryPattern>\x22Marten/$(DataStudioMartenFloor.Replace('.', '\.'))\x22</_MartenStudioFloorLibraryPattern>
-      <_MartenStudioAssets Condition="'$(_MartenStudioAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_MartenStudioAssets>
-      <_MartenStudioAssetsAtFloor>false</_MartenStudioAssetsAtFloor>
-      <_MartenStudioAssetsAtFloor Condition="'$(_MartenStudioAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_MartenStudioAssets), $(_MartenStudioFloorLibraryPattern)))">true</_MartenStudioAssetsAtFloor>
+      <_MartenAssetsFileExists>false</_MartenAssetsFileExists>
+      <_MartenAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_MartenAssetsFileExists>
+      <_MartenFloorLibraryKey>"Marten/$(DataStudioMartenFloor)"</_MartenFloorLibraryKey>
+      <_MartenFloorLibraryPattern>\x22Marten/$(DataStudioMartenFloor.Replace('.', '\.'))\x22</_MartenFloorLibraryPattern>
+      <_MartenAssets Condition="'$(_MartenAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_MartenAssets>
+      <_MartenAssetsAtFloor>false</_MartenAssetsAtFloor>
+      <_MartenAssetsAtFloor Condition="'$(_MartenAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_MartenAssets), $(_MartenFloorLibraryPattern)))">true</_MartenAssetsAtFloor>
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioMartenVersion)' != '$(DataStudioMartenFloor)'"
-           Text="MartenStudio is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten &gt;= $(DataStudioMartenVersion) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
-    <Error Condition="'$(_MartenStudioAssetsFileExists)' != 'true'"
-           Text="MartenStudio is packed only at the Marten floor ($(DataStudioMartenFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
-    <Error Condition="'$(_MartenStudioAssetsFileExists)' == 'true' and '$(_MartenStudioAssetsAtFloor)' != 'true'"
-           Text="MartenStudio is packed only at the Marten floor ($(DataStudioMartenFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Marten - it has no $(_MartenStudioFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's floor. Restore at the floor first: pack without --no-restore and without DataStudioMartenVersion." />
+           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten &gt;= $(DataStudioMartenVersion) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
+    <Error Condition="'$(_MartenAssetsFileExists)' != 'true'"
+           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
+    <Error Condition="'$(_MartenAssetsFileExists)' == 'true' and '$(_MartenAssetsAtFloor)' != 'true'"
+           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Marten - it has no $(_MartenFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's floor. Restore at the floor first: pack without --no-restore and without DataStudioMartenVersion." />
   </Target>
 
   <!--
-    MartenStudio depends on exactly its own PostgresStudio: `PostgresStudio [0.5.0]` in the nuspec, not
-    NuGet's default `>= 0.5.0`. The two assemblies are one program split in two files - PostgresStudio
-    grants MartenStudio its internals - so MartenStudio 0.5.0 beside PostgresStudio 0.5.1 is a
+    The Marten module depends on exactly its own Postgres module: `the Postgres module [0.5.0]` in the nuspec, not
+    NuGet's default `>= 0.5.0`. The two assemblies are one program split in two files - the Postgres module
+    grants the Marten module its internals - so the Marten module 0.5.0 beside the Postgres module 0.5.1 is a
     MissingMethodException on the first internal signature that moved. Measured by PS-0 (2026-10-20, SDK
     10.0.402): with this target the nuspec says version="[1.2.3]", without it version="1.2.3".
 
@@ -139,9 +139,9 @@
     that metadata as a version RANGE. Bracketing it after that target is the whole change. Both names are
     NuGet-private, so the build's Pack target also asserts the nuspec text: a NuGet that renames them fails
     the build instead of shipping `>=`. The Error is the second half of the same defence: a pack that finds
-    no PostgresStudio project reference to pin refuses rather than shipping a package with no pin at all.
+    no Postgres module project reference to pin refuses rather than shipping a package with no pin at all.
 
-    A host that ends up with another PostgresStudio anyway - a central PackageVersion under transitive
+    A host that ends up with another Postgres module anyway - a central PackageVersion under transitive
     pinning drops it from the graph with no NuGet diagnostic at all (PS-0) - is stopped at startup by
     Internal/PostgresVersionGuard.cs.
   -->
@@ -152,7 +152,7 @@
       </_ProjectReferencesWithVersions>
     </ItemGroup>
     <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Postgres'))' == ''"
-           Text="MartenStudio must depend on exactly its own PostgresStudio build, and pack found no PostgresStudio project reference to pin." />
+           Text="DataStudio.Marten must depend on exactly its own DataStudio.Postgres build, and pack found no DataStudio.Postgres project reference to pin." />
   </Target>
 
 </Project>

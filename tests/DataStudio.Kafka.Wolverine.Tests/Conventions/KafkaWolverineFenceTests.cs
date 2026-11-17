@@ -6,9 +6,9 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Wolverine.Tests.Conventions;
 
 /// <summary>
-/// The adapter's fence (AGENTS.md hard rule 16, D43): DataStudio.Kafka.Wolverine references DataStudio.Kafka.Core and WolverineFx.Kafka only - no studio, no KStudio, no
+/// The adapter's fence (AGENTS.md hard rule 16, D43): DataStudio.Kafka.Wolverine references DataStudio.Kafka.Core and WolverineFx.Kafka only - no studio, no Kafka module, no
 /// Marten, Weasel or Npgsql - by project file, restore graph, built references and this suite's output folder. JasperFx arrives through WolverineFx,
-/// so it is not forbidden here; it is forbidden in KStudio, DataStudio.Kafka.Core and the studios by their own fences. And DataStudio.Kafka.Tests must not reference the
+/// so it is not forbidden here; it is forbidden in the Kafka module, DataStudio.Kafka.Core and the studios by their own fences. And DataStudio.Kafka.Tests must not reference the
 /// adapter, so that the module's own output folder stays free of Wolverine (<c>KafkaFenceTests</c>).
 /// </summary>
 public class KafkaWolverineFenceTests
@@ -16,7 +16,7 @@ public class KafkaWolverineFenceTests
     /// <summary>What the adapter may never reference, as the third-party families' name prefixes.</summary>
     private static readonly string[] ForbiddenFamilies = ["Marten", "Weasel", "Npgsql"];
 
-    /// <summary>The studio projects it may never reference, exactly or below (REVIEW-V2-R finding 1): the database module and the engine under it, Marten Studio and the samples.</summary>
+    /// <summary>The studio projects it may never reference, exactly or below (REVIEW-V2-R finding 1): the database module and the engine under it, the Marten module and the samples.</summary>
     private static readonly string[] ForbiddenDotted = ["DataStudio.Postgres", "DataStudio.Marten", "DataStudio.Sample"];
 
     /// <summary>The projects it may never reference, exactly: the shell, and the Kafka module that sits above the engine (its own engine, <c>DataStudio.Kafka.Core</c>, is below it).</summary>
@@ -46,7 +46,7 @@ public class KafkaWolverineFenceTests
     }
 
     [Fact]
-    public void The_project_file_references_KStudio_Core_and_WolverineFx_Kafka_only()
+    public void The_project_file_references_Kafka_Core_and_WolverineFx_Kafka_only()
     {
         XDocument project = XDocument.Load(RepositoryRoot.Combine("src", "DataStudio.Kafka.Wolverine", "DataStudio.Kafka.Wolverine.csproj"));
         string[] references = [.. project.Descendants()
@@ -75,7 +75,7 @@ public class KafkaWolverineFenceTests
     }
 
     [Fact]
-    public void The_built_assembly_references_no_studio_no_KStudio_and_no_Marten_family()
+    public void The_built_assembly_references_no_studio_no_Kafka_and_no_Marten_family()
     {
         string[] references = [.. typeof(KafkaWolverineExtensions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
@@ -91,11 +91,11 @@ public class KafkaWolverineFenceTests
         typeof(KafkaWolverineExtensions).Assembly.GetCustomAttributes(inherit: false)
             .Select(static x => x.GetType().FullName ?? string.Empty)
             .Should().NotContain(static x => x.Contains("JasperFx", StringComparison.Ordinal));
-        File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka.Wolverine", "DataStudio.Kafka.Wolverine.csproj")).Should().Contain("KStudioWolverineWithoutTheJasperFxSourceGenerator");
+        File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka.Wolverine", "DataStudio.Kafka.Wolverine.csproj")).Should().Contain("KafkaWolverineWithoutTheJasperFxSourceGenerator");
     }
 
     [Fact]
-    public void This_suites_output_folder_holds_no_studio_no_KStudio_and_no_Marten_family()
+    public void This_suites_output_folder_holds_no_studio_no_Kafka_and_no_Marten_family()
     {
         string[] files = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(static x => Path.GetFileNameWithoutExtension(x))];
 

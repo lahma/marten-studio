@@ -20,7 +20,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// G1M (issue #8, G1): MartenStudio's table checks judge every table of the store's schemas and of the ones the database
+/// G1M (issue #8, G1): The Marten module's table checks judge every table of the store's schemas and of the ones the database
 /// browser admits, with the store's declarations laid over the catalog - and nothing changes for a table the store
 /// declares.
 /// </summary>

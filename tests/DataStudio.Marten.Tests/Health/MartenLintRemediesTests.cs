@@ -205,7 +205,7 @@ public class MartenLintRemediesTests
 
         MartenTable hosts = new(SqlTestStoreSchema, "orders", DataStudio.Postgres.Services.Sources.StudioTableKind.Relational, DataStudio.Postgres.Services.Sources.StudioTableOwnership.Owned);
         Marten.RebuildBloatedIndex(hosts, IndexRow(hosts, "orders_by_note", "note"), IndexOrigin.Host)!.Code
-            .Should().Be("REINDEX INDEX CONCURRENTLY \"studio_sql\".\"orders_by_note\";", "the host's own table beside the store gets Postgres Studio's statement");
+            .Should().Be("REINDEX INDEX CONCURRENTLY \"studio_sql\".\"orders_by_note\";", "the host's own table beside the store gets the Postgres module's statement");
     }
 
     private const string SqlTestStoreSchema = "studio_sql";

@@ -153,7 +153,7 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
     {
         (MatrixServer leg, string database, string app) = await SeedAsync(matrix, 18, "x1_withheld");
 
-        // hr is the app's own schema, and not one BrowsableSchemas names (Postgres Studio's default is public alone): withheld.
+        // hr is the app's own schema, and not one BrowsableSchemas names (the Postgres module's default is public alone): withheld.
         await StatementsLive.ExecuteAsync(app,
             "create schema hr; "
             + "create table hr.salaries (id int primary key, amount int); "
@@ -220,7 +220,7 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
             ("graded", "graded(o.id, 7)"),
         ];
 
-        // hr withheld - Postgres Studio's default BrowsableSchemas is public alone.
+        // hr withheld - the Postgres module's default BrowsableSchemas is public alone.
         await using (StudioHost withheld = StatementsLive.Host(app))
         {
             await using StudioCircuit circuit = withheld.Circuit();

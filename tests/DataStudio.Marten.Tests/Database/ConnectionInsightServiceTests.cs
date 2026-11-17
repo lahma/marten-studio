@@ -139,7 +139,7 @@ public class ConnectionInsightServiceTests
 
         view.Cards.Should().Contain(static x => x.Id == "conn-card-test");
         view.Contributed.Should().Contain(static x => x.Title == "Test");
-        view.Contributed.Select(static x => x.Id).Should().Contain("conn-marten", "AddMartenStudio registers the Marten contributor beside the test's own");
+        view.Contributed.Select(static x => x.Id).Should().Contain("conn-marten", "AddMarten registers the Marten contributor beside the test's own");
 
         recording.Seen.Should().NotBeNull();
         JsonSerializer.Serialize(recording.Seen, DumpOptions)
@@ -368,7 +368,7 @@ public class ConnectionInsightServiceTests
                 "Host=db.example;Database=app;Username=svc;Application Name=billing-api;Password=" + PasswordSentinel + ";Persist Security Info=true",
                 new ConnectionReadContext()),
             Observed = new ConnectionObserved(
-                "svc", "svc", "app", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "PostgresStudio",
+                "svc", "svc", "app", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "Data Studio",
                 0, 0, 0, null, "scram-sha-256", true, "TLSv1.3", "TLS_AES_256_GCM_SHA384", 256, null, null,
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
         };

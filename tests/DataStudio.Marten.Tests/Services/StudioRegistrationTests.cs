@@ -39,11 +39,11 @@ namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
 /// What <c>AddDataStudio().AddMarten()</c> puts in a host's container, pinned: moving a shared service's registration from
-/// <c>AddMarten()</c> into <see cref="StudioCoreRegistration" /> (PS-1e) must leave a MartenStudio host with the
+/// <c>AddMarten()</c> into <see cref="StudioCoreRegistration" /> (PS-1e) must leave a Marten module host with the
 /// same services, the same lifetimes and the same implementations - and every enumerable service in the same order.
 /// </summary>
 /// <remarks>
-/// The list was taken from <c>AddMartenStudio()</c> at the commit before the move and is compared after it. Only the
+/// The list was taken from <c>AddMarten()</c> at the commit before the move and is compared after it. Only the
 /// studio's own registrations are listed - a descriptor whose service, implementation or factory result is a studio type,
 /// or a generic over one - because the framework's (<c>AddRazorComponents()</c>, <c>AddHttpContextAccessor()</c>) are
 /// the framework's to change. Types are named with <c>typeof</c>, so the namespace move and PS-2's type renames carry
@@ -61,7 +61,7 @@ public class StudioRegistrationTests
     }
 
     /// <summary>
-    /// <c>AddMartenStudio()</c>'s registrations at the commit before PS-1e, less the one PS-1e removed on purpose:
+    /// <c>AddMarten()</c>'s registrations at the commit before PS-1e, less the one PS-1e removed on purpose:
     /// <c>IHealthRemedyProvider</c>, folded into <see cref="IHealthTableRemedies" /> (its one instance,
     /// <c>MartenHealthRemedyProvider</c>, is still registered as that).
     /// </summary>
@@ -139,7 +139,7 @@ public class StudioRegistrationTests
         (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(ForeignKeyWhatIfAction)),
         (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(SequentialScanWhatIfAction)),
 
-        // 1.2-SCOPE-3: Find by id - the circuit's service and Postgres Studio's own two kinds.
+        // 1.2-SCOPE-3: Find by id - the circuit's service and the Postgres module's own two kinds.
         (typeof(DataStudio.Postgres.Services.Find.FindService), ServiceLifetime.Scoped, How.Type, typeof(DataStudio.Postgres.Services.Find.FindService)),
         (typeof(DataStudio.Postgres.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(DataStudio.Postgres.Services.Find.RelationFindContributor)),
         (typeof(DataStudio.Postgres.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(DataStudio.Postgres.Services.Find.StatementFindContributor)),
@@ -309,7 +309,7 @@ public class StudioRegistrationTests
         string[] expected = Describe(Expected);
 
         expected.Should().HaveCount(Expected.Length, "the studio filter keeps every row of the expected list, or the comparison skips some");
-        actual.Should().Equal(expected, "the registrations a MartenStudio host gets are unchanged in effect:" + Environment.NewLine + Listing(services));
+        actual.Should().Equal(expected, "the registrations a Marten module host gets are unchanged in effect:" + Environment.NewLine + Listing(services));
     }
 
     /// <summary>What each factory registration of the studio makes, by its concrete type.</summary>

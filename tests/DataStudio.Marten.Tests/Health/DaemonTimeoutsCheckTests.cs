@@ -176,7 +176,7 @@ public class DaemonTimeoutsCheckTests
     }
 
     [Fact]
-    public void It_is_MartenStudios_own_reads_the_server_and_lists_its_three_variants()
+    public void It_is_Marten_own_reads_the_server_and_lists_its_three_variants()
     {
         HealthCheckInfo info = HealthCheckRegistry.Describe(typeof(DaemonTimeoutsCheck));
 

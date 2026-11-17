@@ -6,7 +6,7 @@ using DataStudio.Sample.Postgres.Auth;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// The Postgres Studio sample, started exactly as <c>dotnet run</c> starts it - nothing configured - on real Kestrel:
+/// The Postgres sample, started exactly as <c>dotnet run</c> starts it - nothing configured - on real Kestrel:
 /// it starts a throwaway Postgres of its own, seeds the admin database and the three tenant databases, and serves
 /// <c>/postgres</c> to a signed-in user with every database in the picker.
 /// </summary>
@@ -47,7 +47,7 @@ public class PostgresSampleHostTests
         using (HttpClient anonymous = Client(host))
         {
             using HttpResponseMessage refused = await anonymous.GetAsync(new Uri("/studio", UriKind.Relative), Token);
-            refused.StatusCode.Should().Be(HttpStatusCode.Redirect, "the mapping requires the PostgresStudio policy");
+            refused.StatusCode.Should().Be(HttpStatusCode.Redirect, "the mapping requires the the Postgres module policy");
             refused.Headers.Location!.OriginalString.Should().Contain("/login");
         }
 

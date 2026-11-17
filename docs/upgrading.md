@@ -196,6 +196,15 @@ where 1.x showed `(Postgres Studio Diagnostics)`, and the connection history's o
 (1.x: `(Marten Studio history)`, `(Postgres Studio history)`). A health snapshot's producer is
 `Data Studio {release}`; a snapshot a 1.x studio wrote still compares, with a notice that its producer was 1.x.
 
+### What a Kafka broker sees
+
+The Kafka module's clients carry Data Studio's names: a scan consumer's group id starts with `data-studio-` (1.x: `kstudio-`),
+a client id ends with `.data-studio` (1.x: `.kstudio`) and an exported file is named `data-studio-{cluster}-{part}-{timestamp}Z.{ext}`
+(1.x: `kstudio-…`). An operator whose ACLs name the `kstudio-` group prefix adds a `PREFIXED` ACL for `data-studio-`: reading
+needs no group ACL, and what leaving it out costs is one refused group lookup per scan in the broker's authorizer log. A host
+that set `GroupIdPrefix` itself is unaffected, and a quota or monitor keyed on the old client id suffix must name the new one.
+The Kafka sample's reuse variable is `DATASTUDIO_KAFKA_SAMPLE_REUSE` (1.x: `KSTUDIO_SAMPLE_REUSE`).
+
 ### Wording, assets and what the studio does not rename
 
 The studio's own sentences say Data Studio, name the module a sentence belongs to, and tell the option that turns something on

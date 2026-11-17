@@ -11,7 +11,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Tests.Sources;
 
 /// <summary>
-/// PostgresStudio's five seam implementations (PS-3b): what a plain data source declares, which tables its health checks
+/// The Postgres module's five seam implementations (PS-3b): what a plain data source declares, which tables its health checks
 /// judge and whose each one is, what its remedies say, how its locks are labelled, and where its links go.
 /// </summary>
 public sealed class PostgresSeamTests : IDisposable

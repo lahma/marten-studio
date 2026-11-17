@@ -56,8 +56,8 @@ public class DocumentDetailVersionedLiveTests(DocumentDetailVersionedLiveTests.F
         {
             await using IDocumentSession session = Marten.Store.LightweightSession();
 
-            session.Store(new VersionedSiteDocument { Id = Id, Name = "Marten Studio" });
-            session.Store(new RevisionedSiteDocument { Id = Id, Name = "Marten Studio" });
+            session.Store(new VersionedSiteDocument { Id = Id, Name = "Data Studio" });
+            session.Store(new RevisionedSiteDocument { Id = Id, Name = "Data Studio" });
 
             await session.SaveChangesAsync();
         }

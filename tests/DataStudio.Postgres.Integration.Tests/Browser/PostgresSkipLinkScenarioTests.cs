@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// The skip link (1.1-UX-FIX-B) in Postgres Studio's own shell: the first Tab stop of a page, drawn only while it has focus,
+/// The skip link (1.1-UX-FIX-B) in the Postgres module's own shell: the first Tab stop of a page, drawn only while it has focus,
 /// and it moves focus to the content region without navigating (the document's <c>&lt;base href&gt;</c> would otherwise send a
 /// bare fragment to the studio's front page).
 /// </summary>

@@ -23,8 +23,8 @@ public class KafkaEngineOptions
     /// <summary>What a scan may cost (D41).</summary>
     public KafkaScanLimits Limits { get; } = new();
 
-    /// <summary>The prefix of the group id every scan consumer gets, followed by the scan's id. Default <c>kstudio-</c>.</summary>
-    public string GroupIdPrefix { get; set; } = "kstudio-";
+    /// <summary>The prefix of the group id every scan consumer gets, followed by the scan's id. Default <c>data-studio-</c>.</summary>
+    public string GroupIdPrefix { get; set; } = "data-studio-";
 
     /// <summary>How long the engine waits for one request to a cluster (1 second to 2 minutes). Default 10 seconds.</summary>
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(10);

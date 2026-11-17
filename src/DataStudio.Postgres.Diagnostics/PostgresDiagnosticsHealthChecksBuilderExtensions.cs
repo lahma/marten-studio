@@ -60,7 +60,7 @@ public static class PostgresDiagnosticsHealthChecksBuilderExtensions
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
     public static IHealthChecksBuilder AddPostgresDiagnostics(
         this IHealthChecksBuilder builder,
-        string name = "postgres-studio",
+        string name = "data-studio-postgres",
         HealthStatus? failureStatus = null,
         IEnumerable<string>? tags = null,
         TimeSpan? timeout = null)

@@ -12,7 +12,7 @@ namespace DataStudio.Postgres.Tests.Diagnostics;
 /// The host gate's sentinel tests (API design §5.3): a sentinel in every Activity-grade place - an evidence value, a tenant id, a
 /// statement text, an application name and a finding of an Activity check - and none of them anywhere in <c>ToJson()</c>
 /// without <c>IncludeActivity</c>, every count right; with it, every one, while the content rules - a literal-bearing text
-/// withheld, comments masked - still hold. (A hidden document type's absence is MartenStudio's: <c>DiagnosticsServiceTests</c>.)
+/// withheld, comments masked - still hold. (A hidden document type's absence is the Marten module's: <c>DiagnosticsServiceTests</c>.)
 /// </summary>
 public class HostGateSentinelTests
 {

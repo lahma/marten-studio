@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <!-- CS1591 (missing XML doc comment) is deliberately NOT silenced here: MartenStudio is a documented
+    <!-- CS1591 (missing XML doc comment) is deliberately NOT silenced here: The Marten module is a documented
          public library, so a missing doc comment must fail the build in src/. .editorconfig turns it off
          again for build/, tests/, samples/ and *.razor, where it is noise. GenerateDocumentationFile is
          also what lets IDE0005 (unnecessary usings) run under EnforceCodeStyleInBuild. -->
@@ -35,10 +35,10 @@
   </PropertyGroup>
 
   <!-- K8: the Kafka module ships as a preview beside the family release. The three Kafka projects (DataStudio.Kafka.Core, DataStudio.Kafka, DataStudio.Kafka.Wolverine) pack
-       at `<version>-<label>`, the version being CHANGELOG.md's (above); no other project reads the label. To graduate KStudio, empty it:
+       at `<version>-<label>`, the version being CHANGELOG.md's (above); no other project reads the label. To graduate the Kafka module, empty it:
        they then pack at the family version and stamp no label. The rest of graduation is words (the READMEs' "preview" and the
        prerelease flag of the install lines) and, a release later, the three projects' empty PackageValidationBaselineVersion element
-       (build-and-release.md, "KStudio's preview label"). -->
+       (build-and-release.md, "the Kafka module's preview label"). -->
   <PropertyGroup>
     <KafkaPrereleaseLabel>preview.1</KafkaPrereleaseLabel>
   </PropertyGroup>

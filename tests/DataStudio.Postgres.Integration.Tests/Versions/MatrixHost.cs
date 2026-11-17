@@ -14,11 +14,11 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Integration.Tests.Versions;
 
 /// <summary>
-/// A PostgresStudio host over one matrix server, as one role, in one database: the studio's own services, resolved the way
+/// A Postgres module host over one matrix server, as one role, in one database: the studio's own services, resolved the way
 /// a visitor's would be, so a matrix read runs exactly the code a page runs.
 /// </summary>
 /// <remarks>
-/// No Marten anywhere: the host registers the role's <see cref="NpgsqlDataSource" /> unkeyed, which PostgresStudio
+/// No Marten anywhere: the host registers the role's <see cref="NpgsqlDataSource" /> unkeyed, which the Postgres module
 /// discovers on its own, and admits <see cref="MatrixReads.Schemas" /> with every capability on - so the folder can move to
 /// <c>tests/DataStudio.Postgres.Integration.Tests</c> as it is (PS-5).
 /// </remarks>
@@ -58,7 +58,7 @@ internal sealed class MatrixHost : IAsyncDisposable
     /// <param name="role">The role the studio connects as.</param>
     /// <param name="database">The database it reads.</param>
     /// <param name="services">
-    /// Registrations made before <c>AddPostgresStudio()</c>, whose <c>TryAdd</c> then keeps them - a
+    /// Registrations made before <c>AddPostgres()</c>, whose <c>TryAdd</c> then keeps them - a
     /// <c>HealthCheckRegistry.ForTypes(...)</c> of a test's own checks, say.
     /// </param>
     /// <param name="options">

@@ -11,7 +11,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Tests;
 
 /// <summary>
-/// The options' defaults and their validation - MartenStudio's bounds and messages in PostgresStudio's own names - and the
+/// The options' defaults and their validation - the Marten module's bounds and messages in the Postgres module's own names - and the
 /// source names <c>AddDataSource</c> and <c>AddDatabaseSource</c> may carry. Plus the inbound types' own checks.
 /// </summary>
 public class PostgresOptionsTests
@@ -27,7 +27,7 @@ public class PostgresOptionsTests
     private static Action ResolveAction(Action<PostgresOptions> configure) => () => Resolve(configure);
 
     [Fact]
-    public void The_defaults_mirror_MartenStudios_and_name_PostgresStudio()
+    public void The_defaults_mirror_Marten_and_name_Postgres()
     {
         PostgresOptions options = new();
 
@@ -113,14 +113,14 @@ public class PostgresOptionsTests
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["PostgresStudio:BrowsableSchemas:0"] = "legacy",
-                ["PostgresStudio:BrowsableSchemas:1"] = "qrtz",
+                ["Postgres:BrowsableSchemas:0"] = "legacy",
+                ["Postgres:BrowsableSchemas:1"] = "qrtz",
             })
             .Build();
 
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
-        services.Configure<PostgresOptions>(configuration.GetSection("PostgresStudio"));
+        services.Configure<PostgresOptions>(configuration.GetSection("Postgres"));
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IOptions<PostgresOptions>>().Value.BrowsableSchemas.Should().Equal("legacy", "qrtz");
@@ -210,7 +210,7 @@ public class PostgresOptionsTests
     }
 
     [Fact]
-    public void The_other_bounds_are_MartenStudios_in_PostgresStudios_names()
+    public void The_other_bounds_are_Marten_in_Postgres_names()
     {
         ResolveAction(static options => options.MaxPageSize = 5001).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.MaxPageSize*");
         ResolveAction(static options => options.DefaultPageSize = 0).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.DefaultPageSize*");
@@ -236,7 +236,7 @@ public class PostgresOptionsTests
     }
 
     [Fact]
-    public void The_settings_speak_PostgresStudios_names_and_offer_four_capabilities()
+    public void The_settings_speak_Postgres_names_and_offer_four_capabilities()
     {
         PostgresOptions options = new() { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" };
         IStudioSettings settings = PostgresSettings.Of(options);
@@ -271,7 +271,7 @@ public class PostgresOptionsTests
 
     [Theory]
     [MemberData(nameof(EveryCapability))]
-    public void Every_capability_PostgresStudio_does_not_offer_throws_rather_than_reads_false(string name)
+    public void Every_capability_Postgres_does_not_offer_throws_rather_than_reads_false(string name)
     {
         StudioCapability capability = Enum.Parse<StudioCapability>(name);
         PostgresSettings settings = PostgresSettings.Of(new PostgresOptions { Capabilities = PostgresCapabilities.All() });
@@ -396,7 +396,7 @@ public class PostgresOptionsTests
     [InlineData("K10")]
     public void An_accepted_key_that_is_not_a_check_of_this_studio_is_refused_naming_the_key_and_nothing_else(string key)
     {
-        // D01 and K01 are Marten Studio's checks: in Postgres Studio's registry they do not exist.
+        // D01 and K01 are the Marten module's checks: in the Postgres module's registry they do not exist.
         OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks[key] = "a reason")
             .Should().Throw<OptionsValidationException>().Which;
 

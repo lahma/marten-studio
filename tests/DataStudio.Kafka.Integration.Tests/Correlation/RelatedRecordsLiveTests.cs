@@ -10,7 +10,7 @@ namespace DataStudio.Kafka.Integration.Tests.Correlation;
 
 /// <summary>
 /// <b>The M4 exit on real brokers (D42):</b> related records across an in topic and an out topic, found by the correlation fields of each, as the
-/// restricted principal <c>reader</c>. The services are KStudio's real ones composed by the real registrations (<see cref="LiveSearchHost" />), the
+/// restricted principal <c>reader</c>. The services are the Kafka module's real ones composed by the real registrations (<see cref="LiveSearchHost" />), the
 /// scan is one scan with one consumer whose group is never joined and commits nothing (hard rule 17), and a topic the principal may not describe is a
 /// lane with the engine's sentence while the others are read.
 /// </summary>
@@ -92,7 +92,7 @@ public abstract class RelatedRecordsLiveTests(KafkaFixture fixture)
 
         TopicNames().Should().BeEquivalentTo(topicsBefore, "a scan creates no topic");
 
-        string group = $"kstudio-{result.ScanId:N}";
+        string group = $"data-studio-{result.ScanId:N}";
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
@@ -133,7 +133,7 @@ public abstract class RelatedRecordsLiveTests(KafkaFixture fixture)
     {
         using IAdminClient client = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();
 
-        // Internal topics are the broker's own (kstudio.md D37, "The group coordinator on a pristine cluster").
+        // Internal topics are the broker's own (kafka.md D37, "The group coordinator on a pristine cluster").
         return [.. client.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(static x => x.Topic)
             .Where(static x => !x.StartsWith("__", StringComparison.Ordinal)).Order(StringComparer.Ordinal)];
     }

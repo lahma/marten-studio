@@ -6,8 +6,8 @@ namespace DataStudio.Sample.Kafka.Wolverine;
 
 /// <summary>
 /// The Wolverine handler of <see cref="PlaceCheckout" />: it stores a <see cref="CheckoutOrder" /> in the sample's Marten store, in the message's
-/// tenant, and returns the <see cref="CheckoutConfirmed" /> (with the order id as its key) Wolverine publishes to <c>checkout.confirmed.v1</c>. It is application code: KStudio and
-/// Marten Studio only ever read what it wrote.
+/// tenant, and returns the <see cref="CheckoutConfirmed" /> (with the order id as its key) Wolverine publishes to <c>checkout.confirmed.v1</c>. It is application code: The Kafka module and
+/// The Marten module only ever read what it wrote.
 /// </summary>
 public static class PlaceCheckoutHandler
 {

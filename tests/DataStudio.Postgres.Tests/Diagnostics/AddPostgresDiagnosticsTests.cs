@@ -154,7 +154,7 @@ public class AddPostgresDiagnosticsTests
     }
 
     [Fact]
-    public void Calling_it_twice_behaves_as_calling_AddPostgresStudio_twice_does()
+    public void Calling_it_twice_behaves_as_calling_AddPostgres_twice_does()
     {
         ServiceCollection services = Engine();
         services.AddPostgresDiagnostics();

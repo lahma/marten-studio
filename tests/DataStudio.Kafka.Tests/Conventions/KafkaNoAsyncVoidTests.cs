@@ -7,7 +7,7 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// AGENTS.md hard rule 6 for KStudio: no <c>async void</c> anywhere in KStudio's sources (<c>src/DataStudio.Kafka.Core</c>, and <c>src/DataStudio.Kafka</c> once
+/// AGENTS.md hard rule 6 for the Kafka module: no <c>async void</c> anywhere in the Kafka module's sources (<c>src/DataStudio.Kafka.Core</c>, and <c>src/DataStudio.Kafka</c> once
 /// M2 adds it). The source scan strips comments and string literals first (<see cref="SourceScanner" />, shared with the studios' scan); the
 /// compiled-assembly scan is hard rule 6's other half (1.2-HEADER-FU, REVIEW-SCAF follow-up 3): an <c>async</c> lambda converted to an
 /// <c>Action</c>, an <c>async</c> local function returning <c>void</c> or one added to an event is an <c>async void</c> with different
@@ -21,9 +21,9 @@ public class KafkaNoAsyncVoidTests
     private static readonly Regex AsyncVoid = new(@"\basync\s+void\b", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
 
     [Fact]
-    public void No_kstudio_source_file_declares_an_async_void()
+    public void No_kafka_source_file_declares_an_async_void()
     {
-        string[] files = KStudioSourceFiles();
+        string[] files = KafkaSourceFiles();
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
@@ -39,7 +39,7 @@ public class KafkaNoAsyncVoidTests
     }
 
     [Fact]
-    public void No_compiled_method_in_a_kstudio_assembly_is_an_async_void()
+    public void No_compiled_method_in_a_kafka_assembly_is_an_async_void()
     {
         Assembly[] assemblies = [typeof(KafkaEngineOptions).Assembly, typeof(KafkaOptions).Assembly];
 
@@ -82,7 +82,7 @@ public class KafkaNoAsyncVoidTests
 
     private static readonly string[] SourceProjects = ["DataStudio.Kafka.Core", "DataStudio.Kafka"];
 
-    private static string[] KStudioSourceFiles() =>
+    private static string[] KafkaSourceFiles() =>
         [
             .. SourceProjects
                 .Select(static x => RepositoryRoot.Combine("src", x))

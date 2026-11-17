@@ -147,7 +147,7 @@ public class StudioLintCheckTests
 
     // ---- K07 counts every module's capabilities (REVIEW-V2-B finding 1) ----------------------------------------------
 
-    private static readonly StudioModuleCapabilitiesOn KafkaOn = new("KStudio for Apache Kafka", ["SearchRecords", "ExportRecords"]);
+    private static readonly StudioModuleCapabilitiesOn KafkaOn = new("Kafka", ["SearchRecords", "ExportRecords"]);
 
     [Theory]
     [InlineData(false)]
@@ -160,9 +160,9 @@ public class StudioLintCheckTests
         HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value.Contains("SearchRecords (KStudio for Apache Kafka)", StringComparison.Ordinal)
-            && x.Value.Contains("ExportRecords (KStudio for Apache Kafka)", StringComparison.Ordinal));
-        finding.WhyItMatters.Should().Contain("KStudio for Apache Kafka decide what it reaches of its own");
+        finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value.Contains("SearchRecords (Kafka)", StringComparison.Ordinal)
+            && x.Value.Contains("ExportRecords (Kafka)", StringComparison.Ordinal));
+        finding.WhyItMatters.Should().Contain("Kafka decide what it reaches of its own");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public class StudioLintCheckTests
         HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Evidence.Single(static x => x.Label == "Capabilities on").Value.Should().Be("SearchRecords (KStudio for Apache Kafka), ExportRecords (KStudio for Apache Kafka)");
+        finding.Evidence.Single(static x => x.Label == "Capabilities on").Value.Should().Be("SearchRecords (Kafka), ExportRecords (Kafka)");
     }
 
     [Fact]

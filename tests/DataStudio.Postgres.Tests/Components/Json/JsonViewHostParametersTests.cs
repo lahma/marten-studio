@@ -5,7 +5,7 @@ using DataStudio.Components.Json;
 namespace DataStudio.Postgres.Tests.Components.Json;
 
 /// <summary>
-/// The three parameters a host that is not a Postgres studio sets on <c>JsonView</c> (KStudio shows a Kafka value with it): no download, no Postgres
+/// The three parameters a host that is not a Postgres studio sets on <c>JsonView</c> (the Kafka module shows a Kafka value with it): no download, no Postgres
 /// expressions in the node menu, and a "Copy as search" the host answers. Their defaults leave both studios as they were.
 /// </summary>
 public class JsonViewHostParametersTests

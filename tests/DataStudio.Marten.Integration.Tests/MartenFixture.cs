@@ -21,7 +21,7 @@ namespace DataStudio.Marten.Integration.Tests;
 /// <remarks>
 /// <para>
 /// <b>What makes this worth having.</b> Everything here goes <em>through</em> the studio's own services:
-/// the container is built with <c>AddMartenStudio()</c> beside <c>AddMarten()</c>, and a data service is
+/// the container is built with <c>AddMarten()</c> beside <c>AddMarten()</c>, and a data service is
 /// resolved from a scope, so every call passes through <see cref="StudioScopeResolver" /> and the
 /// authorization it runs first. A test that reached for an <c>IDocumentStore</c> directly would prove that
 /// Postgres works, which nobody doubts, rather than that the studio works.

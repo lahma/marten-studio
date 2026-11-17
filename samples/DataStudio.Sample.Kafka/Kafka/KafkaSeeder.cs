@@ -5,7 +5,7 @@ namespace DataStudio.Sample.Kafka.Kafka;
 
 /// <summary>
 /// What the seeder needs of a cluster, in the shape of the producer and admin client it is built on, so that a recording fake stands in for
-/// them in the fast tests (D-UI decision 18). This is the <i>sample's</i> producer and consumer, never KStudio's: KStudio reads and never writes.
+/// them in the fast tests (D-UI decision 18). This is the <i>sample's</i> producer and consumer, never the Kafka module's: The Kafka module reads and never writes.
 /// </summary>
 internal interface IKafkaSeedTarget
 {

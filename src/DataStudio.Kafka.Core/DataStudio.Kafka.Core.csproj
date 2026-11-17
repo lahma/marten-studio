@@ -22,17 +22,17 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
-  <!-- K8: the preview label (Directory.Build.props, KafkaPrereleaseLabel). Only the three KStudio projects read it. The package and the
+  <!-- K8: the preview label (Directory.Build.props, KafkaPrereleaseLabel). Only the three Kafka projects read it. The package and the
        informational version are `<version>-<label>`; AssemblyVersion and FileVersion stay numeric. `Version` is the CHANGELOG's, passed by Pack
        as a global property, so it is read here and never set. An empty label packs at the family version (the graduation path). The
        label is also stamped into the assembly, so the version guards can tell the preview suffix from the family's own version. -->
   <PropertyGroup>
-    <KStudioBaseVersion>$(Version)</KStudioBaseVersion>
-    <KStudioBaseVersion Condition="'$(KStudioBaseVersion)' == ''">$(VersionPrefix)</KStudioBaseVersion>
+    <KafkaBaseVersion>$(Version)</KafkaBaseVersion>
+    <KafkaBaseVersion Condition="'$(KafkaBaseVersion)' == ''">$(VersionPrefix)</KafkaBaseVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
-    <PackageVersion>$(KStudioBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>
-    <InformationalVersion>$(KStudioBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>
+    <PackageVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>
+    <InformationalVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>
   </PropertyGroup>
   <ItemGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
@@ -66,30 +66,30 @@
 
   <!--
     The package is packed at the Confluent.Kafka floor and nowhere else - the same refusal, for the same reason, as
-    PostgresStudioDiagnosticsPackOnlyAtTheNpgsqlFloor in src/DataStudio.Postgres.Diagnostics. A nupkg packed after a restore at
+    PostgresDiagnosticsPackOnlyAtTheNpgsqlFloor in src/DataStudio.Postgres.Diagnostics. A nupkg packed after a restore at
     Confluent.Kafka 2.16.0 would say `Confluent.Kafka >= 2.16.0` and raise every Wolverine host's Confluent.Kafka (WolverineFx.Kafka
     pins the floor). The build's Pack target refuses first and names the Fallout parameter (AssertPackingAtTheConfluentFloor); this is
     the refusal for a bare `dotnet pack`, by property and by project.assets.json (the dependency range is written from that file, so a
-    restore at the latest followed by a pack with no-restore would pass a property-only check). KStudio and DataStudio.Kafka.Wolverine take the
+    restore at the latest followed by a pack with no-restore would pass a property-only check). The Kafka module and DataStudio.Kafka.Wolverine take the
     same range transitively; Pack asserts their nuspecs.
   -->
-  <Target Name="KStudioCorePackOnlyAtTheConfluentFloor" BeforeTargets="GenerateNuspec">
+  <Target Name="KafkaCorePackOnlyAtTheConfluentFloor" BeforeTargets="GenerateNuspec">
     <PropertyGroup>
-      <_KStudioCoreAssetsFileExists>false</_KStudioCoreAssetsFileExists>
-      <_KStudioCoreAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_KStudioCoreAssetsFileExists>
-      <_KStudioCoreFloorLibraryKey>"Confluent.Kafka/$(DataStudioConfluentFloor)"</_KStudioCoreFloorLibraryKey>
-      <_KStudioCoreFloorLibraryPattern>\x22Confluent\.Kafka/$(DataStudioConfluentFloor.Replace('.', '\.'))\x22</_KStudioCoreFloorLibraryPattern>
-      <_KStudioCoreAssets Condition="'$(_KStudioCoreAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_KStudioCoreAssets>
-      <_KStudioCoreAssetsAtFloor>false</_KStudioCoreAssetsAtFloor>
-      <_KStudioCoreAssetsAtFloor Condition="'$(_KStudioCoreAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_KStudioCoreAssets), $(_KStudioCoreFloorLibraryPattern)))">true</_KStudioCoreAssetsAtFloor>
+      <_KafkaCoreAssetsFileExists>false</_KafkaCoreAssetsFileExists>
+      <_KafkaCoreAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_KafkaCoreAssetsFileExists>
+      <_KafkaCoreFloorLibraryKey>"Confluent.Kafka/$(DataStudioConfluentFloor)"</_KafkaCoreFloorLibraryKey>
+      <_KafkaCoreFloorLibraryPattern>\x22Confluent\.Kafka/$(DataStudioConfluentFloor.Replace('.', '\.'))\x22</_KafkaCoreFloorLibraryPattern>
+      <_KafkaCoreAssets Condition="'$(_KafkaCoreAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_KafkaCoreAssets>
+      <_KafkaCoreAssetsAtFloor>false</_KafkaCoreAssetsAtFloor>
+      <_KafkaCoreAssetsAtFloor Condition="'$(_KafkaCoreAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_KafkaCoreAssets), $(_KafkaCoreFloorLibraryPattern)))">true</_KafkaCoreAssetsAtFloor>
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioConfluentVersion)' != '$(DataStudioConfluentFloor)'"
            Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor), Directory.Packages.props), and this pack asks for Confluent.Kafka $(DataStudioConfluentVersion). A package packed here would depend on Confluent.Kafka &gt;= $(DataStudioConfluentVersion) and raise every host's Confluent.Kafka. Pack without DataStudioConfluentVersion, or raise DataStudioConfluentFloor deliberately and record why in AGENTS.md, Package budget changes." />
-    <Error Condition="'$(_KStudioCoreAssetsFileExists)' != 'true'"
+    <Error Condition="'$(_KafkaCoreAssetsFileExists)' != 'true'"
            Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
-    <Error Condition="'$(_KStudioCoreAssetsFileExists)' == 'true' and '$(_KStudioCoreAssetsAtFloor)' != 'true'"
-           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Confluent.Kafka - it has no $(_KStudioCoreFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Confluent.Kafka. Restore at the floor first: pack without --no-restore and without DataStudioConfluentVersion." />
+    <Error Condition="'$(_KafkaCoreAssetsFileExists)' == 'true' and '$(_KafkaCoreAssetsAtFloor)' != 'true'"
+           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Confluent.Kafka - it has no $(_KafkaCoreFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Confluent.Kafka. Restore at the floor first: pack without --no-restore and without DataStudioConfluentVersion." />
   </Target>
 
 </Project>

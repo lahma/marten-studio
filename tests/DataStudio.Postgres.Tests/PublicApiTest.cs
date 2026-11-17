@@ -5,12 +5,12 @@ using PublicApiGenerator;
 namespace DataStudio.Postgres.Tests;
 
 /// <summary>
-/// Snapshots the whole public surface of the PostgresStudio package.
+/// Snapshots the whole public surface of the Postgres module package.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The surface is the six registration types - three static classes, two classes and one record, mirroring
-/// MartenStudio's - and the six inbound types a host implements or builds: <c>IPostgresDatabaseSource</c>,
+/// The Marten module's - and the six inbound types a host implements or builds: <c>IPostgresDatabaseSource</c>,
 /// <c>IPostgresCapacitySource</c>, <c>PostgresComputeCapacity</c>, <c>PostgresDatabaseRef</c>,
 /// <c>PostgresServerInfo</c> and <c>PostgresPlatformKind</c> - and the diagnostics read model (D31, W5-API): the
 /// <c>IPostgresDiagnostics</c> service, its request, its snapshot, findings and checks, the four sections and their rows, and
@@ -49,7 +49,7 @@ public class PublicApiTest
     {
         var options = new ApiGeneratorOptions
         {
-            // The same generator options as MartenStudio's baseline, for the same reasons.
+            // The same generator options as the Marten module's baseline, for the same reasons.
             ExcludeAttributes =
             [
                 "System.Diagnostics.DebuggerDisplayAttribute",

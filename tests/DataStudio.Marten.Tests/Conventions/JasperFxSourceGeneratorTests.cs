@@ -15,7 +15,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// processes, unconditionally. On <c>DataStudio.Marten.dll</c> that would be a JasperFx attribute on the
 /// shipped assembly whenever it was built at a newer Marten than the floor, and a line in the public API
 /// baseline that is present on one CI leg and absent on the other. The
-/// <c>MartenStudioWithoutTheJasperFxSourceGenerator</c> target in <c>src/DataStudio.Marten/DataStudio.Marten.csproj</c>
+/// <c>MartenWithoutTheJasperFxSourceGenerator</c> target in <c>src/DataStudio.Marten/DataStudio.Marten.csproj</c>
 /// takes the generator out of that one compilation - <c>ExcludeAssets="analyzers"</c> was measured not to
 /// (docs/maintainers/package-budget-changes.md, 2026-10-15).
 /// </para>
@@ -38,7 +38,7 @@ public class JasperFxSourceGeneratorTests
 
         CarriesMarker(studio).Should().BeFalse(
             "DataStudio.Marten.dll declares no aggregate and no projection; the only thing the generator would put " +
-            "in it is a JasperFx attribute on the shipped assembly. See MartenStudioWithoutTheJasperFxSourceGenerator " +
+            "in it is a JasperFx attribute on the shipped assembly. See MartenWithoutTheJasperFxSourceGenerator " +
             "in src/DataStudio.Marten/DataStudio.Marten.csproj");
     }
 

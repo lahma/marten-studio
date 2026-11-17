@@ -24,7 +24,7 @@ public class HealthLiveTestConventionTests
     /// Marten type goes there - and where: that suite's own convention (its <c>ProvenHere</c>) holds each to a fires and a
     /// quiet test, so here each is only named, never proven twice.
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, string> ProvenInPostgresStudioSuite = new Dictionary<string, string>(StringComparer.Ordinal)
+    internal static readonly IReadOnlyDictionary<string, string> ProvenInPostgresSuite = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["R02"] = "archive commands that fail, hang and succeed - Replication/ArchiverAndCheckpointLiveTests",
         ["R03"] = "a primary and standby pair on 17 and 18 - Replication/StandbyLagLiveTests",
@@ -61,7 +61,7 @@ public class HealthLiveTestConventionTests
     {
         IReadOnlyList<string> codes =
         [
-            .. StudioHealthChecks.Registry.All.Select(static x => x.Info.Code).Where(static x => !ProvenInPostgresStudioSuite.ContainsKey(x)),
+            .. StudioHealthChecks.Registry.All.Select(static x => x.Info.Code).Where(static x => !ProvenInPostgresSuite.ContainsKey(x)),
         ];
         codes.Should().NotBeEmpty();
 
@@ -71,21 +71,21 @@ public class HealthLiveTestConventionTests
         problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
     }
 
-    /// <summary>A check proven in the other suite is a shared one this studio ships - never one of MartenStudio's own.</summary>
+    /// <summary>A check proven in the other suite is a shared one this studio ships - never one of the Marten module's own.</summary>
     [Fact]
-    public void Every_check_proven_in_the_PostgresStudio_suite_is_a_shipped_shared_check()
+    public void Every_check_proven_in_the_Postgres_suite_is_a_shipped_shared_check()
     {
-        foreach (string code in ProvenInPostgresStudioSuite.Keys)
+        foreach (string code in ProvenInPostgresSuite.Keys)
         {
             DataStudio.Postgres.Services.Health.HealthCheckDescriptor? check = StudioHealthChecks.Registry.Find(code);
 
-            check.Should().NotBeNull(code + " is listed but is not a check MartenStudio ships");
+            check.Should().NotBeNull(code + " is listed but is not a check the Marten module ships");
 
             // The shared studio's two assemblies: the engine's checks, and the three that judge a studio's own exposure.
             System.Reflection.Assembly assembly = check!.Info.CheckType.Assembly;
             (assembly == typeof(DataStudio.Postgres.Services.Health.HealthCheckRegistry).Assembly
                 || assembly == typeof(DataStudio.Postgres.Services.Settings.StudioDescriptor).Assembly)
-                .Should().BeTrue(code + " is MartenStudio's own, whose live proof needs a Marten store and belongs here");
+                .Should().BeTrue(code + " is the Marten module's own, whose live proof needs a Marten store and belongs here");
         }
     }
 

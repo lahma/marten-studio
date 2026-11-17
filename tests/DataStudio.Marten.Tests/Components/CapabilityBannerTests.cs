@@ -75,7 +75,8 @@ public class CapabilityBannerTests
 
     /// <summary>
     /// The chip's one template names the switch that is on, a module's own included: under the module's first group a line says so, and while the
-    /// module's switch is off the line is not drawn.
+    /// module's switch is off the line is not drawn. The module's own "<c>All()</c> turns every capability of this module on" line is drawn only
+    /// while no read-only switch is on, since while one is the line is false.
     /// </summary>
     [Fact]
     public void A_modules_own_ReadOnly_is_named_under_its_first_group_and_only_while_it_is_on()
@@ -87,10 +88,36 @@ public class CapabilityBannerTests
 
         banner.TextOfAll(".ms-popover-title").Should().Equal("Marten: reads authorized like writes", "Marten: mutating operations");
         banner.TextOfAll(".ms-popover-footnote").Should().Contain(static x => x.Contains("MartenOptions.ReadOnly is true, so every capability of this module is off.", StringComparison.Ordinal));
+        banner.TextOfAll(".ms-popover-footnote").Should().NotContain(static x => x.Contains("turns every capability of this module on", StringComparison.Ordinal));
 
         using var off = new StudioComponentContext().WithAllCapabilities();
 
-        off.Render<CapabilityBanner>().TextOfAll(".ms-popover-footnote").Should().NotContain(static x => x.Contains("is true, so every capability of this module is off", StringComparison.Ordinal));
+        var footnotes = off.Render<CapabilityBanner>().TextOfAll(".ms-popover-footnote");
+        footnotes.Should().NotContain(static x => x.Contains("is true, so every capability of this module is off", StringComparison.Ordinal));
+        footnotes.Should().ContainSingle(static x => x.Contains("MartenCapabilities.All() turns every capability of this module on", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The module's "<c>All()</c> turns every capability of this module on" line, in each of the four states of the two read-only switches: drawn
+    /// only with neither on. The shell's switch draws no popover at all, and the module's own draws the switch line instead of this one.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    public void The_all_line_is_drawn_only_while_no_read_only_switch_is_on(bool moduleReadOnly, bool shellReadOnly, bool drawn)
+    {
+        using var context = new StudioComponentContext().WithAllCapabilities();
+        context.Options.ReadOnly = moduleReadOnly;
+        context.ShellOptions.ReadOnly = shellReadOnly;
+
+        var banner = context.Render<CapabilityBanner>();
+
+        var lines = banner.FindAll(".ms-popover-footnote").Select(static x => x.TextContent)
+            .Where(static x => x.Contains("turns every capability of this module on", StringComparison.Ordinal)).ToList();
+
+        lines.Should().HaveCount(drawn ? 1 : 0);
     }
 
     /// <summary>

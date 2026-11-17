@@ -114,8 +114,8 @@ public class HealthSweepCacheTests
             .Should().NotContain(static x => x.Contains("Health", StringComparison.Ordinal),
                 "the advisor runs only when a page asks (plan §3.2)");
 
-        // Both studios' advisor types: the framework and the shared checks are PostgresStudio's since the move, and the
-        // Marten-only checks MartenStudio's.
+        // Both studios' advisor types: the framework and the shared checks are the Postgres module's since the move, and the
+        // Marten-only checks the Marten module's.
         Type[] advisor =
         [
             .. new[] { typeof(HealthSweepCache).Assembly, typeof(MartenOptions).Assembly }
@@ -126,7 +126,7 @@ public class HealthSweepCacheTests
         ];
 
         advisor.Should().Contain(typeof(HealthSweepCache), "the scan has to see the advisor it is about")
-            .And.Contain(static x => x.Namespace!.StartsWith("DataStudio.Marten.", StringComparison.Ordinal), "and MartenStudio's own checks with it");
+            .And.Contain(static x => x.Namespace!.StartsWith("DataStudio.Marten.", StringComparison.Ordinal), "and the Marten module's own checks with it");
 
         advisor
             .SelectMany(static x => x.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public))

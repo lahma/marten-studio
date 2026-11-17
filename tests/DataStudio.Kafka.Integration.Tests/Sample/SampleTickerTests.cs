@@ -14,7 +14,7 @@ namespace DataStudio.Kafka.Integration.Tests.Sample;
 /// a JSON value whose email the topic's rule masks, the seed creates the topic empty, and the settings the verifier uses lower the tail's pause and
 /// leave only search on.
 /// </summary>
-/// <remarks>These live in the live suite's project for the reason <c>SampleSeedTests</c> does: the sample hosts Marten Studio. They start no container.</remarks>
+/// <remarks>These live in the live suite's project for the reason <c>SampleSeedTests</c> does: the sample hosts the Marten module. They start no container.</remarks>
 public class SampleTickerTests
 {
     private static readonly DateTimeOffset At = new(2026, 11, 13, 9, 30, 15, 250, TimeSpan.Zero);
@@ -50,7 +50,7 @@ public class SampleTickerTests
     [Fact]
     public void The_judge_does_not_mind_the_heartbeat_topic()
     {
-        SampleKafkaJudge.Judge(["orders.v1", "heartbeats.v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
+        SampleKafkaJudge.Judge(["orders.v1", "heartbeats.v1", KafkaSeedPlan.MarkerTopic]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
         SampleKafkaJudge.Judge(["heartbeats.v1"]).Verdict.Should().Be(SampleKafkaVerdict.Empty, "a cluster with only the ticker's topic is not somebody's orders.v1");
     }
 

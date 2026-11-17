@@ -82,7 +82,7 @@ public class FindBoxTests
         string hintId = input.GetAttribute("aria-describedby")!;
         box.Find("#" + hintId).TextContent.Should().Be(
             "An exact table or view name, or a statement's queryid",
-            "Postgres Studio has no documents, streams or natural keys to offer (1.2-FINAL-FIX)");
+            "the Postgres module has no documents, streams or natural keys to offer (1.2-FINAL-FIX)");
 
         IElement toggle = box.Find("button.ms-find-toggle");
         toggle.GetAttribute("popovertarget").Should().Be("ms-find-popover");
@@ -247,7 +247,7 @@ public class FindBoxTests
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
 
-        context.State.ShowTenantSelector.Should().BeFalse("the premise: a Postgres Studio source has no tenants");
+        context.State.ShowTenantSelector.Should().BeFalse("the premise: a Postgres module source has no tenants");
         string panel = box.Find("[data-ms-find-panel]").TextContent;
         panel.Should().Contain("Nothing in ").And.Contain("matched \"nope\".");
         panel.Should().NotContain("tenant");

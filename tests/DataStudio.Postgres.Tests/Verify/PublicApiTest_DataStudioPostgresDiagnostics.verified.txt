@@ -136,7 +136,7 @@ namespace DataStudio.Postgres
     }
     public static class PostgresDiagnosticsHealthChecksBuilderExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresDiagnostics(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "postgres-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
+        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresDiagnostics(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "data-studio-postgres", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
     }
     public class PostgresDiagnosticsOptions
     {

@@ -158,7 +158,7 @@ internal sealed class FakeRelationshipDataService : IRelationshipDataService
     };
 
     /// <summary>
-    /// <see cref="WithTables" /> as a studio over plain data sources reads it: no document type at all - Postgres Studio has
+    /// <see cref="WithTables" /> as a studio over plain data sources reads it: no document type at all - the Postgres module has
     /// no node source - so only the keys between two tables, and <c>legacy.customer_credit</c>, whose one key pointed into a
     /// document table, has none.
     /// </summary>

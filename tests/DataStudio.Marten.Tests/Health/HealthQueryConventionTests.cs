@@ -41,7 +41,7 @@ namespace DataStudio.Marten.Tests.Health;
 /// readers' - are built in <c>src/DataStudio.Postgres.Diagnostics/Internal/Sql/</c>, the ones only the studio's UI runs (the SQL
 /// console's plans, the browser's rows, Relationships) in <c>src/DataStudio.Postgres/Internal/Sql/</c>, and the ones only a Marten
 /// store has (the daemon's and the event store's) in <c>src/DataStudio.Marten/Internal/Sql/</c>. The first two folders share the
-/// namespace <c>DataStudio.Postgres.Internal.Sql</c>, MartenStudio's has its own. Each assembly is exempt in its own folder and
+/// namespace <c>DataStudio.Postgres.Internal.Sql</c>, the Marten module's has its own. Each assembly is exempt in its own folder and
 /// nowhere else - by assembly and folder, not by namespace alone - so no folder can lend another its exemption.
 /// </para>
 /// <para>
@@ -69,7 +69,7 @@ public class HealthQueryConventionTests
     /// <summary>Where the shared studio's own statements - the UI's - are built; its namespace is the engine's.</summary>
     private const string SharedBuilders = "src/DataStudio.Postgres/Internal/Sql/";
 
-    /// <summary>Where MartenStudio's own health statements - the daemon's and the event store's - are built.</summary>
+    /// <summary>Where the Marten module's own health statements - the daemon's and the event store's - are built.</summary>
     private const string MartenBuilders = "src/DataStudio.Marten/Internal/Sql/";
 
     private const string SharedBuildersNamespace = "DataStudio.Postgres.Internal.Sql";
@@ -240,7 +240,7 @@ public class HealthQueryConventionTests
             (StudioProjects.MartenAssembly, MartenBuildersNamespace, true),
         ];
 
-        assemblies.Select(static x => x.Assembly).Should().OnlyHaveUniqueItems("the engine, the shared studio and MartenStudio are three assemblies since the split");
+        assemblies.Select(static x => x.Assembly).Should().OnlyHaveUniqueItems("the engine, the shared studio and the Marten module are three assemblies since the split");
         typeof(HealthQuery).Assembly.Should().BeSameAs(StudioProjects.DiagnosticsAssembly, "the query type is the engine's");
 
         IReadOnlyList<MethodBase> shared = IlScan.Constructions(typeof(HealthQuery).Assembly, typeof(HealthQuery));
@@ -256,7 +256,7 @@ public class HealthQueryConventionTests
         {
             IReadOnlyList<MethodBase> sites = IlScan.Constructions(assembly, typeof(HealthQuery));
 
-            // Not vacuous either way: the engine's and MartenStudio's own builders construct the query - in DataStudio.Marten.dll a
+            // Not vacuous either way: the engine's and the Marten module's own builders construct the query - in DataStudio.Marten.dll a
             // newobj of a constructor declared in another assembly, which is the resolution this scan has to get right there.
             // The shared studio's own builders (the SQL console's plans, the browser's rows) may build none of their own.
             if (buildsQueries)
@@ -405,7 +405,7 @@ public class HealthQueryConventionTests
 
     /// <summary>
     /// Each assembly's folder is the one place its own builders' namespace may be declared - by its folder and not by its
-    /// name - and no folder admits another assembly's namespace: the engine's and the studio's share one, MartenStudio's
+    /// name - and no folder admits another assembly's namespace: the engine's and the studio's share one, the Marten module's
     /// has its own.
     /// </summary>
     [Theory]
@@ -520,7 +520,7 @@ public class HealthQueryConventionTests
     /// <summary>
     /// Whether <paramref name="source" />, at <paramref name="path" />, declares a builders' namespace (or one inside it)
     /// anywhere but under a folder that namespace belongs to: the engine's and the studio's own both hold
-    /// <c>DataStudio.Postgres.Internal.Sql</c>, each in its own assembly, and MartenStudio's folder holds its own alone.
+    /// <c>DataStudio.Postgres.Internal.Sql</c>, each in its own assembly, and the Marten module's folder holds its own alone.
     /// </summary>
     private static bool DeclaresABuildersNamespaceOutsideItsFolder(string path, string source) =>
         DeclaredNamespaces(source).Any(declared => Builders.Select(static x => x.Namespace).Distinct().Any(buildersNamespace =>

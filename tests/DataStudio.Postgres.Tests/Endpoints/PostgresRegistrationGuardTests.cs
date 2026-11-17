@@ -131,12 +131,12 @@ public class PostgresRegistrationGuardTests
         services.AddDataStudio().AddPostgres();
         services.AddHealthChecks()
             .AddPostgresDiagnostics(tags: ["ready"])
-            .AddPostgresDiagnostics("postgres-studio-live", failureStatus: HealthStatus.Degraded);
+            .AddPostgresDiagnostics("data-studio-postgres-live", failureStatus: HealthStatus.Degraded);
 
         using ServiceProvider provider = services.BuildServiceProvider();
         HealthCheckRegistration[] registrations = [.. provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations];
 
-        registrations.Select(static x => x.Name).Should().Equal("postgres-studio", "postgres-studio-live");
+        registrations.Select(static x => x.Name).Should().Equal("data-studio-postgres", "data-studio-postgres-live");
         registrations[0].Tags.Should().Equal("ready");
         registrations[0].FailureStatus.Should().Be(HealthStatus.Unhealthy);
         registrations[1].FailureStatus.Should().Be(HealthStatus.Degraded);
@@ -148,7 +148,7 @@ public class PostgresRegistrationGuardTests
     private static IHealthCheck HealthCheck(HealthCheckRegistration registration, IServiceProvider provider) => registration.Factory(provider);
 
     [Fact]
-    public void The_marker_is_PostgresStudios()
+    public void The_marker_is_Postgres()
     {
         PostgresDescriptor.Marker.Should().Be(new StudioRegistrationMarker("postgres", "the Postgres module", "AddPostgres()"));
     }

@@ -21,10 +21,10 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Marten.Integration.Tests.Database;
 
 /// <summary>
-/// PostgresStudio's seams (PS-3b) against a real server: a database holding Quartz.NET-like <c>qrtz_</c> tables, a Marten
+/// The Postgres module's seams (PS-3b) against a real server: a database holding Quartz.NET-like <c>qrtz_</c> tables, a Marten
 /// table, EF Core's history and the application's own table. The table source judges each by whose it is and locks
 /// nothing; the <c>mt_</c> rule refuses a Marten table's rows and a view over one; nothing writes DDL. PS-5 builds the
-/// full PostgresStudio suite; these are the seams' own few.
+/// full the Postgres module suite; these are the seams' own few.
 /// </summary>
 /// <remarks>
 /// <b>A database of each test's own</b>, never the assembly's shared one. Under <c>"*"</c> the table source lists every
@@ -122,7 +122,7 @@ public class PostgresSeamsLiveTests(PostgresFixture postgres)
 
         TableRowPage view = await rows.ListRowsAsync(scope, App, "order_docs", new TableRowRequest(), Token);
         view.Refusal.Should().Be(DatabaseRefusal.MartenOwned);
-        view.Reason.Should().Be(PostgresText.Instance.MartenDependencyDenial, "the refusal is in Postgres Studio's words");
+        view.Reason.Should().Be(PostgresText.Instance.MartenDependencyDenial, "the refusal is in the Postgres module's words");
 
         TableRowPage own = await rows.ListRowsAsync(scope, App, "orders", new TableRowRequest(), Token);
         own.State.Should().Be(TableRowPageState.Loaded);

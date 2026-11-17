@@ -6,7 +6,7 @@ using DataStudio.Sample.Kafka.Wolverine;
 namespace DataStudio.Sample.Kafka.Kafka;
 
 /// <summary>
-/// What the sample tells KStudio about its cluster: the body of its <c>AddKafka(…)</c> call, in a method of its own so that the live
+/// What the sample tells the Kafka module about its cluster: the body of its <c>AddKafka(…)</c> call, in a method of its own so that the live
 /// tests configure the engine exactly as the host does.
 /// </summary>
 internal static class SampleKafkaRegistration
@@ -15,13 +15,13 @@ internal static class SampleKafkaRegistration
     public const string ClusterKey = "local";
 
     /// <summary>The setting that lowers how long a live tail reads before it pauses itself (a <see cref="TimeSpan" />, <c>00:00:10</c> at least), so a demo shows the pause.</summary>
-    public const string TailPauseAfterSetting = "KStudioSample:TailPauseAfter";
+    public const string TailPauseAfterSetting = "DataStudioKafkaSample:TailPauseAfter";
 
     /// <summary>The setting that picks the capabilities: <c>all</c> (the default) or <c>search</c>, which leaves export, payloads and the live tail off so their notices can be seen.</summary>
-    public const string CapabilitiesSetting = "KStudioSample:Capabilities";
+    public const string CapabilitiesSetting = "DataStudioKafkaSample:Capabilities";
 
-    /// <summary>Configures KStudio for the sample's cluster.</summary>
-    /// <param name="o">KStudio's options.</param>
+    /// <summary>Configures the Kafka module for the sample's cluster.</summary>
+    /// <param name="o">The Kafka module's options.</param>
     /// <param name="bootstrapServers">The cluster's bootstrap servers.</param>
     /// <param name="configuration">The host's configuration, for <see cref="TailPauseAfterSetting" /> and <see cref="CapabilitiesSetting" />; <see langword="null" /> for neither.</param>
     public static void Configure(KafkaOptions o, string bootstrapServers, IConfiguration? configuration = null)
@@ -79,7 +79,7 @@ internal static class SampleKafkaRegistration
     public const string WolverineClusterKey = "wolverine";
 
     /// <summary>
-    /// Adds what the sample's Wolverine application needs in KStudio (D-CORR decision 11), beside <see cref="Configure" />: the application's own
+    /// Adds what the sample's Wolverine application needs in the Kafka module (D-CORR decision 11), beside <see cref="Configure" />: the application's own
     /// Kafka, read from its Wolverine configuration, as a second cluster under the key <c>wolverine</c>; the two checkout topics' correlation field;
     /// and a link to a tracing tool.
     /// </summary>
@@ -88,15 +88,15 @@ internal static class SampleKafkaRegistration
     /// cluster once, either with <c>AddCluster</c> or by letting <c>UseWolverineKafka()</c> find it, and the Settings page shows both so the difference
     /// can be seen.
     /// </remarks>
-    /// <param name="o">KStudio's options.</param>
+    /// <param name="o">The Kafka module's options.</param>
     public static void ConfigureWolverine(KafkaOptions o)
     {
         ArgumentNullException.ThrowIfNull(o);
 
         o.UseWolverineKafka(w => w.Cluster((_, c) => c.DisplayName("Sample Kafka (Wolverine)").Profile(KafkaProfile.Production)));
 
-        // The key of both topics is the order id, and the order id is the id of a CheckoutOrder in the sample's Marten store: KStudio links the
-        // record to the document, and Marten Studio's page for the document back to the records.
+        // The key of both topics is the order id, and the order id is the id of a CheckoutOrder in the sample's Marten store: The Kafka module links the
+        // record to the document, and the Marten module's page for the document back to the records.
         foreach (string topic in new[] { SampleWolverine.CheckoutTopic, SampleWolverine.ConfirmedTopic })
         {
             o.Topic(topic, t => t.Correlation(c => c.Key().Document(SampleWolverine.DocumentType)));

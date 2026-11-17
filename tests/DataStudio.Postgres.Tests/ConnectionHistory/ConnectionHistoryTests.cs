@@ -304,17 +304,17 @@ public class ConnectionHistoryTests
     }
 
     [Theory]
-    [InlineData(null, "Host=db;Application Name=orders-api", "orders-api (Postgres Studio history)")]
-    [InlineData(null, "Host=db", "Postgres Studio history")]
+    [InlineData(null, "Host=db;Application Name=orders-api", "orders-api (Data Studio history)")]
+    [InlineData(null, "Host=db", "Data Studio history")]
     [InlineData("", "Host=db;Application Name=orders-api", null)]
     [InlineData("studio", "Host=db;Application Name=orders-api", "studio (history)")]
     public void The_kept_session_is_named_as_the_history_unless_the_host_keeps_the_applications(string? configured, string connectionString, string? expected) =>
-        ConnectionHistorySampler.HistoryName(configured, connectionString, "Postgres Studio").Should().Be(expected);
+        ConnectionHistorySampler.HistoryName(configured, connectionString, "Data Studio").Should().Be(expected);
 
     [Fact]
     public void A_long_host_name_is_cut_so_the_history_is_still_said_within_what_PostgreSQL_keeps()
     {
-        string name = ConnectionHistorySampler.HistoryName(new string('a', 63), "Host=db", "Postgres Studio")!;
+        string name = ConnectionHistorySampler.HistoryName(new string('a', 63), "Host=db", "Data Studio")!;
 
         name.Should().HaveLength(63).And.EndWith(" (history)");
     }

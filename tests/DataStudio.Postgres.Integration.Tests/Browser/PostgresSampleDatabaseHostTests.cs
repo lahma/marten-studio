@@ -9,7 +9,7 @@ using DataStudio.Sample.Postgres.Data;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// The Postgres Studio sample pointed at a database it did not start (SEC-fix F2): without <c>--allow-data-generation</c>
+/// The Postgres sample pointed at a database it did not start (SEC-fix F2): without <c>--allow-data-generation</c>
 /// it writes nothing - no tenant databases on the server, no demo schemas in the admin database - says so in one line, and
 /// still serves the studio; with the switch it writes the demo data there, as on its own throwaway container.
 /// </summary>

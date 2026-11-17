@@ -261,7 +261,7 @@ public class StudioActionLogTest
     }
 
     /// <summary>
-    /// The split itself: the shared class declares only the events every studio logs, and MartenStudio's the ones only it
+    /// The split itself: the shared class declares only the events every studio logs, and the Marten module's the ones only it
     /// logs - so no later packet needs to add a method to the shared class to log a Marten fact, or the reverse.
     /// </summary>
     [Fact]

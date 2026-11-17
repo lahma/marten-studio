@@ -19,7 +19,7 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Marten.Integration.Tests.Query;
 
 /// <summary>
-/// 1.2-VEC against a real pgvector: the SQL console - the service the Marten Query page's SQL tab and PostgresStudio's Query
+/// 1.2-VEC against a real pgvector: the SQL console - the service the Marten Query page's SQL tab and the Postgres module's Query
 /// page both run through - shows <c>vector</c>, <c>halfvec</c> and <c>sparsevec</c> columns as the text Postgres prints, knows
 /// they are pgvector's from the extension that owns their type, and leaves every other column as it was.
 /// </summary>

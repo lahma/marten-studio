@@ -7,14 +7,14 @@ using DataStudio.Sample.Postgres.Data;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// Postgres Studio in a real browser, over <c>samples/DataStudio.Sample.Postgres</c> on real Kestrel: sign-in, the Overview, the
+/// The Postgres module in a real browser, over <c>samples/DataStudio.Sample.Postgres</c> on real Kestrel: sign-in, the Overview, the
 /// database browser on the admin database and then a tenant database, a row read the gate refuses a viewer, the SQL
 /// console, Health - and every core page walked on both kinds of source without a single write.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>What the sample's policies decide.</b> <c>admin</c> holds every capability's scope; <c>viewer</c> holds
-/// <c>studio:read</c> alone, so the write policy - which Postgres Studio asks about each capability by name - refuses it
+/// <c>studio:read</c> alone, so the write policy - which the Postgres module asks about each capability by name - refuses it
 /// <c>BrowseDatabase</c> and <c>RunSql</c>. The sample names <c>public</c>, <c>quartz</c>, <c>legacy</c> and
 /// <c>studio_sample</c> in <c>BrowsableSchemas</c>, so their structure is shown to anyone signed in and their rows only
 /// past the gate.
@@ -107,7 +107,7 @@ public class PostgresScenarioTests(BrowserSuiteFixture fixture)
 
             string refusal = await card.InnerTextAsync();
             refusal.Should().Contain("PostgresOptions.WriteAuthorizationPolicy", "the card names the exact thing a host would change (D4)");
-            refusal.Should().NotContain("MartenOptions", "Postgres Studio's words, not Marten Studio's");
+            refusal.Should().NotContain("MartenOptions", "the Postgres module's words, not the Marten module's");
             (await page.Locator(".ms-row-grid").CountAsync()).Should().Be(0, "no row of it is read for this visitor");
 
             ILocator tabs = page.Locator(".ms-db-object-tabs a");

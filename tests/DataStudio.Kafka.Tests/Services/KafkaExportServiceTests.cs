@@ -118,7 +118,7 @@ public class KafkaExportServiceTests
         outcome.Written.Should().Be(3);
         capture.Calls.Should().Be(1);
         capture.Mime.Should().Be("application/x-ndjson");
-        capture.FileName.Should().StartWith("kstudio-test-orders-").And.EndWith("Z.jsonl");
+        capture.FileName.Should().StartWith("data-studio-test-orders-").And.EndWith("Z.jsonl");
         Encoding.UTF8.GetString(capture.Bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries).Should().HaveCount(3);
 
         StudioActionLogEntry entry = Exports(rig).Should().ContainSingle("one entry per call, whatever the file holds").Which;

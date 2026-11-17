@@ -55,7 +55,7 @@ internal static class PlanSpeedscope
         return line.Length <= MaxNameLength ? line : line[..MaxNameLength];
     }
 
-    /// <summary>What the exporter field says: the studio's name and its version, <c>Postgres Studio 0.9.0</c>.</summary>
+    /// <summary>What the exporter field says: the studio's name and its version, <c>The Postgres module 0.9.0</c>.</summary>
     /// <param name="productName">The studio's product name.</param>
     public static string Exporter(string productName)
     {

@@ -104,7 +104,7 @@ public class ShellModuleComponentTests
 
         Links(off).Should().NotContain("Search");
         Links(on).Should().Contain("Search");
-        Links(readOnly).Should().NotContain("Search", "the host studio's ReadOnly turns every capability off");
+        Links(readOnly).Should().NotContain("Search", "the shell's ReadOnly turns every capability off");
     }
 
     [Fact]

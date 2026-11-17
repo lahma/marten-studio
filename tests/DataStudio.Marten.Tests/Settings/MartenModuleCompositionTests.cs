@@ -89,7 +89,7 @@ public class MartenModuleCompositionTests
         StudioRouteTable own = new(Host.PageAssemblies);
         string[] paths = EveryPagePath(Host);
 
-        paths.Should().HaveCountGreaterThan(28, "Data Studio's own pages and PostgresStudio's are all compared, not the rail's entries alone")
+        paths.Should().HaveCountGreaterThan(28, "Data Studio's own pages and the Postgres module's are all compared, not the rail's entries alone")
             .And.Contain("marten/documents/value/doc", "a page only a link reaches is among them").And.Contain("postgres/database/row");
         foreach (string path in paths)
         {

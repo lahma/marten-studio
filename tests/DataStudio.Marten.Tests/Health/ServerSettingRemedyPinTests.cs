@@ -28,11 +28,11 @@ public class ServerSettingRemedyPinTests
 
     public static TheoryData<string, string> Texts => new()
     {
-        { "MartenStudio", "A server setting, not a StoreOptions one" },
-        { "PostgresStudio", "A server setting" },
+        { "Marten", "A server setting, not a StoreOptions one" },
+        { "Postgres", "A server setting" },
     };
 
-    private static StudioText Text(string studio) => studio == "MartenStudio" ? DataStudio.Marten.Services.MartenText.Instance : PostgresText.Instance;
+    private static StudioText Text(string studio) => studio == "Marten" ? DataStudio.Marten.Services.MartenText.Instance : PostgresText.Instance;
 
     private static HealthRemedy S02(string studio, ServerSetting changed, PostgresPlatform? platform = null, string environment = "Production") =>
         new DangerousSettingsCheck().Evaluate(
@@ -65,7 +65,7 @@ public class ServerSettingRemedyPinTests
     [Fact]
     public void S02s_remedy_for_a_setting_the_connection_sends_points_at_the_connection_string()
     {
-        HealthRemedy remedy = S02("MartenStudio", new ServerSetting("synchronous_commit", "off", "client", false), environment: "Development");
+        HealthRemedy remedy = S02("Marten", new ServerSetting("synchronous_commit", "off", "client", false), environment: "Development");
 
         remedy.Code.Should().Be("# A server setting, not a StoreOptions one:\nsynchronous_commit = on");
         remedy.Explanation.Should().Be(
@@ -76,7 +76,7 @@ public class ServerSettingRemedyPinTests
     [Fact]
     public void S02s_remedy_for_a_role_setting_points_at_the_role()
     {
-        HealthRemedy remedy = S02("MartenStudio", new ServerSetting("synchronous_commit", "off", "user", false), environment: "Development");
+        HealthRemedy remedy = S02("Marten", new ServerSetting("synchronous_commit", "off", "user", false), environment: "Development");
 
         remedy.Explanation.Should().Be(
             "It is set for this role or this database, not for the server: whoever owns the "
@@ -138,8 +138,8 @@ public class ServerSettingRemedyPinTests
 
         remedy.Kind.Should().Be(HealthRemedyKind.Configuration, "C03's remedy is the source's pool ceiling, not a server setting");
 
-        // Wave 6: in Postgres Studio the line is the data source's own connection string - there is no store to configure.
-        remedy.Code.Should().Be(studio == "PostgresStudio"
+        // Wave 6: in the Postgres module the line is the data source's own connection string - there is no store to configure.
+        remedy.Code.Should().Be(studio == "Postgres"
             ? "// Fewer connections per process, in the connection string each data source is built from:\n"
               + "Maximum Pool Size=50"
             : "// Fewer connections per process - every data source Marten builds from a connection string:\n"

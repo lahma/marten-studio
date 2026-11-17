@@ -478,7 +478,7 @@ public class ActivityViewsOffThePollPathTests
                 || x == "src/DataStudio.Postgres/Services/Settings/StudioCoreRegistration.cs"
                 || x == SnapshotBuilder
                 || StudioProjects.IsUnder(x, "Services", "Database"),
-            "the sidebar, MartenStudio's Overview and every other page poll every RefreshInterval; PostgresStudio's Overview "
+            "the sidebar, the Marten module's Overview and every other page poll every RefreshInterval; the Postgres module's Overview "
             + "reads the summary at HealthInterval only (the fact below), and the Health page's Snapshot menu once per click");
     }
 
@@ -498,16 +498,16 @@ public class ActivityViewsOffThePollPathTests
         menu.Should().NotContain("PeriodicTimer").And.NotContain("StudioLiveUpdates.Create", "a snapshot is taken when asked, never polled");
     }
 
-    /// <summary>PostgresStudio's Overview, the one page besides Sessions that reads the sessions summary (PS-3a).</summary>
+    /// <summary>The Postgres module's Overview, the one page besides Sessions that reads the sessions summary (PS-3a).</summary>
     private const string PostgresOverview = "src/DataStudio.Postgres/Components/Pages/PostgresOverview.razor";
 
     /// <summary>
-    /// PostgresStudio's Overview shows the connection counts, and reads them as Sessions does: the summary is asked in
+    /// The Postgres module's Overview shows the connection counts, and reads them as Sessions does: the summary is asked in
     /// one method, <c>LoadAtHealthIntervalAsync</c>, which the five-second tick calls only once <c>EffectiveHealthInterval</c>
     /// has passed - so the process array is never read on the poll, and the shared ten-second snapshot floor still holds.
     /// </summary>
     [Fact]
-    public void PostgresStudios_overview_reads_the_sessions_summary_at_the_health_interval_only()
+    public void Postgres_overview_reads_the_sessions_summary_at_the_health_interval_only()
     {
         string page = SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine(PostgresOverview.Split('/'))));
 

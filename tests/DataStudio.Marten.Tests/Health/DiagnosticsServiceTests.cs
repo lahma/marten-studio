@@ -10,7 +10,7 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// The diagnostics API through <c>AddMartenStudio()</c> (API design §1.9, §5.3), over the health harness's real container: an
+/// The diagnostics API through <c>AddMarten()</c> (API design §1.9, §5.3), over the health harness's real container: an
 /// unknown source or database is a value, never an exception; Activity-grade findings, evidence and findings about one tenant
 /// need <c>IncludeActivity</c>; a hidden document type's finding never leaves the sweeper; the catalogue holds Marten's codes;
 /// and a call logs at Debug and nowhere higher. The store never connects, so the sections a test asks for fail as values.

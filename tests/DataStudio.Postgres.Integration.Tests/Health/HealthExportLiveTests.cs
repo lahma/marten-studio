@@ -48,7 +48,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
         }, static options => options.AddDatabaseSource("tenants", static services => services.GetRequiredService<ThirtyDatabases>()));
 
         HealthReport report = await studio.Services.GetRequiredService<HealthCheckService>().CheckHealthAsync(Token);
-        HealthReportEntry entry = report.Entries["postgres-studio"];
+        HealthReportEntry entry = report.Entries["data-studio-postgres"];
         TestContext.Current.TestOutputHelper?.WriteLine(entry.Status + ": " + entry.Description);
 
         entry.Data["databases"].Should().Be(25, entry.Description);

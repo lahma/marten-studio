@@ -19,8 +19,8 @@ namespace DataStudio.Marten.Tests.Components;
 /// D34, the database module's half, proved on the real <c>DatabaseScopeHost</c>, <c>DatabaseScopeGate</c> and <c>StudioState</c> of the Marten module beside
 /// a module this suite defines (<see cref="SecondModule" />, which has a page of its own and no gate): the database's scope waits in memory on another
 /// module's page, its policy is not asked there, and the way back asks the gate again before a database page's body is read. The Postgres suite holds the
-/// same over its own module, and the one case that needs a catalog load that can be held (a click during the load) is its alone: this suite's catalog is a fake
-/// that answers at once.
+/// same over its own module, and the one case that needs a catalog load that can be held (a click during the load) is its alone: the guard it proves is in the
+/// one <c>DatabaseScopeHost</c> both modules register, and nothing module-specific reaches it.
 /// </summary>
 /// <remarks>
 /// Each test names the one-line change to the source that makes it fail, and was seen to fail with it (v2-G).
@@ -105,7 +105,7 @@ public sealed class DatabaseModuleBesideAnotherModuleTests
 
     /// <summary>
     /// Fails when <c>DatabaseScopeHost.OnInitializedAsync</c> reads the address's scope on a page that is not the database's (the <c>Active ? …</c> on the
-    /// read): the scope moves to <c>other</c> and the address is rewritten.
+    /// read): the scope moves to <c>other</c>.
     /// </summary>
     [Fact]
     public async Task An_address_naming_a_database_scope_on_the_other_modules_page_does_not_move_it_on_first_load()
@@ -123,7 +123,7 @@ public sealed class DatabaseModuleBesideAnotherModuleTests
 
     /// <summary>
     /// Fails when <c>DatabaseScopeHost.OnLocationChanged</c> does not return for a page that is not the database's (the <c>IsMine</c> guard): the clicked
-    /// address's scope is applied, the policy is asked and the address is rewritten.
+    /// address's scope is applied and the policy is asked.
     /// </summary>
     [Fact]
     public async Task A_click_from_a_database_page_to_the_other_modules_page_naming_another_scope_moves_nothing_and_asks_no_policy()

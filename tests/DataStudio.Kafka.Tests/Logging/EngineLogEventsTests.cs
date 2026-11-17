@@ -83,7 +83,7 @@ public class EngineLogEventsTests
 
         ids.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
         ids.Should().OnlyHaveUniqueItems();
-        ids.Should().OnlyContain(static x => x >= 9650 && x <= 9699, "KStudio's engine owns 9650 to 9699");
+        ids.Should().OnlyContain(static x => x >= 9650 && x <= 9699, "the Kafka module's engine owns 9650 to 9699");
     }
 
     [Fact]

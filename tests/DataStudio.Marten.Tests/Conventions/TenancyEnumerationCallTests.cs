@@ -110,7 +110,7 @@ public class TenancyEnumerationCallTests
             + "1.2-SCOPE-1: the Overview passes the selected store's key, so a load costs one enumeration, not one per store)"),
         new("src/DataStudio.Marten/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,
             "tenant ids, for every tenancy but master-table and sharded, which are read from the instance (F8-D3 C4)"),
-        // PS-1b: moved with the code, from DatabaseAccess.cs to MartenStudio's IDatabaseDeclarationsSource.
+        // PS-1b: moved with the code, from DatabaseAccess.cs to the Marten module's IDatabaseDeclarationsSource.
         new("src/DataStudio.Marten/Services/MartenDatabaseDeclarationsSource.cs", "AllDatabases", 1,
             "names: another store's spelling of this database's identity, walked only when a policy will be asked "
             + "and only on a Single or StaticMultiple store (F8-D3 C1)"),

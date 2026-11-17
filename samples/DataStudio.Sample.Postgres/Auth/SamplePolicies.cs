@@ -5,7 +5,7 @@ using DataStudio.Postgres;
 namespace DataStudio.Sample.Postgres.Auth;
 
 /// <summary>
-/// The two policies the demo hands Postgres Studio: who gets in, and who may use each of its three capabilities.
+/// The two policies the demo hands the Postgres module: who gets in, and who may use each of its three capabilities.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +29,7 @@ internal static class SamplePolicies
     /// <summary>Who may use which capability, asked per capability with the resource attached.</summary>
     public const string StudioCapability = "DataStudioCapability";
 
-    /// <summary>The scope each of Postgres Studio's capabilities needs, by the name the studio puts on the resource.</summary>
+    /// <summary>The scope each of the Postgres module's capabilities needs, by the name the studio puts on the resource.</summary>
     private static readonly Dictionary<string, string> ScopeByCapability = new(StringComparer.Ordinal)
     {
         [nameof(PostgresCapabilities.BrowseDatabase)] = DevUsers.BrowseScope,
@@ -71,7 +71,7 @@ internal sealed class StudioCapabilityRequirement : IAuthorizationRequirement;
 /// the capability it names, mapped to the scope the user must hold.
 /// </summary>
 /// <remarks>
-/// It fails closed. A capability the demo does not know - one a later Postgres Studio adds - needs a scope nobody has,
+/// It fails closed. A capability the demo does not know - one a later the Postgres module adds - needs a scope nobody has,
 /// and a call without the resource, or without a capability, is not one this policy was written for.
 /// </remarks>
 internal sealed class StudioCapabilityHandler : AuthorizationHandler<StudioCapabilityRequirement, PostgresResource>

@@ -19,7 +19,7 @@ using DataStudio.Postgres.Services.Storage;
 namespace DataStudio.Marten.Tests.Storage;
 
 /// <summary>
-/// The Storage page in MartenStudio (W5-CAP), over views built by the real per-visitor step (<c>StorageService.ShowAsync</c>)
+/// The Storage page in the Marten module (W5-CAP), over views built by the real per-visitor step (<c>StorageService.ShowAsync</c>)
 /// from stated facts: its tiles, a table in a withheld schema listed without its name (D27), a hidden document type's table
 /// absent, the "needs a day" text before the window has counted a day, the store policy's refusal, and nothing read while
 /// prerendered.

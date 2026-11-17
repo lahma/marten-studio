@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 namespace DataStudio.Marten.Integration.Tests.Browser;
 
 /// <summary>
-/// 1.2-HEADER in Data Studio in a real browser: the shell is PostgresStudio's, so the longer set is in its suite; this proves the same
+/// 1.2-HEADER in Data Studio in a real browser: the shell is the Postgres module's, so the longer set is in its suite; this proves the same
 /// header under Data Studio's own mount (<c>/marten</c>), the sample's <c>Development</c> badge, the back link out of the mount and
 /// the copied address.
 /// </summary>

@@ -31,7 +31,7 @@ namespace DataStudio.Marten.Tests.Projections;
 /// </remarks>
 public class ProjectionsWritePolicyTests
 {
-    private const string WritePolicy = "MartenStudioWriter";
+    private const string WritePolicy = "MartenWriter";
 
     /// <summary>The controls <c>ControlDaemon</c> answers for.</summary>
     private static string[] DaemonControls =>

@@ -45,7 +45,7 @@ public class AuditSweepQuestionsTests
 
         if (writePolicy)
         {
-            context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+            context.Options.WriteAuthorizationPolicy = "MartenWrite";
         }
 
         foreach (StudioCapability capability in on)

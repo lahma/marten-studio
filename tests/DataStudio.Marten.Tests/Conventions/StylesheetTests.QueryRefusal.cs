@@ -73,7 +73,7 @@ public partial class StylesheetTests
     {
         // The class as a whole token: "ms-query-error" followed by the attribute's end or another class, never the
         // "-message" of the element inside it. Both studios' components: the editor is the shared studio's since the move,
-        // LINQ mode MartenStudio's.
+        // LINQ mode the Marten module's.
         List<(string Name, string Markup)> drawing = [.. StudioProjects
             .Files("*.razor", SearchOption.AllDirectories)
             .Select(static x => (Name: Path.GetFileName(x), Markup: File.ReadAllText(x)))

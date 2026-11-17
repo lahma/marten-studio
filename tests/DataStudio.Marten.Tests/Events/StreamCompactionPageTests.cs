@@ -23,7 +23,7 @@ namespace DataStudio.Marten.Tests.Events;
 /// </remarks>
 public class StreamCompactionPageTests
 {
-    private const string WritePolicy = "MartenStudioWriter";
+    private const string WritePolicy = "MartenWriter";
     private const string StreamId = "11111111-1111-1111-1111-111111111111";
 
     private const string CompactButton = ".ms-stream-compact-button";

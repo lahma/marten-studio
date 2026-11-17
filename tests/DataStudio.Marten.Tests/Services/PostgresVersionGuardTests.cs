@@ -12,15 +12,15 @@ namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
 /// <c>AddMarten</c> refuses to start beside any DataStudio.Postgres but its own build, and says why - including when
-/// NuGet left PostgresStudio out of the deployment altogether, which a central <c>PackageVersion</c> at another version
+/// NuGet left the Postgres module out of the deployment altogether, which a central <c>PackageVersion</c> at another version
 /// does silently under transitive pinning (PS-0, 2026-10-20).
 /// </summary>
 /// <remarks>
-/// In this test host PostgresStudio is always present and always the same build, so the two failures are driven through
+/// In this test host the Postgres module is always present and always the same build, so the two failures are driven through
 /// the guard's seam - the loader is a parameter - and the property that lets the guard run at all when the assembly is
-/// missing, that neither it nor the public method calling it names a PostgresStudio member, is checked on the IL: a
+/// missing, that neither it nor the public method calling it names a Postgres module member, is checked on the IL: a
 /// reference that crept into either would break nothing here and everything in the deployment the guard exists for.
-/// The end-to-end half, a real host whose central pin drops PostgresStudio, was run by PS-6 against packed nupkgs.
+/// The end-to-end half, a real host whose central pin drops the Postgres module, was run by PS-6 against packed nupkgs.
 /// </remarks>
 public class PostgresVersionGuardTests
 {
@@ -40,7 +40,7 @@ public class PostgresVersionGuardTests
         .ToDictionary(static group => group.Key, static group => group.First());
 
     [Fact]
-    public void Beside_the_PostgresStudio_it_was_built_with_the_guard_passes()
+    public void Beside_the_Postgres_it_was_built_with_the_guard_passes()
     {
         string marten = PostgresVersionGuard.ReleaseVersion(Marten);
 
@@ -60,9 +60,9 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void A_missing_PostgresStudio_is_refused_and_the_central_pin_is_named()
+    public void A_missing_Postgres_is_refused_and_the_central_pin_is_named()
     {
-        var missing = new FileNotFoundException("Could not load file or assembly 'PostgresStudio'.", "DataStudio.Postgres");
+        var missing = new FileNotFoundException("Could not load file or assembly 'DataStudio.Postgres'.", "DataStudio.Postgres");
         string required = PostgresVersionGuard.ReleaseVersion(Marten);
 
         InvalidOperationException refusal = FluentActions
@@ -79,7 +79,7 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void A_missing_PostgresStudio_Diagnostics_is_refused_and_the_central_pin_is_named()
+    public void A_missing_Postgres_Diagnostics_is_refused_and_the_central_pin_is_named()
     {
         var missing = new FileNotFoundException("Could not load file or assembly 'DataStudio.Postgres.Diagnostics'.", "DataStudio.Postgres.Diagnostics");
         string required = PostgresVersionGuard.ReleaseVersion(Marten);
@@ -129,7 +129,7 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void Another_PostgresStudio_Diagnostics_version_is_refused_and_named()
+    public void Another_Postgres_Diagnostics_version_is_refused_and_named()
     {
         FluentActions.Invoking(() => PostgresVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.0"), () => WithVersion("0.5.1")))
             .Should().Throw<InvalidOperationException>()
@@ -140,7 +140,7 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void Two_commits_of_one_PostgresStudio_Diagnostics_version_are_named_in_full()
+    public void Two_commits_of_one_Postgres_Diagnostics_version_are_named_in_full()
     {
         FluentActions.Invoking(() => PostgresVersionGuard.Ensure(
                 WithVersion("0.5.0+5f1c2a9d", "Release"), () => WithVersion("0.5.0+5f1c2a9d", "Release"), () => WithVersion("0.5.0+0b7e3c41", "Release")))
@@ -150,7 +150,7 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void PostgresStudio_is_checked_before_PostgresStudio_Diagnostics()
+    public void Postgres_is_checked_before_Postgres_Diagnostics()
     {
         FluentActions.Invoking(() => PostgresVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.1"), () => WithVersion("0.5.2")))
             .Should().Throw<InvalidOperationException>()
@@ -158,7 +158,7 @@ public class PostgresVersionGuardTests
     }
 
     [Fact]
-    public void Another_PostgresStudio_version_is_refused_and_named()
+    public void Another_Postgres_version_is_refused_and_named()
     {
         FluentActions.Invoking(() => PostgresVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.1")))
             .Should().Throw<InvalidOperationException>()
@@ -171,8 +171,8 @@ public class PostgresVersionGuardTests
     /// <summary>
     /// The commit after the <c>+</c> is compared when, and only when, both assemblies are Release builds - as every pack
     /// is - and both carry one: the same version packed from two commits is refused. A Debug build compares the release
-    /// versions only, because an IDE's incremental build after a commit recompiles MartenStudio with the new commit and
-    /// leaves an unchanged PostgresStudio on the old one; so does a mixed pair, a missing configuration, and a side with
+    /// versions only, because an IDE's incremental build after a commit recompiles the Marten module with the new commit and
+    /// leaves an unchanged Postgres module on the old one; so does a mixed pair, a missing configuration, and a side with
     /// no commit.
     /// </summary>
     [Theory]
@@ -261,11 +261,11 @@ public class PostgresVersionGuardTests
 
     /// <summary>
     /// Both public methods - <c>AddMarten</c> on the studio's builder and <c>AddMartenDiagnostics</c> on the health checks builder - and the guard
-    /// name no PostgresStudio type or member - in a call, a field, a token or a local - so the JIT can compile them, and
+    /// name no Postgres module type or member - in a call, a field, a token or a local - so the JIT can compile them, and
     /// the guard can explain, when DataStudio.Postgres.dll is absent.
     /// </summary>
     [Fact]
-    public void Neither_AddMarten_nor_the_guard_names_a_PostgresStudio_member()
+    public void Neither_AddMarten_nor_the_guard_names_a_Postgres_member()
     {
         MethodBase[] methods =
         [
@@ -275,31 +275,31 @@ public class PostgresVersionGuardTests
         ];
 
         methods.Should().HaveCountGreaterThan(4, "both public methods, the guard's checks and its loader are all scanned");
-        methods.SelectMany(PostgresStudioMembersIn).Should().BeEmpty(
-            "a PostgresStudio member here is resolved when the method is compiled - before the guard can run - and a " +
-            "deployment without PostgresStudio then fails with a bare FileNotFoundException instead of the guard's reason");
+        methods.SelectMany(PostgresMembersIn).Should().BeEmpty(
+            "a Postgres-module member here is resolved when the method is compiled - before the guard can run - and a " +
+            "deployment without the Postgres module then fails with a bare FileNotFoundException instead of the guard's reason");
     }
 
-    /// <summary>Anti-vacuity: the scan above does see PostgresStudio members, in the method that is meant to hold them.</summary>
+    /// <summary>Anti-vacuity: the scan above does see the Postgres module members, in the method that is meant to hold them.</summary>
     [Fact]
-    public void The_scan_finds_PostgresStudio_members_where_they_are_meant_to_be()
+    public void The_scan_finds_Postgres_members_where_they_are_meant_to_be()
     {
         MethodInfo services = typeof(MartenDataStudioBuilderExtensions).GetMethod("AddMartenServices", Declared)!;
         MethodInfo healthCheck = typeof(MartenHealthChecksBuilderExtensions).GetMethod("AddMartenDiagnosticsHealthCheck", Declared)!;
 
         services.Should().NotBeNull();
         healthCheck.Should().NotBeNull();
-        PostgresStudioMembersIn(services).Should().Contain(static x => x.Contains(nameof(StudioCoreRegistration), StringComparison.Ordinal));
-        PostgresStudioMembersIn(healthCheck).Should().Contain(static x => x.Contains("HealthExportRunner", StringComparison.Ordinal));
+        PostgresMembersIn(services).Should().Contain(static x => x.Contains(nameof(StudioCoreRegistration), StringComparison.Ordinal));
+        PostgresMembersIn(healthCheck).Should().Contain(static x => x.Contains("HealthExportRunner", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void What_names_PostgresStudio_is_never_inlined_into_what_runs_before_the_guard()
+    public void What_names_Postgres_is_never_inlined_into_what_runs_before_the_guard()
     {
         MethodInfo services = typeof(MartenDataStudioBuilderExtensions).GetMethod("AddMartenServices", Declared)!;
         MethodInfo healthCheck = typeof(MartenHealthChecksBuilderExtensions).GetMethod("AddMartenDiagnosticsHealthCheck", Declared)!;
         MethodInfo ensure = typeof(PostgresVersionGuard).GetMethod(nameof(PostgresVersionGuard.Ensure), Type.EmptyTypes)!;
-        MethodInfo load = typeof(PostgresVersionGuard).GetMethod("LoadPostgresStudio", Declared)!;
+        MethodInfo load = typeof(PostgresVersionGuard).GetMethod("LoadPostgres", Declared)!;
         MethodInfo loadEngine = typeof(PostgresVersionGuard).GetMethod("LoadDiagnostics", Declared)!;
         MethodInfo loadShell = typeof(PostgresVersionGuard).GetMethod("LoadShell", Declared)!;
 
@@ -354,8 +354,8 @@ public class PostgresVersionGuardTests
             .Where(static method => method.GetMethodBody() is not null);
     }
 
-    /// <summary>Each PostgresStudio type or member a method's body names, as <c>opcode member</c> or <c>local type</c>.</summary>
-    private static IEnumerable<string> PostgresStudioMembersIn(MethodBase method)
+    /// <summary>Each Postgres module type or member a method's body names, as <c>opcode member</c> or <c>local type</c>.</summary>
+    private static IEnumerable<string> PostgresMembersIn(MethodBase method)
     {
         MethodBody body = method.GetMethodBody()!;
         byte[] il = body.GetILAsByteArray()!;
@@ -376,7 +376,7 @@ public class PostgresVersionGuardTests
             {
                 MemberInfo member = method.Module.ResolveMember(BitConverter.ToInt32(il, position), typeArguments, methodArguments)!;
 
-                if (TypesOf(member).Any(IsPostgresStudio))
+                if (TypesOf(member).Any(IsPostgresModule))
                 {
                     // The member's own ToString carries generic arguments (TryAddSingleton[HealthExportRunner]).
                     yield return $"{method.Name}: {code.Name} {member.DeclaringType?.Name}::{member}";
@@ -394,7 +394,7 @@ public class PostgresVersionGuardTests
             };
         }
 
-        foreach (LocalVariableInfo local in body.LocalVariables.Where(static x => Expand(x.LocalType).Any(IsPostgresStudio)))
+        foreach (LocalVariableInfo local in body.LocalVariables.Where(static x => Expand(x.LocalType).Any(IsPostgresModule)))
         {
             yield return $"{method.Name}: local {local.LocalType.Name}";
         }
@@ -432,14 +432,14 @@ public class PostgresVersionGuardTests
     }
 
     /// <summary>
-    /// A type of PostgresStudio - or of DataStudio.Postgres.Diagnostics, the engine it is built on, or of DataStudio, the shell, which a deployment can lack in
-    /// the same way and which MartenStudio names directly (<c>HealthExportRunner</c>, <c>FreshReadLimiter</c>) - except the shell's <c>DataStudioBuilder</c>,
+    /// A type of the Postgres module - or of DataStudio.Postgres.Diagnostics, the engine it is built on, or of DataStudio, the shell, which a deployment can lack in
+    /// the same way and which the Marten module names directly (<c>HealthExportRunner</c>, <c>FreshReadLimiter</c>) - except the shell's <c>DataStudioBuilder</c>,
     /// <c>AddMarten</c>'s own first parameter, which the loader resolves before the body runs whatever the body names, and which the body only hands on.
     /// </summary>
-    private static bool IsPostgresStudio(Type type) =>
+    private static bool IsPostgresModule(Type type) =>
         !type.IsGenericParameter
         && type != typeof(DataStudioBuilder)
-        && (string.Equals(type.Assembly.GetName().Name, PostgresVersionGuard.PostgresStudioAssemblyName, StringComparison.Ordinal)
+        && (string.Equals(type.Assembly.GetName().Name, PostgresVersionGuard.PostgresAssemblyName, StringComparison.Ordinal)
             || string.Equals(type.Assembly.GetName().Name, "DataStudio.Postgres.Diagnostics", StringComparison.Ordinal)
             || string.Equals(type.Assembly.GetName().Name, PostgresVersionGuard.ShellAssemblyName, StringComparison.Ordinal));
 }

@@ -86,7 +86,7 @@ Marten touches it (`SampleDatabase`): one another build of it seeded is dropped 
 container or with `--allow-data-generation`, and on any other database the host stops with one line that says what
 to do. Its throwaway container has a reuse identity of its own too, so `dotnet run` never attaches to the integration
 suite's reused container. The Kafka sample starts a throwaway Kafka broker and a Postgres of its own, and reuses them
-only with `KSTUDIO_SAMPLE_REUSE`.
+only with `DATASTUDIO_KAFKA_SAMPLE_REUSE`.
 
 ## D30
 

@@ -443,7 +443,7 @@ public abstract class WireContract
         }
 
         // A group's offsets for a partition that does not exist are simply not committed: no error, no offset.
-        WireResult<IReadOnlyList<WireGroupOffset>> committed = await cluster.Wire.ListGroupOffsetsAsync("kstudio-absent-group", [new WirePartition(topic, 0)], Token);
+        WireResult<IReadOnlyList<WireGroupOffset>> committed = await cluster.Wire.ListGroupOffsetsAsync("data-studio-absent-group", [new WirePartition(topic, 0)], Token);
         committed.Error.Should().BeNull();
         committed.Value.Should().ContainSingle().Which.Committed.Should().BeNull();
 

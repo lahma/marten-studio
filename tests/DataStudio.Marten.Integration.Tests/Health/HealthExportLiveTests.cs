@@ -38,7 +38,7 @@ namespace DataStudio.Marten.Integration.Tests.Health;
 /// </remarks>
 public class HealthExportLiveTests(PostgresFixture postgres)
 {
-    private const string Name = "marten-studio";
+    private const string Name = "data-studio-marten";
 
     [PostgresFact]
     public async Task The_healthy_sample_store_reports_Healthy()
@@ -292,7 +292,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
             {
                 collection.AddHealthChecks().AddMartenDiagnostics(name: Name, tags: ["marten"]);
 
-                // After AddMartenStudio's own registration, so a test's narrower registry is the one resolved.
+                // After Addthe Marten module's own registration, so a test's narrower registry is the one resolved.
                 services?.Invoke(collection);
             });
     }

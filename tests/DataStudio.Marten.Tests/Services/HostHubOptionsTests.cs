@@ -5,8 +5,8 @@ using DataStudio.Marten.Tests.Support;
 namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
-/// Issue #38 for <c>AddMartenStudio()</c>: a host's own server-side Blazor registration, and the hub options it tuned,
-/// survive the studio's registration in either order. The scenarios are shared with PostgresStudio's suite
+/// Issue #38 for <c>AddMarten()</c>: a host's own server-side Blazor registration, and the hub options it tuned,
+/// survive the studio's registration in either order. The scenarios are shared with the Postgres module's suite
 /// (<see cref="HostHubOptionsScenarios" />), which holds the registration both studios share to the same assertions.
 /// </summary>
 public class HostHubOptionsTests

@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace DataStudio.Kafka.Tests.Services;
 
-/// <summary>The module's circuit handler (AGENTS.md D46): a no-op on a circuit with no tail, a relay to the pages that registered, and added by <c>AddKafkaStudio</c> only.</summary>
+/// <summary>The module's circuit handler (AGENTS.md D46): a no-op on a circuit with no tail, a relay to the pages that registered, and added by <c>AddKafka</c> only.</summary>
 public class KafkaTailCircuitTests
 {
     [Fact]

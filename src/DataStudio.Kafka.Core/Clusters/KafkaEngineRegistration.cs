@@ -20,8 +20,8 @@ internal static class KafkaEngineRegistration
 {
     /// <summary>Adds the engine to <paramref name="services" />.</summary>
     /// <param name="services">The container.</param>
-    /// <param name="options">The engine options, as the host studio builds them.</param>
-    /// <param name="settings">What the engine takes from its host studio.</param>
+    /// <param name="options">The engine options, as the shell builds them.</param>
+    /// <param name="settings">What the engine takes from its shell.</param>
     public static IServiceCollection Add(
         IServiceCollection services,
         Func<IServiceProvider, KafkaEngineOptions> options,

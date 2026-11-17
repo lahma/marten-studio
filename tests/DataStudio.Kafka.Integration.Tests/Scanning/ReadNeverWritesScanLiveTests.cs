@@ -44,13 +44,13 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
 
         TopicNames().Should().BeEquivalentTo(topicsBefore, "a scan creates no topic, as a principal that could have created one");
 
-        string[] scanGroups = [$"kstudio-{result.ScanId:N}", $"kstudio-{partial.ScanId:N}"];
+        string[] scanGroups = [$"data-studio-{result.ScanId:N}", $"data-studio-{partial.ScanId:N}"];
 
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
         listed.Should().NotContain(scanGroups, "the scan's group id is never joined: the group does not exist");
-        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for a scan survives");
+        listed.Should().NotContain(static x => x.StartsWith("data-studio-", StringComparison.Ordinal) && x.Length == "data-studio-".Length + 32, "no group named for a scan survives");
 
         foreach (string group in scanGroups)
         {
@@ -121,13 +121,13 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
 
         TopicNames().Should().BeEquivalentTo(topicsBefore, "a tail creates no topic, as a principal that could have created one");
 
-        string[] tailGroups = [$"kstudio-{paused!.ScanId:N}", $"kstudio-{last.ScanId:N}"];
+        string[] tailGroups = [$"data-studio-{paused!.ScanId:N}", $"data-studio-{last.ScanId:N}"];
 
         using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
         ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
         listed.Should().NotContain(tailGroups, "a tail's group id is never joined: the group does not exist");
-        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for a scan survives");
+        listed.Should().NotContain(static x => x.StartsWith("data-studio-", StringComparison.Ordinal) && x.Length == "data-studio-".Length + 32, "no group named for a scan survives");
 
         foreach (string group in tailGroups)
         {
@@ -140,7 +140,7 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
     {
         using IAdminClient client = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();
         // A broker that never hosted a consumer group creates its internal __consumer_offsets when the scan consumer looks up
-        // its group coordinator (kstudio.md D37, "The group coordinator on a pristine cluster"); internal topics are the
+        // its group coordinator (kafka.md D37, "The group coordinator on a pristine cluster"); internal topics are the
         // broker's own, so only topics a host could see are compared.
         return [.. client.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(static x => x.Topic)
             .Where(static x => !x.StartsWith("__", StringComparison.Ordinal)).Order(StringComparer.Ordinal)];

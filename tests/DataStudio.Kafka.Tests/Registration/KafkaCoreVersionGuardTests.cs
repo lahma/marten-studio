@@ -11,10 +11,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Tests.Registration;
 
 /// <summary>
-/// <c>AddKafkaStudio</c> refuses to start beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build, and says why. In
+/// <c>AddKafka</c> refuses to start beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build, and says why. In
 /// this test host all of them are always present and the same build, so each failure is driven through the guard's seam - the loaders are
 /// parameters - and the property that lets the guard run at all when an assembly is missing, that neither it nor the public method calling it
-/// names a DataStudio or DataStudio.Kafka.Core member, is checked on the IL (MartenStudio's <c>PostgresVersionGuardTests</c> is this class's model).
+/// names a DataStudio or DataStudio.Kafka.Core member, is checked on the IL (the Marten module's <c>PostgresVersionGuardTests</c> is this class's model).
 /// </summary>
 public class KafkaCoreVersionGuardTests
 {
@@ -48,17 +48,17 @@ public class KafkaCoreVersionGuardTests
 
         if (configured.Length > 0)
         {
-            label.Should().Be(configured, "the three KStudio projects are stamped with Directory.Build.props' KafkaPrereleaseLabel");
-            KafkaCoreVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "KStudio packs as a preview");
+            label.Should().Be(configured, "the three Kafka projects are stamped with Directory.Build.props' KafkaPrereleaseLabel");
+            KafkaCoreVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "the Kafka module packs as a preview");
         }
         else
         {
             label.Should().BeNull("an empty label stamps no metadata");
-            family.Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "the family version is KStudio's own");
+            family.Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "the family version is the Kafka module's own");
         }
 
-        KafkaCoreVersionGuard.InformationalVersion(Shell).Should().Be(family, "the family beside KStudio is at the version without its preview label");
-        KafkaCoreVersionGuard.InformationalVersion(Kafka).Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is KStudio's own, label and all");
+        KafkaCoreVersionGuard.InformationalVersion(Shell).Should().Be(family, "the family beside the Kafka module is at the version without its preview label");
+        KafkaCoreVersionGuard.InformationalVersion(Kafka).Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is the Kafka module's own, label and all");
 
         FluentActions.Invoking(KafkaCoreVersionGuard.Ensure).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddDataStudio().AddKafka()).Should().NotThrow();
@@ -139,7 +139,7 @@ public class KafkaCoreVersionGuardTests
         KafkaCoreVersionGuard.SameBuild(kStudio, other, bothRelease).Should().Be(passes);
     }
 
-    /// <summary>A correct preview install: KStudio and DataStudio.Kafka.Core carry the label, the shell does not.</summary>
+    /// <summary>A correct preview install: The Kafka module and DataStudio.Kafka.Core carry the label, the shell does not.</summary>
     [Theory]
     [InlineData("1.3.0-preview.1", "1.3.0", "1.3.0-preview.1")]
     [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
@@ -186,7 +186,7 @@ public class KafkaCoreVersionGuardTests
     [InlineData("1.3.0")]
     [InlineData("1.3.0-preview.2")]
     [InlineData("1.3.1-preview.1")]
-    public void A_KStudio_Core_that_is_not_the_previews_own_build_is_refused(string core)
+    public void A_Kafka_Core_that_is_not_the_previews_own_build_is_refused(string core)
     {
         AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
 

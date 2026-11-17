@@ -119,7 +119,7 @@ public sealed class HealthActionServiceTests : IAsyncDisposable
     {
         context.Options.SourceAuthorizationPolicy = "source";
 
-        // The resolver's own questions pass; the gate's, which come after them, do not. (A Postgres Studio source has no tenant, so
+        // The resolver's own questions pass; the gate's, which come after them, do not. (A Postgres module source has no tenant, so
         // the store policy's answer to the gate is the resolver's - the order of the questions is what tells them apart.)
         int before = context.AuthorizationService.Calls.Count;
         await ResolveAsync();
@@ -158,7 +158,7 @@ public sealed class HealthActionServiceTests : IAsyncDisposable
     [Fact]
     public async Task A_finding_about_a_tenant_needs_the_activity_gate_because_it_names_the_tenant()
     {
-        // A tenant's own store-policy question is MartenStudio's (a Postgres Studio source has no tenant); what holds for both is
+        // A tenant's own store-policy question is the Marten module's (a Postgres module source has no tenant); what holds for both is
         // that a finding naming a tenant is Activity-gated whatever the action asks, exactly as the report gates it.
         TestAction action = new("a.applies", "T01") { Gate = HealthGate.None };
         HealthReportFinding about = Finding("T01") with { Finding = Finding("T01").Finding with { TenantId = "acme" } };

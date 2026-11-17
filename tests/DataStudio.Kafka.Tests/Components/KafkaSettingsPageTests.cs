@@ -10,7 +10,7 @@ using DataStudio.Kafka.Tests.Support;
 
 namespace DataStudio.Kafka.Tests.Components;
 
-/// <summary>Cluster settings (D-UI decision 8b): what the host handed KStudio, one setting at a time, and what KStudio's clients change.</summary>
+/// <summary>Cluster settings (D-UI decision 8b): what the host handed the Kafka module, one setting at a time, and what the Kafka module's clients change.</summary>
 public class KafkaSettingsPageTests
 {
     private const string Sentinel = "S3NT1NEL-4f9a2c";

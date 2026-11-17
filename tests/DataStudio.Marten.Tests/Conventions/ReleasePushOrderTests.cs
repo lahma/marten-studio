@@ -28,7 +28,7 @@ public class ReleasePushOrderTests
     }
 
     [Fact]
-    public void The_release_packages_are_the_engine_then_the_shell_then_PostgresStudio_then_MartenStudio_then_the_three_KStudio_packages_and_nothing_else()
+    public void The_release_packages_are_the_engine_then_the_shell_then_Postgres_then_Marten_then_the_three_Kafka_packages_and_nothing_else()
     {
         Match list = Regex.Match(PublishSource, @"AbsolutePath\[\] ReleasePackages =>\s*\[(?<items>[^\]]*)\]", RegexOptions.CultureInvariant);
 
@@ -37,22 +37,22 @@ public class ReleasePushOrderTests
         string[] items = [.. list.Groups["items"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
 
         items.Should().HaveCount(7);
-        items[0].Should().Contain("DiagnosticsPackageId", "PostgresStudio depends on exactly DataStudio.Postgres.Diagnostics, so the engine is pushed first");
-        items[1].Should().Contain("ShellPackageId", "PostgresStudio and KStudio depend on exactly DataStudio, so the shell is pushed before both");
-        items[2].Should().Contain("PostgresStudioPackageId", "MartenStudio depends on exactly PostgresStudio, so PostgresStudio is pushed before it");
-        items[3].Should().Contain("MartenStudioPackageId");
-        items[4].Should().Contain("KStudioCorePackageId", "KStudio and DataStudio.Kafka.Wolverine depend on exactly DataStudio.Kafka.Core, so the Kafka engine is pushed before both");
-        items[5].Should().Contain("KStudioPackageId", "KStudio depends on exactly DataStudio and DataStudio.Kafka.Core, both pushed before it");
-        items[6].Should().Contain("KStudioWolverinePackageId");
+        items[0].Should().Contain("DiagnosticsPackageId", "the Postgres module depends on exactly DataStudio.Postgres.Diagnostics, so the engine is pushed first");
+        items[1].Should().Contain("ShellPackageId", "the Postgres module and the Kafka module depend on exactly DataStudio, so the shell is pushed before both");
+        items[2].Should().Contain("PostgresPackageId", "the Marten module depends on exactly the Postgres module, so the Postgres module is pushed before it");
+        items[3].Should().Contain("MartenPackageId");
+        items[4].Should().Contain("KafkaCorePackageId", "the Kafka module and DataStudio.Kafka.Wolverine depend on exactly DataStudio.Kafka.Core, so the Kafka engine is pushed before both");
+        items[5].Should().Contain("KafkaPackageId", "the Kafka module depends on exactly DataStudio and DataStudio.Kafka.Core, both pushed before it");
+        items[6].Should().Contain("KafkaWolverinePackageId");
 
-        foreach (string kstudio in items[4..])
+        foreach (string kafka in items[4..])
         {
-            kstudio.Should().Contain("KStudioVersion", "the three KStudio packages carry the preview label, the family's four do not");
+            kafka.Should().Contain("KafkaVersion", "the three Kafka packages carry the preview label, the family's four do not");
         }
 
         foreach (string family in items[..4])
         {
-            family.Should().NotContain("KStudioVersion");
+            family.Should().NotContain("KafkaVersion");
         }
     }
 
@@ -222,7 +222,7 @@ public class ReleasePushOrderTests
 
         if (!Regex.IsMatch(body, @"var packages = ReleasePackages;", RegexOptions.CultureInvariant))
         {
-            problems.Add("the packages are not ReleasePackages, the list that puts PostgresStudio first");
+            problems.Add("the packages are not ReleasePackages, the list that puts the Postgres module first");
         }
 
         int guard = body.IndexOf("AssertTheReleasePackagesAndNothingElse();", StringComparison.Ordinal);

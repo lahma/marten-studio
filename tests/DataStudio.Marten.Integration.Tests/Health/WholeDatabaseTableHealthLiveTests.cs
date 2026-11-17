@@ -77,7 +77,7 @@ public sealed class WholeDatabaseTablesFixture(PostgresFixture postgres) : IAsyn
 }
 
 /// <summary>
-/// G1M (issue #8, G1): MartenStudio's table checks judge every table of the store's schemas and of the schemas the database
+/// G1M (issue #8, G1): The Marten module's table checks judge every table of the store's schemas and of the schemas the database
 /// browser admits - the host's relational tables beside the store with migration SQL, a library's tables on vacuum and
 /// statistics but not on index design, never a hidden document type's - and lock nothing and create nothing doing it.
 /// </summary>

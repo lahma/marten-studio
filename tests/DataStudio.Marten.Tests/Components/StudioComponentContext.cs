@@ -86,7 +86,7 @@ internal class StudioComponentContext : BunitContext
 
         // What the shared shell reads in place of the options: the live settings adapter over the same options
         // instance - so WithPolicy, WithReadOnly and every test that sets an option after construction are seen - the
-        // descriptor, and the links into MartenStudio's own screens.
+        // descriptor, and the links into the Marten module's own screens.
         Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
         Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>

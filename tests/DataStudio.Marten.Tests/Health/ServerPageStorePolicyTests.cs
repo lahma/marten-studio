@@ -6,7 +6,7 @@ using DataStudio.Postgres.Services.Server;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// The Server page's gate through MartenStudio's own resource (W5-S2-fix2): the store policy is asked about the database as a
+/// The Server page's gate through the Marten module's own resource (W5-S2-fix2): the store policy is asked about the database as a
 /// whole, with <c>TenantId = null</c>, whatever tenant the visitor's scope names (D29) - which only a
 /// <see cref="MartenStoreResource" /> can show, the shared studio's resource having no tenant at all.
 /// </summary>

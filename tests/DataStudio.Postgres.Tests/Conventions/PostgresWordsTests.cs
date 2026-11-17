@@ -17,14 +17,14 @@ namespace DataStudio.Postgres.Tests.Conventions;
 /// </summary>
 public partial class PostgresWordsTests
 {
-    /// <summary>What only MartenStudio's configuration and API are called: never in a PostgresStudio sentence.</summary>
-    private static readonly string[] MartenStudioNames =
+    /// <summary>What only the Marten module's configuration and API are called: never in a Postgres module sentence.</summary>
+    private static readonly string[] MartenNames =
     [
         "MartenOptions", "MartenCapabilities", "StoreOptions", "AddMarten", "LightweightSession", "Marten-managed",
         "StoreAuthorizationPolicy",
     ];
 
-    /// <summary>What a sentence about a store says: never in a PostgresStudio sentence, but the ones about Marten's objects.</summary>
+    /// <summary>What a sentence about a store says: never in a Postgres module sentence, but the ones about Marten's objects.</summary>
     private static readonly string[] StoreWords = ["Marten store", "this store", "the store's", "Marten table", "document type", "tenant"];
 
     private static IEnumerable<string> StringMembers() =>
@@ -42,7 +42,7 @@ public partial class PostgresWordsTests
 
     /// <summary>
     /// The one member that names <c>StoreOptions</c> on purpose: a Marten table's storage parameters are its store's
-    /// configuration, which Marten Studio's Schema screen compares and a plain data source does not have.
+    /// configuration, which the Marten module's Schema screen compares and a plain data source does not have.
     /// </summary>
     private static readonly string[] NamesStoreOptionsOnPurpose = [nameof(StudioText.MartenTablePartitionParameters)];
 
@@ -50,7 +50,7 @@ public partial class PostgresWordsTests
 
     [Theory]
     [MemberData(nameof(TextMembers))]
-    public void No_sentence_speaks_MartenStudios_words(string member)
+    public void No_sentence_speaks_Marten_words(string member)
     {
         string? text = (string?) typeof(StudioText).GetProperty(member)!.GetValue(PostgresText.Instance);
 
@@ -59,14 +59,14 @@ public partial class PostgresWordsTests
             return;
         }
 
-        foreach (string word in MartenStudioNames)
+        foreach (string word in MartenNames)
         {
             if (word == "StoreOptions" && NamesStoreOptionsOnPurpose.Contains(member))
             {
                 continue;
             }
 
-            text.Should().NotContain(word, member + " is Postgres Studio's");
+            text.Should().NotContain(word, member + " is the Postgres module's");
         }
 
         if (!NamesMartenOnPurpose.Contains(member))
@@ -92,7 +92,7 @@ public partial class PostgresWordsTests
     public void A_Marten_tables_differing_partitions_point_at_Marten_Studios_Schema_screen(string kindName, string name)
     {
         StudioTableKind kind = Enum.Parse<StudioTableKind>(kindName);
-        PostgresHealthTableSource.MartenKindOf(name).Should().Be(kind, "this is the kind Postgres Studio's table source gives it");
+        PostgresHealthTableSource.MartenKindOf(name).Should().Be(kind, "this is the kind the Postgres module's table source gives it");
 
         string said = Autovacuum.State(Partitioned(kind, name), "autovacuum_vacuum_scale_factor", "0.02", PostgresText.Instance);
 
@@ -124,12 +124,12 @@ public partial class PostgresWordsTests
             "a Marten store", "this store", "a document type", "one tenant",
         ];
 
-        planted.Count(static text => MartenStudioNames.Concat(StoreWords).Any(text.Contains)).Should().Be(planted.Length,
+        planted.Count(static text => MartenNames.Concat(StoreWords).Any(text.Contains)).Should().Be(planted.Length,
             "the words the theory above forbids are the words the Marten module's sentences use, so it can fail");
     }
 
     [Fact]
-    public void PostgresStudios_settings_answer_its_own_words()
+    public void Postgres_settings_answer_its_own_words()
     {
         PostgresSettings settings = PostgresSettings.Of(new PostgresOptions());
 

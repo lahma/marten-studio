@@ -16,8 +16,8 @@ namespace DataStudio.Sample.Kafka.Kafka;
 /// <see cref="NoDockerMessage" />. Connecting to a cluster nobody asked for is how a demo writes into something that mattered.
 /// </para>
 /// <para>
-/// <b>Reuse is opt-in</b> (<c>KSTUDIO_SAMPLE_REUSE=true</c>): the container is fresh each run unless the variable asks for it, and then it is
-/// the container labelled <c>kstudio.sample.reuse=kstudio-sample-kafka</c>, which no other container of this repository carries.
+/// <b>Reuse is opt-in</b> (<c>DATASTUDIO_KAFKA_SAMPLE_REUSE=true</c>): the container is fresh each run unless the variable asks for it, and then it is
+/// the container labelled <c>data-studio.sample.reuse=data-studio-sample-kafka</c>, which no other container of this repository carries.
 /// </para>
 /// </remarks>
 internal sealed class SampleKafka : IAsyncDisposable
@@ -26,7 +26,7 @@ internal sealed class SampleKafka : IAsyncDisposable
     public const string ConnectionStringName = "Kafka";
 
     /// <summary>The environment variable that asks for the throwaway containers to be reused across runs.</summary>
-    public const string ReuseEnvironmentVariable = "KSTUDIO_SAMPLE_REUSE";
+    public const string ReuseEnvironmentVariable = "DATASTUDIO_KAFKA_SAMPLE_REUSE";
 
     /// <summary>The environment variable an agent packet sets so its containers carry <c>kstudio.packet</c>.</summary>
     public const string PacketEnvironmentVariable = "KSTUDIO_PACKET";
@@ -35,13 +35,13 @@ internal sealed class SampleKafka : IAsyncDisposable
     public const string Image = "apache/kafka:4.4.0";
 
     /// <summary>The label every container the sample starts carries.</summary>
-    public const string SampleLabel = "kstudio.sample";
+    public const string SampleLabel = "data-studio.sample";
 
     /// <summary>The label that gives a reused broker its identity.</summary>
-    public const string ReuseLabel = "kstudio.sample.reuse";
+    public const string ReuseLabel = "data-studio.sample.reuse";
 
     /// <summary>The label's value.</summary>
-    public const string ReuseLabelValue = "kstudio-sample-kafka";
+    public const string ReuseLabelValue = "data-studio-sample-kafka";
 
     /// <summary>The sentence the host stops with when it needs a throwaway Kafka and Docker is not there.</summary>
     public const string NoDockerMessage =
@@ -110,7 +110,7 @@ internal sealed class SampleKafka : IAsyncDisposable
             // Testcontainers 4.15.0's startup script ends KAFKA_ADVERTISED_LISTENERS with a comma when the container has no additional
             // advertised listener, and Kafka 4.4 refuses an empty entry ("advertised.listeners values must not be empty"). One more
             // listener fixes it. It is bound to the container's own loopback, so nothing outside the container can reach it. (The same
-            // workaround KStudio's live suite carries, KafkaFixture.)
+            // workaround the Kafka module's live suite carries, KafkaFixture.)
             .WithListener("localhost:9095")
             .WithLabel(SampleLabel, "true");
 
@@ -127,14 +127,14 @@ internal sealed class SampleKafka : IAsyncDisposable
         return builder.WithReuse(reuse).Build();
     }
 
-    /// <summary>Whether <c>KSTUDIO_SAMPLE_REUSE</c> asks for reuse: only a literal <c>true</c> does.</summary>
+    /// <summary>Whether <c>DATASTUDIO_KAFKA_SAMPLE_REUSE</c> asks for reuse: only a literal <c>true</c> does.</summary>
     /// <param name="value">The variable's value.</param>
     internal static bool IsReuseRequested(string? value) => string.Equals(value?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The loud banner (D-SHELL 11), logged at Warning on start.</summary>
     /// <param name="kafkaBootstrap">The throwaway Kafka's bootstrap servers, or <see langword="null" /> when the host configured its own.</param>
     /// <param name="postgresHost">The throwaway Postgres' <c>host:port</c>, or <see langword="null" /> when the host configured its own.</param>
-    /// <param name="reused">Whether <c>KSTUDIO_SAMPLE_REUSE=true</c> asked for reuse: the containers are then kept for the next run, and the banner says so.</param>
+    /// <param name="reused">Whether <c>DATASTUDIO_KAFKA_SAMPLE_REUSE=true</c> asked for reuse: the containers are then kept for the next run, and the banner says so.</param>
     /// <returns>The sentence, or <see langword="null" /> when neither is a container.</returns>
     public static string? Banner(string? kafkaBootstrap, string? postgresHost, bool reused = false)
     {
@@ -232,7 +232,7 @@ internal sealed class SampleKafka : IAsyncDisposable
 
 /// <summary>
 /// The few <c>docker</c> calls the broker's anonymous volumes need: the image declares six, and Docker leaves them behind with the container
-/// unless they are removed with it (the lesson of KStudio's live fixture).
+/// unless they are removed with it (the lesson of the Kafka module's live fixture).
 /// </summary>
 internal static class DockerVolumes
 {

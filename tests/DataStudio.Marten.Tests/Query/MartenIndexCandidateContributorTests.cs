@@ -9,7 +9,7 @@ using Weasel.Postgresql.Tables;
 namespace DataStudio.Marten.Tests.Query;
 
 /// <summary>
-/// 1.2-INDEX-A: MartenStudio's half of the index advisor, with no database and no store connection. On a Marten document table an
+/// 1.2-INDEX-A: The Marten module's half of the index advisor, with no database and no store connection. On a Marten document table an
 /// index read off a plan becomes the index Marten would create for a <c>StoreOptions</c> line, carrying that line, or - where the
 /// store already declares it - the same index with no line and a note; any other is dropped; a hidden type's table yields nothing and
 /// is never named; and when the store cannot be learned every candidate on a Marten-named table is dropped. A JSON member is never

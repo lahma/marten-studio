@@ -403,7 +403,7 @@ internal sealed class SampleHost : IAsyncDisposable
         return (process.ExitCode, host.Log);
     }
 
-    /// <summary>The Marten sample's own switches, as the overload that predates the PostgresStudio sample names them.</summary>
+    /// <summary>The Marten sample's own switches, as the overload that predates the Postgres module sample names them.</summary>
     private static string[] MartenArguments(string? studioPath, bool allowDataGeneration, bool noDaemon)
     {
         List<string> arguments = [];
@@ -557,7 +557,7 @@ internal sealed class SampleHost : IAsyncDisposable
 /// <param name="ConnectionStringName">The <c>ConnectionStrings:</c> key it reads its database from.</param>
 /// <param name="DefaultStudioPath">Where it mounts its studio when no path is given.</param>
 /// <remarks>
-/// The Postgres Studio sample is <c>tests/DataStudio.Postgres.Integration.Tests</c>' to start, with a copy of this class of its
+/// The Postgres sample is <c>tests/DataStudio.Postgres.Integration.Tests</c>' to start, with a copy of this class of its
 /// own: this suite no longer builds it.
 /// </remarks>
 internal sealed record SampleApp(string Project, string ConnectionStringName, string DefaultStudioPath)

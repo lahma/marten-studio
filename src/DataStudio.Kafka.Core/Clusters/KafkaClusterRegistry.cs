@@ -352,6 +352,6 @@ internal sealed class KafkaWires(KafkaClusterRegistry registry, IKafkaWireFactor
 /// <summary>What the engine takes from the studio that hosts it.</summary>
 internal interface IKafkaEngineSettings
 {
-    /// <summary>How long a catalog read is reused: the host studio's <c>RefreshInterval</c>.</summary>
+    /// <summary>How long a catalog read is reused: the shell's <c>RefreshInterval</c>.</summary>
     TimeSpan CatalogTimeToLive { get; }
 }

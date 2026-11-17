@@ -25,7 +25,7 @@ public class StudioModuleCompositionTests
 
     private static readonly PostgresSettings Settings = PostgresSettings.Of(Options.Create(new PostgresOptions()));
 
-    /// <summary>The database module as <c>AddPostgresStudio()</c> registers it, for a composition that is about the modules beside it.</summary>
+    /// <summary>The database module as <c>AddPostgres()</c> registers it, for a composition that is about the modules beside it.</summary>
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
 
     private static StudioShellDescriptor Compose(params IStudioModule[] others) => StudioModuleComposition.Compose([Database(), .. others]);

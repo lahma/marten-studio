@@ -8,7 +8,7 @@ using DataStudio.Sample.Postgres.Data;
 namespace DataStudio.Postgres.Integration.Tests.Database;
 
 /// <summary>
-/// The Postgres Studio sample's demo data, applied the way its host applies it on a server with no Marten: the tenant
+/// The Postgres sample's demo data, applied the way its host applies it on a server with no Marten: the tenant
 /// databases with their one unindexed foreign key, the admin database's directory of them, and the relational demo
 /// beside it.
 /// </summary>
@@ -148,7 +148,7 @@ public class TenantDemoLiveTests(PostgresFixture postgres)
         (await CountAsync(admin, RelationalDemoSchema.AppSettingsTable, RelationalDemoSchema.SampleSchemaName)).Should().BePositive();
         (await ScalarAsync<bool>(admin,
                 "select not exists (select 1 from pg_catalog.pg_class where relname like 'mt\\_%')"))
-            .Should().BeTrue("the Postgres Studio sample's admin database holds nothing of Marten's");
+            .Should().BeTrue("the Postgres sample's admin database holds nothing of Marten's");
 
         (await RelationalDemoSchema.ApplyAsync(connection, Token)).RowsWritten.Should().Be(0, "and applying it again writes nothing");
     }

@@ -39,7 +39,7 @@ public class ScanLifecycleTests
         scan.Assigns.Should().ContainSingle("one explicit assign");
         scan.Assigns[0].Should().OnlyContain(static x => x.Offset >= 0, "an assign carries explicit offsets, never a stored or committed position");
         scan.Options.Isolation.Should().Be(WireIsolation.ReadCommitted);
-        scan.GroupId.Should().StartWith("kstudio-");
+        scan.GroupId.Should().StartWith("data-studio-");
     }
 
     [Fact]

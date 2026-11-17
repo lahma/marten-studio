@@ -5,8 +5,8 @@ using DataStudio.Postgres.Services.Health;
 namespace DataStudio.Marten.Tests.Health;
 
 /// <summary>
-/// MartenStudio's health-check registry exactly as a host's container builds it: every check in the descriptor's
-/// assemblies (the shared engine's and MartenStudio's own), with the source kinds each runs against, and every
+/// The Marten module's health-check registry exactly as a host's container builds it: every check in the descriptor's
+/// assemblies (the shared engine's and the Marten module's own), with the source kinds each runs against, and every
 /// <c>RequiresFeature</c> resolved against the Marten this process runs.
 /// </summary>
 /// <remarks>

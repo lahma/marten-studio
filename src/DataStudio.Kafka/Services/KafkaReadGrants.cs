@@ -9,7 +9,7 @@ internal enum KafkaValueAccess
     /// <summary>The scan or read had the payload grant: the value is in the match, as far as the engine could keep it.</summary>
     Granted,
 
-    /// <summary><c>ReadPayloads</c> is off, or the host studio's <c>ReadOnly</c> turned it off.</summary>
+    /// <summary><c>ReadPayloads</c> is off, or the shell's <c>ReadOnly</c> turned it off.</summary>
     CapabilityOff,
 
     /// <summary>The capability policy refused <c>ReadPayloads</c> for the record's topic.</summary>

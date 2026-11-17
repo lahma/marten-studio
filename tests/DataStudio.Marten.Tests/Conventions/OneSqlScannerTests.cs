@@ -35,7 +35,7 @@ public class OneSqlScannerTests
 {
     /// <summary>
     /// The file that owns the lexing, repository-relative. Everything else in either studio's builders' folder asks it -
-    /// MartenStudio's composer through the shared assembly.
+    /// The Marten module's composer through the shared assembly.
     /// </summary>
     private const string TheLexer = "src/DataStudio.Postgres.Diagnostics/Internal/Sql/SqlLexer.cs";
 

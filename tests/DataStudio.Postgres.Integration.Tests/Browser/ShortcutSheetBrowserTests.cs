@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 namespace DataStudio.Postgres.Integration.Tests.Browser;
 
 /// <summary>
-/// 1.2-A11Y in Postgres Studio's own shell: <c>?</c> opens the keyboard shortcut sheet as a native modal, Esc closes it and focus
+/// 1.2-A11Y in the Postgres module's own shell: <c>?</c> opens the keyboard shortcut sheet as a native modal, Esc closes it and focus
 /// goes back to the control that was focused, <c>?</c> does nothing while a character is being typed - the SQL console's editor
 /// is a text area - and the list holds no key only a Marten page answers to.
 /// </summary>
@@ -29,7 +29,7 @@ public class ShortcutSheetBrowserTests(BrowserSuiteFixture fixture)
 
             string text = await page.Locator("#ms-shortcuts").TextContentAsync() ?? string.Empty;
             text.Should().Contain("Keyboard shortcuts").And.Contain("JSON viewer").And.Contain("SQL editor");
-            text.Should().NotContain("Document editor", "a Postgres Studio host has no document pages");
+            text.Should().NotContain("Document editor", "a Postgres module host has no document pages");
 
             // Tab stays in the sheet, the page behind it is unreachable.
             for (int step = 0; step < 4; step++)

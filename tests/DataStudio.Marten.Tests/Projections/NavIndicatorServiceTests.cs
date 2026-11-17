@@ -21,7 +21,7 @@ namespace DataStudio.Marten.Tests.Projections;
 /// more than its answer: a badge that could throw would be a decoration taking navigation down with it.
 /// Everything here answers <see cref="NavIndicators.None" /> rather than raising, and the whole answer
 /// goes through the snapshot cache so that N circuits are one pair of reads per interval (plan D10). The badges are
-/// MartenStudio's contributor's (<see cref="MartenNavIndicatorContributor" />), read through the shared service, so
+/// The Marten module's contributor's (<see cref="MartenNavIndicatorContributor" />), read through the shared service, so
 /// these are the contributor's numbers and the service's caching and authorization at once; where "zero" and "could
 /// not tell" have to be told apart, which no badge does, the contributor's own reading is asked.
 /// </remarks>
@@ -497,7 +497,7 @@ public class NavIndicatorServiceTests
     private static StudioNavBadge? ProjectionsDot(NavIndicators indicators) =>
         indicators.Badges.TryGetValue(MartenDescriptor.ProjectionsBadge, out StudioNavBadge? badge) ? badge : null;
 
-    /// <summary>The service under test, with its scope, MartenStudio's contributor over two fake data services, and a real cache.</summary>
+    /// <summary>The service under test, with its scope, the Marten module's contributor over two fake data services, and a real cache.</summary>
     private sealed class Harness
     {
         /// <summary>The per-store policy name <see cref="WithPolicy" /> configures.</summary>
@@ -564,7 +564,7 @@ public class NavIndicatorServiceTests
 
         public NavIndicatorService Service { get; }
 
-        /// <summary>MartenStudio's contributor, which the service asks for the two badges.</summary>
+        /// <summary>The Marten module's contributor, which the service asks for the two badges.</summary>
         public MartenNavIndicatorContributor Contributor { get; }
 
         /// <summary>The contributor's own numbers for the active scope, straight from the fakes - no cache, no policy.</summary>

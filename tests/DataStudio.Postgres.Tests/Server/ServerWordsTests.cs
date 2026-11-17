@@ -17,7 +17,7 @@ public class ServerWordsTests
     {
         PostgresText.Instance.ReadOnlyWrites.Should().Be("write the application makes");
         PostgresText.Instance.ReadOnlyNeverAsks.Should().Be("and most data access never asks");
-        PostgresText.Instance.LeaderTimeoutClause.Should().BeEmpty("a data source has no HotCold daemon, and Postgres Studio no K08");
+        PostgresText.Instance.LeaderTimeoutClause.Should().BeEmpty("a data source has no HotCold daemon, and the Postgres module no K08");
     }
 
     [Fact]

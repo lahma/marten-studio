@@ -104,7 +104,7 @@ public abstract class ExportLiveTests(KafkaFixture fixture)
             string text = Encoding.UTF8.GetString(saved.Bytes);
             text.Should().NotContain(Sentinel, "the deny-listed header and the rule-masked header are masked in the file");
             text.Should().Contain("redacted by the built-in header deny-list").And.Contain("redacted by header customer-email");
-            saved.FileName.Should().StartWith("kstudio-live-").And.EndWith(format == KafkaExportFormat.Csv ? "Z.csv" : "Z.jsonl");
+            saved.FileName.Should().StartWith("data-studio-live-").And.EndWith(format == KafkaExportFormat.Csv ? "Z.csv" : "Z.jsonl");
 
             // One row per record: a JSON line each, or a CSV header and a row each.
             int rows = text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries).Length;

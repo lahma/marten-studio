@@ -530,9 +530,9 @@ public class KafkaExportWriterTests
     {
         DateTimeOffset now = new(2026, 11, 13, 8, 15, 2, TimeSpan.Zero);
 
-        KafkaExportFileName.For("prod", KafkaExportFileName.TopicsPart(["orders.v1"]), now, "jsonl").Should().Be("kstudio-prod-orders.v1-20261113-081502Z.jsonl");
-        KafkaExportFileName.For("prod", KafkaExportFileName.TopicsPart(["a", "b", "c"]), now, "csv").Should().Be("kstudio-prod-3-topics-20261113-081502Z.csv");
-        KafkaExportFileName.For("prod", KafkaExportFileName.RecordPart("orders.v1", 3, 1200), now, "json").Should().Be("kstudio-prod-orders.v1-3-1200-20261113-081502Z.json");
+        KafkaExportFileName.For("prod", KafkaExportFileName.TopicsPart(["orders.v1"]), now, "jsonl").Should().Be("data-studio-prod-orders.v1-20261113-081502Z.jsonl");
+        KafkaExportFileName.For("prod", KafkaExportFileName.TopicsPart(["a", "b", "c"]), now, "csv").Should().Be("data-studio-prod-3-topics-20261113-081502Z.csv");
+        KafkaExportFileName.For("prod", KafkaExportFileName.RecordPart("orders.v1", 3, 1200), now, "json").Should().Be("data-studio-prod-orders.v1-3-1200-20261113-081502Z.json");
     }
 
     [Fact]
@@ -542,13 +542,13 @@ public class KafkaExportWriterTests
 
         string odd = KafkaExportFileName.For("prod/tenant a", "ordërs:v1 \\ ../x", now, "csv");
 
-        odd.Should().Be("kstudio-prod_tenant_a-ord_rs_v1___.._x-20261113-061502Z.csv", "the time is UTC");
+        odd.Should().Be("data-studio-prod_tenant_a-ord_rs_v1___.._x-20261113-061502Z.csv", "the time is UTC");
         odd.Should().MatchRegex("^[A-Za-z0-9._-]+$");
 
         string longName = KafkaExportFileName.For(new string('c', 100), new string('t', 500), now, "jsonl");
 
         longName.Length.Should().BeLessThanOrEqualTo(KafkaExportFileName.MaxLength);
         longName.Should().EndWith("-20261113-061502Z.jsonl", "the topic part is cut, never the time or the extension");
-        longName.Should().StartWith("kstudio-" + new string('c', 40) + "-t");
+        longName.Should().StartWith("data-studio-" + new string('c', 40) + "-t");
     }
 }

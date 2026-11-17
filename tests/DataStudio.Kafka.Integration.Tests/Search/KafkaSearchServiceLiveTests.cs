@@ -8,7 +8,7 @@ namespace DataStudio.Kafka.Integration.Tests.Search;
 
 /// <summary>
 /// UI-B's search service over a real broker (D-UI decision 17): the engine is the real Confluent one as the restricted principal <c>reader</c>,
-/// and the authorization, capability guard, owner and audit are KStudio's real services, composed by the real registrations over the studio's real
+/// and the authorization, capability guard, owner and audit are the Kafka module's real services, composed by the real registrations over the studio's real
 /// action log and the application's real <c>IAuthorizationService</c> (<see cref="LiveSearchHost" />). What the fast suite proves
 /// on the fake broker is proven here on both images: a header search finds the seeded record and is audited, a request naming a refused topic reads
 /// nothing, "Continue" reads exactly the rest, and a masked header never reaches the audit.
