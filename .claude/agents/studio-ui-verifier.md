@@ -1,6 +1,6 @@
 ---
 name: studio-ui-verifier
-description: Runs the Marten Studio sample host against a real Postgres, drives it in a real browser, and reports what the UI actually renders — screenshots, console errors, failed requests, and a per-page verdict. Use to validate a UI packet in the real browser rather than in bUnit, and to produce README screenshots.
+description: Runs the Data Studio sample host against a real Postgres, drives it in a real browser, and reports what the UI actually renders — screenshots, console errors, failed requests, and a per-page verdict. Use to validate a UI packet in the real browser rather than in bUnit, and to produce README screenshots.
 model: sonnet
 effort: medium
 tools: Read, Glob, Grep, Bash, PowerShell, Write, Edit, TodoWrite, Skill

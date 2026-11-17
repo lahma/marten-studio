@@ -1,6 +1,6 @@
 ---
 name: studio-implementer
-description: Implements one Marten Studio task packet end-to-end — reads AGENTS.md and the packet, writes the code plus its tests, verifies with the build and the test suite, and reports against the packet's acceptance criteria. Use for design-bearing work that must come back as working, tested, committed code rather than as advice.
+description: Implements one Data Studio task packet end-to-end — reads AGENTS.md and the packet, writes the code plus its tests, verifies with the build and the test suite, and reports against the packet's acceptance criteria. Use for design-bearing work that must come back as working, tested, committed code rather than as advice.
 model: sonnet
 effort: high
 disallowedTools: Agent
@@ -28,7 +28,7 @@ committed change.
 6. **Never hand-edit `tests/**/Verify/*.verified.txt`.** If your change moves the public API, run the test,
    read the diff deliberately, say in your report exactly what moved and why, then accept the baseline.
 7. **No MudBlazor and no third-party UI, CSS or icon library, ever.** Styling is hand-rolled, prefixed
-   `ms-`, driven by the design tokens in `src/DataStudio.Postgres/wwwroot/css/studio.css`.
+   `ms-`, driven by the design tokens in `src/DataStudio/wwwroot/css/studio.css`.
 8. **No `async void`.** Component events are `Func<Task>` dispatched through `InvokeAsync` with a
    `try`/`catch` that surfaces the failure in the UI.
 9. **No raw SQL outside the `Internal/Sql` builders**; identifiers quoted, values parameters. Every mutating
@@ -49,7 +49,7 @@ committed change.
 - Write the tests with the code, in the same commit.
 - Verify, in this order, and paste only the summary line (and any failing tail) of each into your report:
   `dotnet build data-studio.slnx`; the fast suite(s) of the project(s) you touched
-  (`dotnet test tests/DataStudio.Marten.Tests`, `dotnet test tests/DataStudio.Postgres.Tests`); and the live classes
+  (`dotnet test tests/DataStudio.Tests`, `…Postgres.Tests`, `…Marten.Tests`, `…Kafka.Tests`, `…Kafka.Wolverine.Tests`); and the live classes
   you added or touched, filtered (`$env:MARTENSTUDIO_PG_REUSE='false'; dotnet test tests/<…>.Integration.Tests
   --filter "FullyQualifiedName~<Class>"`; `docker info` first). The variable gives this run its own
   container so parallel packets cannot collide on schemas; `TESTCONTAINERS_REUSE_ENABLE` is not read by

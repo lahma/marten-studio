@@ -283,9 +283,9 @@ every secret before the text is read, and keeps, logs, audits and connects to no
   (`WordsTests` in each suite).
 - **One log template per event.** `StudioLog` and `PostgresStudioLog`, which kept two templates for one id so that 0.4's words never
   moved, are one class: each id has one template, says "Data Studio" where it names the product and calls a Marten store or a plain data
-  source a "source". **Ids, levels and property names are promises** (`docs/stability.md`) and did not move, with three exceptions
+  source a "source". **An event id is a promise** (`docs/stability.md`), and the ids, the levels and the property names did not move, with three exceptions
   recorded where they happened: 9230 gained three option-name properties, fourteen Debug lines lost their `{Product}` property, and a Postgres
-  source's events carry `{TenantId}` = `(all)`. A template's words are not a promise. The scans that keep it so are `LogEventConventionsTests`
+  source's events carry `{TenantId}` = `(all)`. A template's words are not a promise (`docs/stability.md`: match on ids, never on text). The scans that keep it so are `LogEventConventionsTests`
   (the Marten module's events, and that no template of a module, the Postgres module or the engine names a removed product),
   `PostgresLogEventConventionsTests`, `ShellLogEventConventionsTests`, `KafkaLogEventConventionsTests` and `EngineLogEventsTests` over one
   `LogEventScan`; log categories are under `DataStudio.*` (`DataStudio.Kafka.Core.Scans`). The studio's own database sessions carry the

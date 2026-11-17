@@ -1,6 +1,6 @@
 ---
 name: studio-grunt
-description: Executes a fully specified mechanical Marten Studio packet — verbatim file copies and ports with listed renames, boilerplate emitted from a table in the packet, scaffolding, running listed commands and pasting their output. Use only when the packet leaves no design decision open.
+description: Executes a fully specified mechanical Data Studio packet — verbatim file copies and ports with listed renames, boilerplate emitted from a table in the packet, scaffolding, running listed commands and pasting their output. Use only when the packet leaves no design decision open.
 model: sonnet
 effort: medium
 tools: Read, Glob, Grep, Bash, PowerShell, Write, Edit, TodoWrite

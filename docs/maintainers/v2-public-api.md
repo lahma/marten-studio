@@ -1,7 +1,7 @@
 # The public API of 2.0
 
-The whole public surface of DataStudio 2.0, with each type's 1.x name beside it. It is the target of the 2.0 plan
-(`.alta/plans/2026-11-16-datastudio-v2.md`, step 4); until that step lands, the code still has the 1.x names. A member
+The whole public surface of DataStudio 2.0, with each type's 1.x name beside it. It is the record of the 2.0 renames
+(`.alta/plans/2026-11-16-datastudio-v2.md`, step 4), and the public API baselines hold the names it lists. A member
 that is not listed keeps its name, its type and its default.
 
 Two rules place every type:
@@ -48,7 +48,7 @@ Two rules place every type:
 | `AddPostgresDiagnostics(this IHealthChecksBuilder, …)` | `AddPostgresStudio(this IHealthChecksBuilder, …)` | The health-check export. |
 | `AddPostgresConnectionHistory`, `PostgresConnectionHistoryOptions`, `IPostgresConnectionHistoryStore`, `PostgresConnectionSample` | same | |
 | `PostgresDiagnosticsOptions`, `IPostgresDiagnostics`, `IPostgresDatabaseSource`, `IPostgresCapacitySource` and every record and enum of the read model | same | Only the namespace changes. |
-| `PostgresPageLink` | `PostgresStudioLink` | Its path is relative to the Postgres module's root, not to the mount. |
+| `PostgresPageLink` | `PostgresStudioLink` | Its path is relative to the mount and starts with the Postgres module's segment (`postgres/health`). |
 | `PostgresPage` | `PostgresStudioPage` | |
 
 ## `DataStudio.Marten`
