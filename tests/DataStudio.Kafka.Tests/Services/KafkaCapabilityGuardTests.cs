@@ -60,7 +60,7 @@ public class KafkaCapabilityGuardTests
         Action require = () => guard.Require(KafkaCapability.SearchRecords);
 
         require.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
-            "KStudio refused 'SearchRecords' because DataStudioOptions.ReadOnly is true, which turns every capability off.");
+            "Data Studio refused 'SearchRecords' because DataStudioOptions.ReadOnly is true, which turns every capability off.");
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class KafkaCapabilityGuardTests
         Action require = () => guard.Require(KafkaCapability.SearchRecords);
 
         KafkaCapabilityDeniedException denial = require.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
-            "KStudio refused 'SearchRecords' because KafkaOptions.Capabilities.SearchRecords is false.").Which;
+            "Data Studio refused 'SearchRecords' because KafkaOptions.Capabilities.SearchRecords is false.").Which;
         denial.CapabilityOption.Should().Be("KafkaOptions.Capabilities.SearchRecords");
         denial.Capability.Should().Be(KafkaCapability.SearchRecords);
     }

@@ -50,7 +50,7 @@ public class WolverineTenantProbeTests
 
         probe.Tenants.Should().BeEmpty();
         probe.Notes.Should().ContainSingle().Which.Text.Should().Be(
-            "Tenant acme's cluster is not listed: Wolverine had not connected it when KStudio read the configuration after the application started.");
+            "Tenant acme's cluster is not listed: Wolverine had not connected it when Data Studio read the configuration after the application started.");
 
         KafkaClusterContribution contribution = WolverineRig.Contribute(options);
 
@@ -123,7 +123,7 @@ public class WolverineTenantProbeTests
 
         probe.Tenants.Should().BeEmpty();
         probe.Notes.Should().ContainSingle().Which.Text.Should().Be(
-            "Wolverine's broker-per-tenant clusters are not listed: this Wolverine version does not expose them as KStudio expects.");
+            "Wolverine's broker-per-tenant clusters are not listed: this Wolverine version does not expose them as Data Studio expects.");
     }
 
     [Theory]
@@ -133,7 +133,7 @@ public class WolverineTenantProbeTests
         WolverineTenantProbeResult probe = WolverineTenantProbe.Read(items, WrongShapeTypeName(items));
 
         probe.Tenants.Should().BeEmpty();
-        probe.Notes.Should().ContainSingle().Which.Reason.Should().Contain("does not expose them as KStudio expects");
+        probe.Notes.Should().ContainSingle().Which.Reason.Should().Contain("does not expose them as Data Studio expects");
     }
 
     public static TheoryData<object[]> WrongShapes() => new()
@@ -168,7 +168,7 @@ public class WolverineTenantProbeTests
 
         probe.Tenants.Should().BeEmpty();
         KafkaSourceNote note = probe.Notes.Should().ContainSingle().Which;
-        note.Text.Should().Be("A tenant's cluster was not listed: its id is one KStudio cannot address.");
+        note.Text.Should().Be("A tenant's cluster was not listed: its id is one Data Studio cannot address.");
     }
 
     [Fact]

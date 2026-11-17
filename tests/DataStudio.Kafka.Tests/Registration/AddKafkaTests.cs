@@ -134,9 +134,9 @@ public class AddKafkaTests
 
         Headings(kafkaFirst).First().Should().Be("Kafka: reads");
         Headings(postgresFirst).First().Should().StartWith("Postgres: ");
-        Headings(postgresFirst).Last().Should().Be("KStudio for Apache Kafka® reads");
-        kafkaFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("KStudio for Apache Kafka®", "Postgres Studio");
-        postgresFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("Postgres Studio", "KStudio for Apache Kafka®");
+        Headings(postgresFirst).Last().Should().Be("Kafka: reads");
+        kafkaFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("Kafka", "Postgres");
+        postgresFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("Postgres", "Kafka");
     }
 
     [Fact]

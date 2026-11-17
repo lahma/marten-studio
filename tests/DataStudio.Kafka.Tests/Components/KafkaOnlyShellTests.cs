@@ -39,6 +39,25 @@ public class KafkaOnlyShellTests
         descriptor.Navigation.Select(static x => x.Title).Should().Equal("Kafka", "Studio");
     }
 
+    [Fact]
+    public async Task A_kafka_only_shells_shortcut_sheet_lists_no_key_of_a_component_it_does_not_have()
+    {
+        using KafkaStudioHarness harness = Harness();
+        await harness.Context.ReadyAsync();
+
+        IRenderedComponent<DataStudio.Components.Shared.ShortcutSheet> sheet = harness.Context.Render<DataStudio.Components.Shared.ShortcutSheet>();
+
+        string[] groups = [.. sheet.FindAll(".ms-shortcuts-title").Select(static x => x.TextContent.Trim())];
+        groups.Should().Equal(
+            "Anywhere",
+            "In a dialog",
+            "Menus",
+            "JSON viewer (a row has focus)",
+            "JSON viewer search box");
+        groups.Should().NotContain(static x => x.Contains("SQL", StringComparison.Ordinal) || x.Contains("Table rows", StringComparison.Ordinal) || x.Contains("Plan", StringComparison.Ordinal),
+            "the SQL editor, the row grids and the plan view are the Postgres module's, and it is not composed here");
+    }
+
     [Theory]
     [InlineData("http://localhost/studio", "http://localhost/studio/kafka")]
     [InlineData("http://localhost/studio/", "http://localhost/studio/kafka")]

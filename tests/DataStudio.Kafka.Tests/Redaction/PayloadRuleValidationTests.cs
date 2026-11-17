@@ -98,7 +98,7 @@ public class PayloadRuleValidationTests
     public void A_path_the_search_cannot_read_is_refused_with_the_path_shown(string path, string shown)
     {
         Validate(r => r.JsonPath(path)).Should().ContainSingle().Which.Should().Be(
-            $"KStudio: topic 'orders.v1': the redaction path '{shown}' is not a JSON path the search can read ($.name, $.name[0], $.name[*]).");
+            $"Data Studio: topic 'orders.v1': the redaction path '{shown}' is not a JSON path the search can read ($.name, $.name[0], $.name[*]).");
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class PayloadRuleValidationTests
             r.JsonPath("$.Customer.email");
             r.JsonPath("$.customer.EMAIL");
         }).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1' declares a redaction rule on '$.customer.EMAIL' twice (member names are compared ignoring case).");
+            "Data Studio: topic 'orders.v1' declares a redaction rule on '$.customer.EMAIL' twice (member names are compared ignoring case).");
 
         Validate(static r =>
         {
@@ -127,7 +127,7 @@ public class PayloadRuleValidationTests
             {
                 r.JsonPath("$.f" + i);
             }
-        }).Should().ContainSingle().Which.Should().Be("KStudio: topic 'orders.v1' declares 33 JSON-path redaction rules; the most is 32.");
+        }).Should().ContainSingle().Which.Should().Be("Data Studio: topic 'orders.v1' declares 33 JSON-path redaction rules; the most is 32.");
 
         Validate(static r =>
         {
@@ -135,7 +135,7 @@ public class PayloadRuleValidationTests
             {
                 r.Pattern("p" + i);
             }
-        }).Should().ContainSingle().Which.Should().Be("KStudio: topic 'orders.v1' declares 9 redaction patterns; the most is 8.");
+        }).Should().ContainSingle().Which.Should().Be("Data Studio: topic 'orders.v1' declares 9 redaction patterns; the most is 8.");
 
         Validate(static r =>
         {
@@ -155,20 +155,20 @@ public class PayloadRuleValidationTests
     public void A_pattern_is_checked_for_length_syntax_backtracking_and_emptiness()
     {
         Validate(static r => r.Pattern(new string('a', 501), "long")).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1': pattern long is 501 characters long; the most is 500.");
+            "Data Studio: topic 'orders.v1': pattern long is 501 characters long; the most is 500.");
         Validate(static r => r.Pattern(new string('a', 500), "limit")).Should().BeEmpty();
 
         Validate(static r => r.Pattern("(unclosed", "bad")).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1': pattern bad is not a regular expression .NET can read.");
+            "Data Studio: topic 'orders.v1': pattern bad is not a regular expression .NET can read.");
 
         Validate(static r => r.Pattern(@"(a)\1", "backref")).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1': pattern backref uses a construct that cannot run without backtracking (backreferences, lookarounds, atomic groups and conditionals are refused).");
+            "Data Studio: topic 'orders.v1': pattern backref uses a construct that cannot run without backtracking (backreferences, lookarounds, atomic groups and conditionals are refused).");
         Validate(static r => r.Pattern("(?=a)b", "look")).Should().ContainSingle().Which.Should().Contain("pattern look uses a construct that cannot run without backtracking");
         Validate(static r => r.Pattern("(?<=a)b", "behind")).Should().ContainSingle().Which.Should().Contain("pattern behind uses a construct that cannot run without backtracking");
         Validate(static r => r.Pattern("(?>a+)b", "atomic")).Should().ContainSingle().Which.Should().Contain("pattern atomic uses a construct that cannot run without backtracking");
 
         Validate(static r => r.Pattern("a*", "empty")).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1': pattern empty matches an empty text, so it would mask nothing and run on every value.");
+            "Data Studio: topic 'orders.v1': pattern empty matches an empty text, so it would mask nothing and run on every value.");
         Validate(static r => r.Pattern("^$", "anchors")).Should().ContainSingle().Which.Should().Contain("pattern anchors matches an empty text");
         Validate(static r => r.Pattern("(a|)", "alt")).Should().ContainSingle().Which.Should().Contain("pattern alt matches an empty text");
     }
@@ -181,7 +181,7 @@ public class PayloadRuleValidationTests
     public void A_pattern_name_is_one_to_64_letters_digits_hyphens_and_underscores(string name)
     {
         Validate(r => r.Pattern("aa", name)).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1': a pattern name is 1 to 64 letters, digits, '-' or '_'.");
+            "Data Studio: topic 'orders.v1': a pattern name is 1 to 64 letters, digits, '-' or '_'.");
     }
 
     [Fact]

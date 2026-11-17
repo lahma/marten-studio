@@ -49,7 +49,7 @@ public class KafkaAccessTests
     [Fact]
     public void Other_errors_say_what_happened()
     {
-        KafkaAccessText.Describe(new WireError.AuthenticationFailed("SaslAuthenticationFailed")).Should().Contain("refused KStudio's credentials");
+        KafkaAccessText.Describe(new WireError.AuthenticationFailed("SaslAuthenticationFailed")).Should().Contain("refused Data Studio's credentials");
         KafkaAccessText.Describe(new WireError.Unsupported("ListOffsets")).Should().Be("Not available: this broker does not support ListOffsets");
         KafkaAccessText.Describe(new WireError.NotFound(KafkaResourceType.Topic, "orders")).Should().Be("Not found: topic `orders`");
         KafkaAccessText.Describe(new WireError.Unavailable("Local_TimedOut", true)).Should().Contain("did not answer");

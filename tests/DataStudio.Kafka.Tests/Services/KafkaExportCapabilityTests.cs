@@ -73,7 +73,7 @@ public class KafkaExportCapabilityTests
         Action export = () => guard.Require(KafkaCapability.ExportRecords);
 
         export.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
-            "KStudio refused 'ExportRecords' because KafkaOptions.Capabilities.ExportRecords is false.");
+            "Data Studio refused 'ExportRecords' because KafkaOptions.Capabilities.ExportRecords is false.");
     }
 
     [Fact]

@@ -97,7 +97,7 @@ public class StudioLayoutModulePageTests
     public async Task A_module_with_no_scope_gate_draws_its_page_body_ungated()
     {
         using KafkaStudioHarness harness = Harness();
-        harness.Descriptor.Modules.Single(static x => x.Key == "kafka").ScopeGate.Should().BeNull("the premise: KStudio's module has no gate");
+        harness.Descriptor.Modules.Single(static x => x.Key == "kafka").ScopeGate.Should().BeNull("the premise: Data Studio's module has no gate");
 
         DatabaseScopeAccess access = harness.Context.Services.GetRequiredService<DatabaseScopeAccess>();
         access.Set(ScopeAccess.Denied);

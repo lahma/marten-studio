@@ -160,8 +160,8 @@ public class ShellModuleComponentTests
         string[] lines = [.. rail.Find(".ms-rail-credit").QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim())];
         lines.Should().HaveCount(5);
         lines[0].Should().StartWith("Data Studio ");
-        lines[1].Should().Be("Postgres Studio");
-        lines[2].Should().Be("KStudio for Apache Kafka®");
+        lines[1].Should().Be("Postgres");
+        lines[2].Should().Be("Kafka");
         lines[3].Should().Be("MIT licensed");
         lines[4].Should().Be("by Marko Lahma");
     }
@@ -193,7 +193,7 @@ public class ShellModuleComponentTests
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
 
-        IElement group = banner.Find("ul[aria-label='KStudio for Apache Kafka® reads']");
+        IElement group = banner.Find("ul[aria-label='Kafka: reads']");
         IElement[] rows = [.. group.QuerySelectorAll("li")];
         rows.Should().HaveCount(4);
         rows.Select(static x => x.QuerySelector(".ms-capability-name")!.TextContent).Should().Equal("SearchRecords", "ReadPayloads", "ExportRecords", "LiveTail");
@@ -212,7 +212,7 @@ public class ShellModuleComponentTests
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
 
-        banner.FindAll("ul[aria-label='KStudio for Apache Kafka® reads'] li").Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-off"));
+        banner.FindAll("ul[aria-label='Kafka: reads'] li").Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-off"));
     }
 
     [Fact]

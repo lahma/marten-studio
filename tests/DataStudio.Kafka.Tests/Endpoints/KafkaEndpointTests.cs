@@ -100,7 +100,7 @@ public class KafkaEndpointTests
             string body = await page.Content.ReadAsStringAsync(Token);
             body.Should().Contain("ms-k-trademark", "the prerendered frame draws the trademark line");
             body.Should().Contain("Apache Kafka is a trademark of the Apache Software Foundation");
-            body.Should().Contain("KStudio for Apache Kafka&#xAE;", "the rail names the module");
+            body.Should().Contain("Kafka", "the rail names the module");
             body.Should().NotContain("Kafka topics</h1>", "the body starts only once the circuit is interactive: a prerender reads nothing");
         }
         finally
@@ -209,7 +209,7 @@ public class KafkaEndpointTests
 
         Func<Task> start = () => app.StartAsync(Token);
 
-        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("Data Studio is mapped with no authorization.").And.Contain("KStudio's pages show the clusters");
+        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("Data Studio is mapped with no authorization.").And.Contain("The Kafka pages show the clusters");
     }
 
     [Fact]

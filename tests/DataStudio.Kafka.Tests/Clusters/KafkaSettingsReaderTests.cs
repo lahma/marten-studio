@@ -134,7 +134,7 @@ public class KafkaSettingsReaderTests
 
         KafkaSettingRow row = Row(view, "some.future.setting");
 
-        (row.Exposure, row.Shown).Should().Be((KafkaSettingExposure.Withheld, "value withheld: KStudio does not know this setting"));
+        (row.Exposure, row.Shown).Should().Be((KafkaSettingExposure.Withheld, "value withheld: Data Studio does not know this setting"));
         JsonSerializer.Serialize(view).Should().NotContain(Sentinel);
     }
 
@@ -201,7 +201,7 @@ public class KafkaSettingsReaderTests
         });
 
         view.Host.Where(static x => x.Key is "plugin.library.paths" or "confluent.monitoring.interceptor.bootstrap.servers" or "group.instance.id" or "debug" or "fetch.message.max.bytes" or "auto.commit.enable")
-            .Should().HaveCount(6).And.OnlyContain(static x => x.Exposure == KafkaSettingExposure.Removed && x.Shown == "removed: KStudio's clients never use it");
+            .Should().HaveCount(6).And.OnlyContain(static x => x.Exposure == KafkaSettingExposure.Removed && x.Shown == "removed: Data Studio's clients never use it");
     }
 
     [Fact]

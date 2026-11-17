@@ -184,7 +184,7 @@ public class RedactionBuilderTests
         IReadOnlyList<string> problems = Validate(t => t.Redact(r => r.Header(header).Searchable()));
 
         problems.Should().ContainSingle().Which.Should().Be(
-            $"KStudio: topic 'orders.v1': header '{header}' is on the built-in deny-list, which can never be searched. Remove Searchable().");
+            $"Data Studio: topic 'orders.v1': header '{header}' is on the built-in deny-list, which can never be searched. Remove Searchable().");
 
         Validate(t => t.Redact(r => r.AllowHeader(header).Header(header).Searchable())).Should().ContainSingle("opting out of masking does not make it searchable");
         Validate(t => t.Redact(r => r.Header(header))).Should().BeEmpty("a declared rule that is not searchable only renames the rule");
@@ -210,7 +210,7 @@ public class RedactionBuilderTests
             r.Header("Customer-Email");
             r.Header("customer-email");
         })).Should().ContainSingle().Which.Should().Be(
-            "KStudio: topic 'orders.v1' declares a redaction rule on header 'customer-email' twice (names are compared ignoring case).");
+            "Data Studio: topic 'orders.v1' declares a redaction rule on header 'customer-email' twice (names are compared ignoring case).");
 
         Validate(static t => t.Redact(static r =>
         {

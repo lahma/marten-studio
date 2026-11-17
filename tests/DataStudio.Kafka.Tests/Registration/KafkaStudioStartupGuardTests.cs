@@ -26,7 +26,7 @@ public class KafkaStudioStartupGuardTests
         Func<Task> start = () => Start(static _ => { }, static o => o.Capabilities.SearchRecords = true);
 
         (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(
-            "KStudio has SearchRecords enabled and no policy decides who may use them: every visitor admitted to the studio could read the records "
+            "Data Studio has SearchRecords enabled and no policy decides who may use them: every visitor admitted to the studio could read the records "
             + "of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each "
             + "capability use, once per topic), or KafkaOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
             + "capabilities off; DataStudioOptions.ReadOnly = true turns them all off.");

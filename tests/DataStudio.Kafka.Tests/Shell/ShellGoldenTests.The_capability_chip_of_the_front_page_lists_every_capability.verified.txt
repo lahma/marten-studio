@@ -1,5 +1,5 @@
 <!-- banner -->
-<div class="ms-anonymous-banner" role="alert"><strong>This studio is served to anyone (AllowAnonymous)</strong><span>Its pages carry no authorization, so the structure of every database this application registered, and whatever its capabilities read, is readable by anyone who can reach this URL.</span><span>KStudio&#x27;s pages show the clusters, topics, partitions and consumer groups this application&#x27;s Kafka credentials can describe, and whatever its capabilities read.</span></div>
+<div class="ms-anonymous-banner" role="alert"><strong>This studio is served to anyone (AllowAnonymous)</strong><span>Its pages carry no authorization, so the structure of every database this application registered, and whatever its capabilities read, is readable by anyone who can reach this URL.</span><span>The Kafka pages show the clusters, topics, partitions and consumer groups this application&#x27;s Kafka credentials can describe, and whatever its capabilities read.</span></div>
 
 <!-- rail -->
 <aside class="ms-sidebar" role="navigation" aria-label="Data Studio navigation"><div class="ms-sidebar-inner"><div class="ms-sidebar-brand"><svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2"></ellipse>
@@ -27,12 +27,12 @@
                                 <span class="ms-nav-link-text">Cluster settings</span></a></li><li class="ms-sidebar-section">Studio</li><li class="ms-nav-item"><a class="ms-nav-link " href="activity" title="Activity"><svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="4" x2="15" y2="4" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="14" x2="15" y2="14" /></svg>
                                 <span class="ms-nav-link-text">Activity</span></a></li></ul></nav>
 
-    <p class="ms-rail-credit"><span class="ms-rail-credit-line">Data Studio <version></span><span class="ms-rail-credit-line">Postgres Studio</span><span class="ms-rail-credit-line">KStudio for Apache Kafka&#xAE;</span><span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
+    <p class="ms-rail-credit"><span class="ms-rail-credit-line">Data Studio <version></span><span class="ms-rail-credit-line">Postgres</span><span class="ms-rail-credit-line">Kafka</span><span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
         <span class="ms-rail-credit-line">by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a></span></p></div></aside>
 
 <!-- header -->
-<header class="ms-header"><div class="ms-header-left"><span class="ms-env-badge ms-env-badge-production" data-ms-environment="Production" title="This application is running in the Production environment">Production</span></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="8 of 8 capabilities enabled">8 / 8<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Postgres Studio: reads authorized like writes</p>
-            <ul class="ms-capability-list" aria-label="Postgres Studio: reads authorized like writes"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+<header class="ms-header"><div class="ms-header-left"><span class="ms-env-badge ms-env-badge-production" data-ms-environment="Production" title="This application is running in the Production environment">Production</span></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="8 of 8 capabilities enabled">8 / 8<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Postgres: reads authorized like writes</p>
+            <ul class="ms-capability-list" aria-label="Postgres: reads authorized like writes"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">RunSql</span>
                         <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>RunSql</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">BrowseDatabase</span>
@@ -40,8 +40,8 @@
                         <span class="ms-capability-name">ViewDefinitions</span>
                         <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDefinitions</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">ViewDatabaseActivity</span>
-                        <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-title">KStudio for Apache Kafka&#xAE; reads</p>
-            <ul class="ms-capability-list" aria-label="KStudio for Apache Kafka&#xAE; reads"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+                        <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-title">Kafka: reads</p>
+            <ul class="ms-capability-list" aria-label="Kafka: reads"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">SearchRecords</span>
                         <code class="ms-capability-option">KafkaOptions.<wbr>Capabilities.<wbr>SearchRecords</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">ReadPayloads</span>

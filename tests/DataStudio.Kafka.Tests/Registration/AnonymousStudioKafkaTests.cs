@@ -27,7 +27,7 @@ public class AnonymousStudioKafkaTests
         List<StudioModuleCapabilitiesOn> others = AnonymousStudioCheck.OtherModulesOn(host);
 
         StudioModuleCapabilitiesOn kafka = others.Should().ContainSingle().Subject;
-        kafka.Module.Should().Be("KStudio for Apache Kafka®");
+        kafka.Module.Should().Be("Kafka");
         kafka.Enabled.Should().Equal("SearchRecords");
     }
 

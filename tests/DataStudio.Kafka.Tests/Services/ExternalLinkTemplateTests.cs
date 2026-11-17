@@ -77,7 +77,7 @@ public class ExternalLinkTemplateTests
     [InlineData("https://tempo.example.com/{}")]
     public void An_unknown_placeholder_is_refused(string template)
     {
-        Problems(Link("Traces", template)).Should().ContainSingle().Which.Should().Contain("placeholder KStudio does not know");
+        Problems(Link("Traces", template)).Should().ContainSingle().Which.Should().Contain("placeholder Data Studio does not know");
     }
 
     [Theory]

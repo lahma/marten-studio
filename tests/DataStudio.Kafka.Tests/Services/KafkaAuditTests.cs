@@ -168,7 +168,7 @@ public class KafkaAuditTests
         IRenderedComponent<Activity> page = harness.Context.Render<Activity>();
 
         string footer = string.Join(' ', page.Find("p.ms-muted").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries));
-        footer.Should().EndWith("under event ids 9200-9211 and KStudio for Apache Kafka®'s under 9600-9609.");
+        footer.Should().EndWith("under event ids 9200-9211 and Kafka's under 9600-9609.");
     }
 
     [Fact]

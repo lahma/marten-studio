@@ -199,7 +199,7 @@ public class CorrelationValidationTests
     {
         IReadOnlyList<string> problems = Validate(c => c.Header(new string('é', 300)));
 
-        problems.Should().ContainSingle().Which.Should().StartWith("KStudio: topic 'orders.v1': correlation header '");
+        problems.Should().ContainSingle().Which.Should().StartWith("Data Studio: topic 'orders.v1': correlation header '");
         problems[0].Length.Should().BeLessThan(400);
     }
 

@@ -24,7 +24,7 @@ internal static class KafkaStudioText
 
     /// <summary>The sentence the anonymous banner adds after the host studio's own.</summary>
     public const string ExposedSentence =
-        "Data Studio's pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, "
+        "The Kafka pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, "
         + "and whatever its capabilities read.";
 
     /// <summary>The disclaimer every Kafka page ends with.</summary>

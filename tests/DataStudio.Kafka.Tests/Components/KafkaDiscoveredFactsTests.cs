@@ -105,7 +105,7 @@ public class KafkaDiscoveredFactsTests
     {
         await using KafkaCatalogRig rig = Rig(
             new KafkaSourceNote("a tenant cluster", "Wolverine had not connected it", "Tenant acme's cluster is not listed: Wolverine had not connected it."),
-            new KafkaSourceNote("a topic", "its name is one KStudio cannot address", "The topic 'billing-secret' was not listed: its name is one KStudio cannot address."));
+            new KafkaSourceNote("a topic", "its name is one Data Studio cannot address", "The topic 'billing-secret' was not listed: its name is one Data Studio cannot address."));
 
         IRenderedComponent<KafkaSettingsPage> page = await OpenSettingsAsync(rig, "wolverine");
 

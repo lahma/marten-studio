@@ -110,10 +110,10 @@ public class KafkaSettingsPageTests
 
         IRenderedComponent<KafkaSettingsPage> page = await OpenAsync(rig);
 
-        page.WaitForAssertion(() => page.FindAll("[aria-label=\"What KStudio's clients change\"] tbody tr").Should().NotBeEmpty());
-        string[] keys = [.. page.FindAll("[aria-label=\"What KStudio's clients change\"] tbody tr code").Select(static x => x.TextContent)];
+        page.WaitForAssertion(() => page.FindAll("[aria-label=\"What Data Studio's clients change\"] tbody tr").Should().NotBeEmpty());
+        string[] keys = [.. page.FindAll("[aria-label=\"What Data Studio's clients change\"] tbody tr code").Select(static x => x.TextContent)];
         keys.Should().Contain(["enable.auto.commit", "enable.auto.offset.store", "allow.auto.create.topics", "group.id", "isolation.level", "auto.offset.reset"]);
-        Row(page, "What KStudio's clients change", "enable.auto.commit").TextContent.Should().Contain("nothing is committed or stored");
+        Row(page, "What Data Studio's clients change", "enable.auto.commit").TextContent.Should().Contain("nothing is committed or stored");
         page.Find(".ms-k-oauth").TextContent.Should().Be("OAuth token refresh: not declared");
     }
 
