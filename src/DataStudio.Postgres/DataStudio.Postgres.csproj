@@ -51,7 +51,6 @@
     <InternalsVisibleTo Include="DataStudio.Marten.Integration.Tests" />
     <InternalsVisibleTo Include="DataStudio.Postgres.Tests" />
     <InternalsVisibleTo Include="DataStudio.Postgres.Integration.Tests" />
-    <InternalsVisibleTo Include="DataStudio.Kafka.Tests" />
     <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
   </ItemGroup>
 

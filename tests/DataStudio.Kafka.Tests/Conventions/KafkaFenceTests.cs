@@ -73,6 +73,23 @@ public class KafkaFenceTests
         direct.Should().NotContain("Confluent.Kafka", "the module takes no dependency on the client of its own");
     }
 
+    /// <summary>
+    /// The Kafka suite is a Kafka-only host and references no database assembly, so no database assembly has a friend in it: a grant to this
+    /// suite is a reference waiting to come back unnoticed (REVIEW-V2-F, finding 4). The grants to the integration suite, which does compose the database
+    /// module, stay.
+    /// </summary>
+    [Theory]
+    [InlineData("DataStudio.Postgres", "DataStudio.Postgres.csproj")]
+    [InlineData("DataStudio.Postgres.Diagnostics", "DataStudio.Postgres.Diagnostics.csproj")]
+    public void No_database_assembly_grants_its_internals_to_this_suite(string project, string file)
+    {
+        XDocument document = XDocument.Load(RepositoryRoot.Combine("src", project, file));
+        string[] friends = [.. document.Descendants().Where(static x => x.Name.LocalName == "InternalsVisibleTo").Select(static x => (string?) x.Attribute("Include") ?? string.Empty)];
+
+        friends.Should().Contain("DataStudio.Kafka.Integration.Tests", "the grants read are the real ones, and the integration suite composes the database module");
+        friends.Should().NotContain(typeof(KafkaFenceTests).Assembly.GetName().Name!, "this suite is a Kafka-only host and has no database assembly to read internals of");
+    }
+
     [Fact]
     public void The_built_assembly_references_the_shell_and_the_engine_and_no_database_module_Marten_family_Npgsql_Wolverine_or_Confluent()
     {

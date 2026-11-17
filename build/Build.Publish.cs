@@ -157,6 +157,21 @@ partial class Build
                 Log.Information("Packed {Package}", package.Name);
             }
 
+            // Before the exact sets below, so that the sentence a maintainer reads when the Kafka module grows a database dependency is the one that says what
+            // is wrong, and not "must depend on exactly [...]": the shell and the three Kafka packages depend on no database module, no Npgsql and no part of
+            // the Marten family, so a Kafka-only host restores none of them (KafkaOnlyHostTests holds the same line on the built output). The exact sets
+            // would refuse the same dependency a second time if this check were ever loosened.
+            foreach (var package in new[]
+                     {
+                         PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
+                         PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
+                         PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
+                     })
+            {
+                AssertNuspecDependsOnNoneOf(package, PostgresStudioPackageId, DiagnosticsPackageId, MartenStudioPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
+            }
+
             // MartenStudio depends on exactly its own PostgresStudio and on the Marten floor. The exact range comes
             // from DataStudioMartenPinsPostgresExactly in DataStudio.Marten.csproj, which works through two NuGet-private
             // names; this is what turns a NuGet that renamed them into a failed build rather than a shipped `>=`.
@@ -259,20 +274,6 @@ partial class Build
                     ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
                     ["Microsoft.Extensions.Hosting"] = CentralPackageVersion("Microsoft.Extensions.Hosting"),
                 });
-
-            // The exact sets above already leave no room for one, but the sentence a maintainer reads when the Kafka module grows a database dependency
-            // should say what is wrong: the shell and the three Kafka packages depend on no database module, no Npgsql and no part of the Marten
-            // family, so a Kafka-only host restores none of them (KafkaOnlyHostTests holds the same line on the built output).
-            foreach (var package in new[]
-                     {
-                         PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
-                         PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
-                         PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
-                         PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
-                     })
-            {
-                AssertNuspecDependsOnNoneOf(package, PostgresStudioPackageId, DiagnosticsPackageId, MartenStudioPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
-            }
 
             ReportSummary(_ => _
                 .AddPair("Version", Version)

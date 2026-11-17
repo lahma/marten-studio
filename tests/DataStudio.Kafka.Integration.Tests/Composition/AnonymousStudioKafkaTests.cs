@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Kafka.Integration.Tests.Composition;
 
 /// <summary>
-/// K07 counts every composed module's capabilities (REVIEW-V2-B finding 1), read through the shell's descriptor off a real container: another module's
+/// K07 counts every composed module's capabilities (REVIEW-V2-B finding 1), read through the shell's descriptor off the dependency-injection container: another module's
 /// capabilities that are on, unless the shell's own <c>ReadOnly</c> is, and never the database module's own (its facts carry those).
 /// </summary>
 public class AnonymousStudioKafkaTests

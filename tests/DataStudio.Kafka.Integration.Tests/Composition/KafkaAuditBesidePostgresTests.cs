@@ -15,8 +15,8 @@ namespace DataStudio.Kafka.Integration.Tests.Composition;
 
 /// <summary>
 /// D34 beside a database module: a Kafka audit entry is judged only by the module's own gate, never by the host's store policy, and a database entry
-/// is judged as it always was. These two cases need both modules' gates in one ring, so they live in the project that references both; they run over a
-/// real container and its scoped Activity ring, with no circuit, no broker and no database connection.
+/// is judged as it always was. These two cases need both modules' gates in one ring, so they live in the project that references both; they run over the
+/// dependency-injection container and its scoped Activity ring, with no circuit, no broker and no database connection.
 /// </summary>
 public class KafkaAuditBesidePostgresTests
 {

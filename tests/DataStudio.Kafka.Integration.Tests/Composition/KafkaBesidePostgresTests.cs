@@ -13,7 +13,7 @@ namespace DataStudio.Kafka.Integration.Tests.Composition;
 /// D34 with a database module in the host: <c>AddKafka()</c> beside <c>AddPostgres()</c> or <c>AddPostgresDiagnostics()</c>, in either order, composes the
 /// shell, the rail, the banner and the chip in the order the host wrote them, and a host without Kafka is the host it was. These cases live here, in a
 /// project that references both modules, because the fast Kafka suite is a Kafka-only host with no database module in its output (v2 step 7); they are
-/// registration checks over a real container and need no broker, no Docker and no browser.
+/// registration checks over the dependency-injection container and need no broker, no Docker and no browser.
 /// </summary>
 public class KafkaBesidePostgresTests
 {
