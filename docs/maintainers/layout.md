@@ -419,8 +419,8 @@ src/DataStudio.Kafka.Core/Index/                  The record-index seam (D48): t
                                          planner that asks it
 tests/DataStudio.Kafka.Tests/Conventions/         KStudio's fences and convention scans
 tests/DataStudio.Kafka.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
-tests/DataStudio.Kafka.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
-tests/DataStudio.Kafka.Tests/Shell/               Golden files of the prerendered chrome of a Postgres Studio host with the Kafka module
+tests/DataStudio.Kafka.Tests/Endpoints/           Mounting, endpoint authorization and the shell's front page, on a Kafka-only host and beside a test-defined module
+tests/DataStudio.Kafka.Tests/Shell/               Golden files of the prerendered chrome of a Kafka-only host (no database module is in this suite's output)
 tests/DataStudio.Kafka.Tests/Components/          bUnit: the layout on a Kafka page, the rail, the chip, the frame, Activity
 tests/DataStudio.Kafka.Tests/Services/            Authorization, the capability guard, the cluster scope, the audit gate and action log
 tests/DataStudio.Postgres.Tests/Modules/      The module seam (D34): the composed descriptor, root-keeping routes and a module's audit entries, with fake modules
@@ -435,7 +435,7 @@ tests/DataStudio.Kafka.Tests/Wire/                The overrides, the role filter
 tests/DataStudio.Kafka.Tests/Clusters/            Registration, key formats and the admin pool
 tests/DataStudio.Kafka.Tests/Catalog/             The overview reads, the ACL table, the snapshot cache and the throughput samples
 tests/DataStudio.Kafka.Tests/Windows/             Window resolution on the fake
-tests/DataStudio.Kafka.Tests/Logging/             The engine's log events and the parity of its log values with the studios'
+tests/DataStudio.Kafka.Tests/Logging/             The engine's log events (the parity of its log values with the diagnostics engine's is the live project's Composition)
 tests/DataStudio.Kafka.Tests/Predicates/          The grammar, its messages and limits, the canonical text and the evaluation tables
 tests/DataStudio.Kafka.Tests/Decoding/            The detection order, the caps, headers, trace contexts and CloudEvents
 tests/DataStudio.Kafka.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
@@ -457,6 +457,8 @@ tests/DataStudio.Kafka.Integration.Tests/Partitioning/ Each partitioner against 
 tests/DataStudio.Kafka.Integration.Tests/Redaction/ Payload redaction on real brokers: a scan, a record read, the logs and the exact match, with no masked value in any sink
 tests/DataStudio.Kafka.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
 tests/DataStudio.Kafka.Integration.Tests/Correlation/ Related records on real brokers (the M4 exit): an in and an out topic found by their own fields in one scan, and a topic the principal may not describe
+tests/DataStudio.Kafka.Integration.Tests/Composition/ The Kafka module beside a database module, over a real container and no broker: registration order, the banner, the rail, the
+                                                       audit gates and the log-value parity with the diagnostics engine, which the Kafka-only fast suite cannot hold
 tests/DataStudio.Kafka.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/DataStudio.Kafka.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 src/DataStudio.Kafka.Wolverine/                   DataStudio.Kafka.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka

@@ -12,8 +12,6 @@ using DataStudio.Kafka.Tests.Support;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
-using DataStudio.Postgres.Services;
-
 namespace DataStudio.Kafka.Tests.Components;
 
 /// <summary>D34 and D35 in the shell's own components: the rail, the capability chip and banner, and the page frame's gate.</summary>
@@ -80,13 +78,13 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task Modules_are_drawn_in_registration_order_and_the_shells_own_section_closes_the_rail()
     {
-        using KafkaHarness harness = new();
+        using KafkaHarness harness = new(null, null, [], withHostModule: true);
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
         string[] sections = [.. rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim())];
-        sections.Should().Equal("Data", "Database", "Operations", "System", "Kafka", "Studio");
+        sections.Should().Equal("Host", "Kafka", "Studio");
         rail.FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain(["Topics", "Cluster settings"]).And.NotContain("Search", "the capability is off");
     }
 
@@ -132,9 +130,9 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
-    public async Task A_kafka_link_carries_no_host_scope_and_a_host_link_still_does()
+    public async Task A_kafka_link_carries_no_scope_of_another_module()
     {
-        using KafkaHarness harness = new();
+        using KafkaHarness harness = new(null, null, [], withHostModule: true);
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
@@ -142,8 +140,8 @@ public class ShellModuleComponentTests
         string kafka = rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Topics").GetAttribute("href")!;
         kafka.Should().EndWith("kafka").And.NotContain("store=").And.NotContain("db=").And.NotContain("tenant=");
 
-        string host = rail.FindAll("a.ms-nav-link").First(static x => x.TextContent.Trim() == "Health").GetAttribute("href")!;
-        host.Should().Contain("store=default");
+        string host = rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Host page").GetAttribute("href")!;
+        host.Should().Be(FakeHostModule.PageAddress, "a module with no rail of its own has its links drawn undecorated; what the database module's rail adds is the Postgres suite's");
 
         // The shell's own Activity entry belongs to no module, so it carries no scope of either.
         rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Activity").GetAttribute("href").Should().Be("activity");
@@ -158,12 +156,11 @@ public class ShellModuleComponentTests
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
         string[] lines = [.. rail.Find(".ms-rail-credit").QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim())];
-        lines.Should().HaveCount(5);
+        lines.Should().HaveCount(4, "a Kafka-only host credits the shell and the one module it has");
         lines[0].Should().StartWith("Data Studio ");
-        lines[1].Should().Be("Postgres");
-        lines[2].Should().Be("Kafka");
-        lines[3].Should().Be("MIT licensed");
-        lines[4].Should().Be("by Marko Lahma");
+        lines[1].Should().Be("Kafka");
+        lines[2].Should().Be("MIT licensed");
+        lines[3].Should().Be("by Marko Lahma");
     }
 
     // ---- the chip and the banner
@@ -175,14 +172,13 @@ public class ShellModuleComponentTests
         using KafkaHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
-        StudioCapabilityGuard host = off.Context.Services.GetRequiredService<StudioCapabilityGuard>();
 
         string chipOff = off.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
         string chipOn = on.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
 
-        // KStudio offers four capabilities: SearchRecords, ReadPayloads, ExportRecords and LiveTail.
-        chipOff.Should().StartWith($"{host.EnabledCount} / {host.Offered.Count + 4}");
-        chipOn.Should().StartWith($"{host.EnabledCount + 4} / {host.Offered.Count + 4}");
+        // The Kafka module offers four capabilities: SearchRecords, ReadPayloads, ExportRecords and LiveTail; a Kafka-only host offers no others.
+        chipOff.Should().StartWith("0 / 4");
+        chipOn.Should().StartWith("4 / 4");
     }
 
     [Fact]
@@ -368,7 +364,7 @@ public class ShellModuleComponentTests
         IRenderedComponent<KafkaCapabilityDisabled> readOnly = harness.Context.Render<KafkaCapabilityDisabled>(
             p => p.Add(x => x.Capability, nameof(KafkaCapabilities.SearchRecords)));
 
-        readOnly.Markup.Should().Contain("is not available here.").And.NotContain("ReadOnly").And.NotContain("PostgresOptions");
+        readOnly.Markup.Should().Contain("is not available here.").And.NotContain("ReadOnly").And.NotContain("Options");
     }
 
     // ---- every page ends with the trademark line

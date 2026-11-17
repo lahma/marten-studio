@@ -3,6 +3,7 @@ using System.Net;
 using Confluent.Kafka;
 
 using DataStudio.Internal;
+using DataStudio.Kafka.Tests.Support;
 using DataStudio.Marten.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
@@ -12,28 +13,21 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
-using Npgsql;
-
-using DataStudio.Postgres;
-
 namespace DataStudio.Kafka.Tests.Endpoints;
 
 /// <summary>
-/// D34 and D35 on a real endpoint pipeline: a Postgres Studio host that also called <c>AddKafkaStudio()</c> serves the Kafka pages below the studio's
-/// own mount, behind the studio's own policy, counted by its startup guard, with no data source of its own needed, and a host that did not serves none.
+/// D34 and D35 on a real endpoint pipeline: a host that called <c>AddDataStudio().AddKafka()</c> and nothing else serves the Kafka pages below the
+/// studio's own mount, behind the studio's own policy, counted by its startup guard, with no database module and no data source, and a host that
+/// did not call <c>AddKafka()</c> serves none.
 /// </summary>
 public class KafkaEndpointTests
 {
-    /// <summary>A data source and a broker nothing listens on: serving a page must not open a connection to either.</summary>
-    private const string ConnectionString = "Host=127.0.0.1;Port=1;Database=app;Username=app;Password=secret;Timeout=1";
-
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static WebApplication CreateApp(
         bool kafka = true,
-        bool dataSource = true,
+        bool host = false,
         Action<DataStudioOptions>? configureShell = null,
-        Action<PostgresOptions>? configureStudio = null,
         Action<KafkaOptions>? configureKafka = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
     {
@@ -45,16 +39,16 @@ public class KafkaEndpointTests
             ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
         });
 
-        if (dataSource)
-        {
-            builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        }
+        DataStudioBuilder studio = builder.Services.AddDataStudio(configureShell);
 
-        builder.Services.AddDataStudio(configureShell).AddPostgres(configureStudio);
+        if (host)
+        {
+            studio.AddFakeHost();
+        }
 
         if (kafka)
         {
-            builder.Services.AddDataStudio().AddKafka(options =>
+            studio.AddKafka(options =>
             {
                 options.AddCluster("primary", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Primary"));
                 configureKafka?.Invoke(options);
@@ -146,7 +140,7 @@ public class KafkaEndpointTests
     [Fact]
     public async Task A_host_without_AddKafka_serves_no_kafka_route()
     {
-        await using WebApplication app = CreateApp(kafka: false);
+        await using WebApplication app = CreateApp(kafka: false, host: true);
         app.MapDataStudio().AllowAnonymous();
 
         RouteEndpoints(app).Where(IsKafkaPage).Should().BeEmpty();
@@ -166,9 +160,9 @@ public class KafkaEndpointTests
     }
 
     [Fact]
-    public async Task A_host_with_no_data_source_at_all_renders_the_kafka_page_and_the_rail()
+    public async Task A_kafka_only_host_renders_the_kafka_page_and_the_rail_with_no_data_source_at_all()
     {
-        await using WebApplication app = CreateApp(dataSource: false);
+        await using WebApplication app = CreateApp();
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try

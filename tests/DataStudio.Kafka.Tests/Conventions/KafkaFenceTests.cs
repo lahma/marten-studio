@@ -84,14 +84,13 @@ public class KafkaFenceTests
     }
 
     [Fact]
-    public void The_test_output_folder_holds_no_Marten_family_and_no_Wolverine()
+    public void The_test_output_folder_holds_no_database_module_no_Npgsql_no_Marten_family_and_no_Wolverine()
     {
         string[] files = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(static x => Path.GetFileNameWithoutExtension(x))];
 
         files.Should().Contain("DataStudio.Kafka");
-        // This suite's harness composes the database module beside Kafka, so it is in the output folder; the module's own fence above is the one
-        // that holds the database out of DataStudio.Kafka itself.
-        files.Where(static x => IsForbidden(x) && !IsExactlyOrBelow(x, "DataStudio.Postgres") && !x.StartsWith("Npgsql", StringComparison.OrdinalIgnoreCase)).Should().BeEmpty();
+        // Since v2 step 7 this suite is a Kafka-only host: no database module, Npgsql, Marten, JasperFx or Weasel is in its output (KafkaOnlyHostTests).
+        files.Where(static x => IsForbidden(x)).Should().BeEmpty();
     }
 
     /// <summary>

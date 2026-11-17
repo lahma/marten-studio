@@ -2,12 +2,13 @@ using DataStudio.Kafka.Core.Logging;
 
 using DataStudio.Postgres.Services;
 
-namespace DataStudio.Kafka.Tests.Logging;
+namespace DataStudio.Kafka.Integration.Tests.Composition;
 
 /// <summary>
 /// <c>KafkaLogValue</c> is a verbatim port of the diagnostics engine's <c>StudioLogValue.Cap</c> and <c>CapText</c> (F9: the engine must not
 /// reference the diagnostics assembly), and this holds the two equal on one table of inputs: line breaks, bidirectional overrides, a backslash
-/// and an <c>n</c>, a surrogate pair, a name at and past its bound, and null.
+/// and an <c>n</c>, a surrogate pair, a name at and past its bound, and null. It lives in the live project because the oracle is the diagnostics
+/// assembly's, which the fast Kafka suite does not reference (v2 step 7: a Kafka-only host has no Npgsql in its output).
 /// </summary>
 public class KafkaLogValueParityTests
 {
@@ -65,6 +66,16 @@ public class KafkaLogValueParityTests
     {
         KafkaLogValue.MaxLength.Should().Be(StudioLogValue.MaxLength);
         KafkaLogValue.MaxTextLength.Should().Be(StudioLogValue.MaxTextLength);
+    }
+
+    /// <summary>The fast suite's escape predicate is a copy of the engine's; this holds the two equal for every character there is.</summary>
+    [Fact]
+    public void The_fast_suites_escape_predicate_is_the_originals_for_every_character()
+    {
+        char[] differing = [.. Enumerable.Range(0, char.MaxValue + 1).Select(static x => (char) x)
+            .Where(static c => DataStudio.Kafka.Tests.Support.TestLogEscape.IsEscaped(c) != StudioLogValue.IsEscaped(c))];
+
+        differing.Should().BeEmpty();
     }
 
     [Fact]

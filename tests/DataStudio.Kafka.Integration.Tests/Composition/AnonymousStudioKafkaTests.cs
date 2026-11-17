@@ -2,7 +2,7 @@ using DataStudio.Postgres.Services.Health.Checks;
 
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DataStudio.Kafka.Tests.Registration;
+namespace DataStudio.Kafka.Integration.Tests.Composition;
 
 /// <summary>
 /// K07 counts every composed module's capabilities (REVIEW-V2-B finding 1), read through the shell's descriptor off a real container: another module's

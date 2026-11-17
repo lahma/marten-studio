@@ -7,13 +7,14 @@ using DataStudio.Marten.Tests.Support;
 
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres.Services;
+using DataStudio.Kafka.Core.Logging;
+using DataStudio.Kafka.Tests.Support;
 
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
 /// Hard rule 5 for KStudio's events (9600 to 9611, 9605 to 9609 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
-/// reaches the log only through <see cref="StudioLogValue" />. Held three ways: every wrapper writes hostile values escaped and bounded, every
+/// reaches the log only through <see cref="KafkaLogValue" /> (held equal to the diagnostics engine's <c>StudioLogValue</c> by the live project's parity test). Held three ways: every wrapper writes hostile values escaped and bounded, every
 /// <c>[LoggerMessage]</c> method is private to <c>KafkaLog</c>, and none is called from anywhere else in KStudio.
 /// </summary>
 public partial class KafkaRefusalLogValuesTests
@@ -46,10 +47,10 @@ public partial class KafkaRefusalLogValuesTests
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
-            entry.Message.Any(StudioLogValue.IsEscaped).Should().BeFalse("event {0} writes every value a visitor shaped escaped", entry.EventId.Id);
+            entry.Message.Any(TestLogEscape.IsEscaped).Should().BeFalse("event {0} writes every value a visitor shaped escaped", entry.EventId.Id);
             entry.Message.Should().NotContain(Hostile).And.NotContain(HostileText);
-            entry.Message.Should().Contain(StudioLogValue.Cap(Hostile), "event {0} keeps the bounded value", entry.EventId.Id);
-            entry.Message.Length.Should().BeLessThan(8 * StudioLogValue.MaxTextLength, "event {0} is bounded whatever was sent", entry.EventId.Id);
+            entry.Message.Should().Contain(KafkaLogValue.Cap(Hostile), "event {0} keeps the bounded value", entry.EventId.Id);
+            entry.Message.Length.Should().BeLessThan(8 * KafkaLogValue.MaxTextLength, "event {0} is bounded whatever was sent", entry.EventId.Id);
         }
     }
 

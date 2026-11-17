@@ -3,6 +3,7 @@ using System.Net;
 using Confluent.Kafka;
 
 using DataStudio.Internal;
+using DataStudio.Kafka.Tests.Support;
 using DataStudio.Marten.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
@@ -12,26 +13,24 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
-using Npgsql;
-
 namespace DataStudio.Kafka.Tests.Endpoints;
 
 /// <summary>
 /// The shell's front page, at the mount (v2 step 5), on a real endpoint pipeline: with one module composed it sends the visitor to that module's home,
 /// keeping the query string; with two or more it draws one tile per module (a name, one sentence and a link to the home, no number); it is served under
 /// the shell's own policy like every other page and the startup guard counts it; and a 1.x address (<c>{mount}/health</c>, <c>{mount}/documents</c>) is a 404.
+/// The second module is <see cref="FakeHostModule" />, defined by this suite: a Kafka-only host has no database module, and the shell's front page does
+/// not know one from another.
 /// </summary>
 public class ShellFrontEndpointTests
 {
-    private const string ConnectionString = "Host=127.0.0.1;Port=1;Database=app;Username=app;Password=secret;Timeout=1";
-
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static void AddKafka(DataStudioBuilder studio) =>
         studio.AddKafka(static options => options.AddCluster("primary", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Primary")));
 
     private static WebApplication CreateApp(
-        bool postgres,
+        bool host,
         bool kafka = true,
         bool kafkaFirst = false,
         Action<DataStudioOptions>? configureShell = null,
@@ -54,10 +53,9 @@ public class ShellFrontEndpointTests
             AddKafka(studio);
         }
 
-        if (postgres)
+        if (host)
         {
-            builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-            studio.AddPostgres();
+            studio.AddFakeHost();
         }
 
         if (kafka && !kafkaFirst)
@@ -96,7 +94,7 @@ public class ShellFrontEndpointTests
     [InlineData("/ops/data", "/app", "/app/ops/data?cluster=primary", "/app/ops/data/kafka?cluster=primary")]
     public async Task With_one_module_the_front_address_sends_the_visitor_to_its_home_as_a_path_keeping_the_query(string mount, string? pathBase, string request, string location)
     {
-        await using WebApplication app = CreateApp(postgres: false, configureShell: options => options.Path = mount, pathBase: pathBase);
+        await using WebApplication app = CreateApp(host: false, configureShell: options => options.Path = mount, pathBase: pathBase);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
@@ -118,7 +116,7 @@ public class ShellFrontEndpointTests
     [Fact]
     public async Task The_redirect_names_no_scheme_and_no_host_whatever_the_request_arrived_as()
     {
-        await using WebApplication app = CreateApp(postgres: false);
+        await using WebApplication app = CreateApp(host: false);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
@@ -144,7 +142,7 @@ public class ShellFrontEndpointTests
     [Fact]
     public async Task With_two_modules_the_front_page_has_one_tile_per_registered_module_in_module_order_and_names_no_other()
     {
-        await using WebApplication app = CreateApp(postgres: true);
+        await using WebApplication app = CreateApp(host: true);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
@@ -157,9 +155,9 @@ public class ShellFrontEndpointTests
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             body.Should().Contain("ms-front-tiles");
             body.Split("ms-front-tile-name").Length.Should().Be(3, "two modules, two tiles");
-            TileOrder(body).Should().Equal(["postgres", "kafka"], "the tiles follow the order the host registered the modules in");
+            TileOrder(body).Should().Equal([FakeHostModule.PageAddress, "kafka"], "the tiles follow the order the host registered the modules in");
             body.Should().Contain("Topics, record search and live tail of the application&#x27;s clusters.");
-            body.Should().Contain("Health, queries, tables and sessions of the application&#x27;s data sources.");
+            body.Should().Contain("A module the tests define.");
             body.Should().NotContain("Marten", "the host registered no Marten module");
             body.Should().NotContain("Documents, event streams");
         }
@@ -172,7 +170,7 @@ public class ShellFrontEndpointTests
     [Fact]
     public async Task The_front_page_tiles_follow_registration_order_whichever_module_the_host_added_first()
     {
-        await using WebApplication kafkaFirst = CreateApp(postgres: true, kafkaFirst: true);
+        await using WebApplication kafkaFirst = CreateApp(host: true, kafkaFirst: true);
         kafkaFirst.MapDataStudio().AllowAnonymous();
         await kafkaFirst.StartAsync(Token);
         try
@@ -180,7 +178,7 @@ public class ShellFrontEndpointTests
             using HttpClient client = kafkaFirst.GetTestClient();
             string body = await client.GetStringAsync(new Uri("/studio", UriKind.Relative), Token);
 
-            TileOrder(body).Should().Equal(["kafka", "postgres"], "the host called AddKafka first");
+            TileOrder(body).Should().Equal(["kafka", FakeHostModule.PageAddress], "the host called AddKafka first");
         }
         finally
         {
@@ -192,7 +190,7 @@ public class ShellFrontEndpointTests
     /// The modules' tiles, in the order the front page lists them: each tile's link, read from the tile list alone - the rail is drawn before the
     /// body and carries links of its own to the same segments, so a search of the whole document would read the rail's order.
     /// </summary>
-    private static readonly string[] Segments = ["kafka", "postgres"];
+    private static readonly string[] Segments = ["kafka", FakeHostModule.PageAddress];
 
     private static string[] TileOrder(string body)
     {
@@ -215,7 +213,7 @@ public class ShellFrontEndpointTests
     public async Task The_front_page_is_served_under_the_shells_policy_and_the_startup_guard_counts_it()
     {
         await using WebApplication app = CreateApp(
-            postgres: true,
+            host: true,
             configureShell: static options => options.AuthorizationPolicy = "ops",
             configureBuilder: static builder => builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
         app.MapDataStudio();
@@ -230,9 +228,9 @@ public class ShellFrontEndpointTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task An_anonymous_visitor_is_refused_the_front_page_whichever_modules_there_are(bool postgres)
+    public async Task An_anonymous_visitor_is_refused_the_front_page_whichever_modules_there_are(bool host)
     {
-        await using WebApplication app = CreateApp(postgres: postgres, configureBuilder: static builder =>
+        await using WebApplication app = CreateApp(host: host, configureBuilder: static builder =>
         {
             builder.Services
                 .AddAuthentication(TestAuthenticationHandler.SchemeName)
@@ -261,7 +259,7 @@ public class ShellFrontEndpointTests
     [Fact]
     public async Task An_unauthorized_mapping_is_refused_at_startup_with_the_front_page_among_the_pages()
     {
-        await using WebApplication app = CreateApp(postgres: true, kafka: false, configureShell: static options => options.Path = "/only-front");
+        await using WebApplication app = CreateApp(host: true, kafka: false, configureShell: static options => options.Path = "/only-front");
         app.MapDataStudio();
 
         // With the front page and the pages of one module there is no way to tell them apart by a path that is under the mount: the front page's is the
@@ -280,7 +278,7 @@ public class ShellFrontEndpointTests
     [InlineData("/studio/events/streams")]
     public async Task A_1x_address_is_a_404_not_a_wrong_page(string address)
     {
-        await using WebApplication app = CreateApp(postgres: true);
+        await using WebApplication app = CreateApp(host: false);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
@@ -298,13 +296,11 @@ public class ShellFrontEndpointTests
     }
 
     [Theory]
-    [InlineData("/studio/postgres")]
-    [InlineData("/studio/postgres/health")]
     [InlineData("/studio/kafka")]
     [InlineData("/studio/activity")]
     public async Task A_2_0_address_is_a_page(string address)
     {
-        await using WebApplication app = CreateApp(postgres: true);
+        await using WebApplication app = CreateApp(host: false);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try

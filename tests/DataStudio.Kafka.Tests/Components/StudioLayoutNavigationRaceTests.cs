@@ -4,30 +4,34 @@ using DataStudio.Components.Layout;
 using DataStudio.Components;
 using DataStudio.Kafka.Tests.Support;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace DataStudio.Kafka.Tests.Components;
 
 /// <summary>
-/// D34, D-SHELL 4.1: the host's scope gate is asked whenever a page of the host studio is on screen, however the visitor got there. These
+/// D34, D-SHELL 4.1: a module's scope gate is asked whenever a page of that module is on screen, however the visitor got there. These
 /// tests render through <c>StudioRoutes</c>, as the studio does, because the race they hold is between the router's re-render of the page and
 /// the layout's own location handler: the layout used to learn that a module's page had gone only from its handler, after the router had
-/// already rendered the host's page body in the module's ungated layout.
+/// already rendered the other module's page body in the Kafka module's ungated layout.
 /// </summary>
 /// <remarks>
-/// The host page is <c>Database › Connection</c>; its body reads <see cref="FakeConnectionInsightService.Requests" /> when it starts, so an
-/// empty list says the body never ran.
+/// The other module is <see cref="FakeHostModule" />, which this suite defines (a Kafka-only host has no database module): its page counts its bodies
+/// in <see cref="FakeHostProbe" /> when it starts, so a count of zero says the body never ran.
 /// </remarks>
 public class StudioLayoutNavigationRaceTests
 {
     private const string KafkaPage = "/studio/kafka";
 
-    private const string HostPath = "studio/postgres/database/connection";
+    private const string HostPath = "studio/host/page";
 
     private static KafkaHarness Harness(string startAt)
     {
-        KafkaHarness harness = new(null, KafkaHarness.Primary, KafkaHarness.Secondary);
+        KafkaHarness harness = new(null, null, [KafkaHarness.Primary, KafkaHarness.Secondary], withHostModule: true);
         harness.Context.Navigate(startAt);
         return harness;
     }
+
+    private static int Bodies(KafkaHarness harness) => harness.Context.Services.GetRequiredService<FakeHostProbe>().Bodies;
 
     private static async Task SettleAsync(IRenderedComponent<StudioRoutes> routes) => await routes.InvokeAsync(() => { });
 
@@ -36,7 +40,6 @@ public class StudioLayoutNavigationRaceTests
     {
         using KafkaHarness harness = Harness(KafkaPage);
         await harness.Context.ReadyAsync();
-        harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         routes.WaitForAssertion(() => routes.FindAll("#ms-cluster-select").Should().NotBeEmpty());
@@ -46,14 +49,14 @@ public class StudioLayoutNavigationRaceTests
         harness.Navigation.Simulate(HostPath, intercepted: true);
         await SettleAsync(routes);
 
-        harness.Context.Connection.Requests.Should().BeEmpty("the host's body is not rendered before the host's scope gate has answered");
+        Bodies(harness).Should().Be(0, "the host's body is not rendered before the host's scope gate has answered");
         routes.FindAll(".ms-loading-spinner").Should().NotBeEmpty("the layout waits for the gate");
         routes.FindAll("#ms-cluster-select").Should().BeEmpty("the page on screen is a host page now");
 
         gate.SetResult(false);
 
         routes.WaitForAssertion(() => routes.Find(".ms-empty-title").TextContent.Should().Be("Not authorized"));
-        harness.Context.Connection.Requests.Should().BeEmpty("a scope the host's policy refuses is never read, however briefly");
+        Bodies(harness).Should().Be(0, "a scope the host's policy refuses is never read, however briefly");
     }
 
     [Fact]
@@ -61,7 +64,6 @@ public class StudioLayoutNavigationRaceTests
     {
         using KafkaHarness harness = Harness(KafkaPage);
         await harness.Context.ReadyAsync();
-        harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         routes.WaitForState(() => routes.FindComponent<StudioLayout>().Instance.PreferencesLoaded);
@@ -70,14 +72,13 @@ public class StudioLayoutNavigationRaceTests
         harness.Navigation.Simulate(HostPath, intercepted: true);
 
         routes.WaitForAssertion(() => routes.Find(".ms-empty-title").TextContent.Should().Be("Not authorized"));
-        harness.Context.Connection.Requests.Should().BeEmpty("the notice stands in the body's place from the first render, not after it");
+        Bodies(harness).Should().Be(0, "the notice stands in the body's place from the first render, not after it");
     }
 
     [Fact]
     public async Task A_rail_click_to_a_host_page_during_the_catalog_load_is_gated_too()
     {
         using KafkaHarness harness = Harness(KafkaPage);
-        harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
         // The catalog load asks the host's policy for every store, so it is pending for as long as the gate is held. The layout has not yet
         // subscribed to the location while it waits: it used to see nothing of a click in that time.
@@ -88,12 +89,12 @@ public class StudioLayoutNavigationRaceTests
         harness.Navigation.Simulate(HostPath, intercepted: true);
         await SettleAsync(routes);
 
-        harness.Context.Connection.Requests.Should().BeEmpty("the host's page is not rendered ungated because its click arrived during the load");
+        Bodies(harness).Should().Be(0, "the host's page is not rendered ungated because its click arrived during the load");
         routes.FindAll(".ms-loading-spinner").Should().NotBeEmpty();
 
         gate.SetResult(true);
 
-        routes.WaitForAssertion(() => harness.Context.Connection.Requests.Should().NotBeEmpty("the gate answered yes, so the body runs"));
+        routes.WaitForAssertion(() => Bodies(harness).Should().BeGreaterThan(0, "the gate answered yes, so the body runs"));
     }
 
     [Fact]

@@ -16,23 +16,20 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 
-using DataStudio.Postgres;
-using DataStudio.Postgres.Tests.Components;
 using DataStudio.Postgres.Tests.Support;
 
 namespace DataStudio.Kafka.Tests.Support;
 
 /// <summary>
-/// An <see cref="IAuthorizationService" /> that answers for both resources a Postgres Studio host with KStudio is asked about -
-/// <see cref="PostgresResource" /> (the host's) and <see cref="KafkaTopicResource" /> (KStudio's) - and records every question, so a test can
-/// say which resource reached which policy.
+/// An <see cref="IAuthorizationService" /> that answers for both resources a host with the Kafka module and another module is asked about -
+/// <see cref="FakeHostResource" /> (the other module's, from <see cref="FakeHostModule" />) and <see cref="KafkaTopicResource" /> (the Kafka module's) -
+/// and records every question, so a test can say which resource reached which policy. A question about any other resource is refused.
 /// </summary>
 public sealed class RecordingAuthorizationService : IAuthorizationService
 {
     private Func<KafkaTopicResource, bool> kafka = static _ => true;
-    private Func<PostgresResource, bool> host = static _ => true;
+    private Func<FakeHostResource, bool> host = static _ => true;
     private TaskCompletionSource<bool>? hostGate;
     private TaskCompletionSource<bool>? kafkaGate;
     private Func<KafkaTopicResource, bool> kafkaHeld = static _ => false;
@@ -44,9 +41,23 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
     public IEnumerable<(string Policy, KafkaTopicResource Resource)> KafkaCalls =>
         Calls.Where(static x => x.Resource is KafkaTopicResource).Select(static x => (x.Policy, (KafkaTopicResource) x.Resource!));
 
-    /// <summary>The questions about the host studio's resource.</summary>
-    public IEnumerable<(string Policy, PostgresResource Resource)> HostCalls =>
-        Calls.Where(static x => x.Resource is PostgresResource).Select(static x => (x.Policy, (PostgresResource) x.Resource!));
+    /// <summary>The questions about the other module's resource.</summary>
+    public IEnumerable<(string Policy, FakeHostResource Resource)> HostCalls =>
+        Calls.Where(static x => x.Resource is FakeHostResource).Select(static x => (x.Policy, (FakeHostResource) x.Resource!));
+
+    /// <summary>What the other module's policies allow; everything by default.</summary>
+    public void AllowHost(Func<FakeHostResource, bool> predicate) => host = predicate;
+
+    /// <summary>
+    /// Holds every question about the other module's resource until the returned source is completed - with whether its handler then allows it -
+    /// so a test can look at the shell while that module's scope gate is pending.
+    /// </summary>
+    public TaskCompletionSource<bool> BlockHost()
+    {
+        TaskCompletionSource<bool> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref hostGate, gate);
+        return gate;
+    }
 
     /// <summary>What KStudio's policies allow; everything by default.</summary>
     public void AllowKafka(Func<KafkaTopicResource, bool> predicate) => kafka = predicate;
@@ -64,23 +75,9 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         return gate;
     }
 
-    /// <summary>What the host studio's policies allow; everything by default.</summary>
-    public void AllowHost(Func<PostgresResource, bool> predicate) => host = predicate;
-
     /// <inheritdoc />
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
         Task.FromResult(AuthorizationResult.Failed());
-
-    /// <summary>
-    /// Holds every question about the host studio's resource until the returned source is completed - with whether the host's handler then
-    /// allows it - so a test can look at the shell while the host's scope gate is pending.
-    /// </summary>
-    public TaskCompletionSource<bool> BlockHost()
-    {
-        TaskCompletionSource<bool> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Volatile.Write(ref hostGate, gate);
-        return gate;
-    }
 
     /// <inheritdoc />
     public async Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
@@ -93,7 +90,7 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         bool allowed = resource switch
         {
             KafkaTopicResource topic => kafka(topic) && await KafkaOpenAsync(topic).ConfigureAwait(false),
-            PostgresResource source => host(source) && await HostOpenAsync().ConfigureAwait(false),
+            FakeHostResource scope => host(scope) && await HostOpenAsync().ConfigureAwait(false),
             _ => false,
         };
 
@@ -114,9 +111,9 @@ internal sealed class FakeClusterEntries(IReadOnlyList<KafkaClusterEntry> entrie
 }
 
 /// <summary>
-/// A Postgres Studio bUnit context with KStudio's module composed into its descriptor and KStudio's services beside it, as
-/// <c>AddPostgresStudio()</c> and <c>AddKafkaStudio()</c> leave a circuit: the shell, the rail, the header and the audit are the real ones, over the
-/// fakes <see cref="PostgresComponentContext" /> brings, and the engine is not involved at all.
+/// A bUnit context for a host that added the shell and the Kafka module (<see cref="KafkaShellContext" />): the shell, the rail, the header and the audit
+/// are the real registration's, over the engine's fake broker and a visitor the test names. No database module is composed, because a Kafka-only host
+/// has none; a test about the shell between two modules asks for <see cref="FakeHostModule" /> beside the Kafka module instead.
 /// </summary>
 internal sealed class KafkaHarness : IDisposable
 {
@@ -132,11 +129,21 @@ internal sealed class KafkaHarness : IDisposable
     }
 
     /// <summary>
-    /// The same, with <paramref name="extra" /> adding services to the circuit's container (a Find contributor, say). The engine behind the catalog
-    /// service is <paramref name="engine" />, or - for a test that is about the shell and not about what a page reads - an empty fake cluster
+    /// The same, with <paramref name="extra" /> replacing or adding services in the circuit's container (a Find contributor, say). The engine behind the
+    /// catalog service is <paramref name="engine" />, or - for a test that is about the shell and not about what a page reads - an empty fake cluster
     /// that lists every entry as a registered cluster.
     /// </summary>
-    public KafkaHarness(Action<KafkaOptions>? configure, Action<IServiceCollection>? extra, KafkaClusterEntry[] clusters, EngineHarness? engine = null)
+    /// <param name="configure">Configures the module's options.</param>
+    /// <param name="extra">Replaces or adds services after the real registration.</param>
+    /// <param name="clusters">The cluster entries the catalog lists; the primary one when none.</param>
+    /// <param name="engine">The engine the catalog reads through, or none for an empty fake cluster.</param>
+    /// <param name="withHostModule">Whether <see cref="FakeHostModule" /> is composed before the Kafka module, as the host's first module.</param>
+    public KafkaHarness(
+        Action<KafkaOptions>? configure,
+        Action<IServiceCollection>? extra,
+        KafkaClusterEntry[] clusters,
+        EngineHarness? engine = null,
+        bool withHostModule = false)
     {
         Options = new KafkaOptions();
         configure?.Invoke(Options);
@@ -158,7 +165,7 @@ internal sealed class KafkaHarness : IDisposable
         Entries = new FakeClusterEntries(entries);
         Navigation = new RecordingNavigationManager();
 
-        Context = new PostgresComponentContext(services =>
+        Context = new KafkaShellContext(Options, withHostModule, services =>
         {
             // The address the circuit is on, and the browser's two navigation services a StudioRoutes render asks for: the tests that render
             // through the router (as the studio does) say what the browser did with Navigation.Simulate.
@@ -169,32 +176,29 @@ internal sealed class KafkaHarness : IDisposable
             services.RemoveAll<IAuthorizationService>();
             services.AddSingleton<IAuthorizationService>(Authorization);
 
-            services.AddSingleton<IOptions<KafkaOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
-            services.AddSingleton<IStudioModule, KafkaModule>();
-            services.RemoveAll<StudioShellDescriptor>();
-            services.AddSingleton(static provider =>
-                StudioModuleComposition.Compose(provider.GetServices<IStudioModule>()));
-
+            // The module's own services, singletons here (the context's one root is the one circuit), over the cluster entries a test lists.
             services.AddSingleton<IKafkaClusterEntrySource>(Entries);
+            services.RemoveAll<IStudioAuditScopeGate>();
+            services.AddSingleton<IStudioAuditScopeGate, KafkaAuditGate>();
             services.AddSingleton<KafkaCapabilityGuard>();
             services.AddSingleton<KafkaAuthorization>();
             services.AddSingleton<KafkaState>();
             services.AddSingleton<KafkaActionLog>();
-            services.AddSingleton<IStudioAuditScopeGate, KafkaAuditGate>();
+            services.AddSingleton<KafkaCatalogService>();
 
+            // The engine behind them: the fake broker's.
             services.AddSingleton(Engine.Catalog);
             services.AddSingleton(Engine.Provider.GetRequiredService<KafkaClusterRegistry>());
             services.AddSingleton(Engine.Provider.GetRequiredService<KafkaSettingsReader>());
-            services.AddSingleton<KafkaCatalogService>();
 
             // Search and the record page (UI-B): the engine's scanner and its owner budget over the same fake broker, and the services around them.
-            services.TryAddSingleton(Engine.Clock);
+            services.AddSingleton<TimeProvider>(Engine.Clock);
             services.AddSingleton(Engine.Provider.GetRequiredService<DataStudio.Kafka.Core.Scanning.IKafkaScanner>());
             services.AddSingleton(Engine.Provider.GetRequiredService<DataStudio.Kafka.Core.Scanning.OwnerByteBudget>());
             services.AddSingleton(Engine.Provider.GetRequiredService<DataStudio.Kafka.Core.Scanning.KafkaClusterCostControls>());
             services.AddSingleton(Engine.Provider.GetRequiredService<DataStudio.Kafka.Core.Index.KafkaRecordIndexResolver>());
-            services.AddSingleton<KafkaOwnerKey>();
             services.AddSingleton(Engine.Provider.GetRequiredService<DataStudio.Kafka.Core.Clusters.KafkaEngineSnapshot>());
+            services.AddSingleton<KafkaOwnerKey>();
             services.AddSingleton<KafkaReadGrants>();
             services.AddSingleton<KafkaSearchService>();
             services.AddSingleton<KafkaRecordService>();
@@ -221,7 +225,7 @@ internal sealed class KafkaHarness : IDisposable
     /// <summary>The circuit's address; <see cref="RecordingNavigationManager.Simulate" /> is a link click, Back or Forward.</summary>
     public RecordingNavigationManager Navigation { get; }
 
-    public PostgresComponentContext Context { get; }
+    public KafkaShellContext Context { get; }
 
     public KafkaState State => Context.Services.GetRequiredService<KafkaState>();
 

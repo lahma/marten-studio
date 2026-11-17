@@ -92,19 +92,17 @@ public class KafkaAuthorizationTests
     }
 
     [Fact]
-    public async Task The_hosts_store_policy_is_never_asked()
+    public async Task Another_modules_policy_is_never_asked()
     {
-        // The host sets every policy it has; Kafka sets one of its own. The host's handler (which records any resource it sees) is only ever shown
-        // its own resource: PostgresResource is asked about the host's scope, never about a cluster or a topic.
-        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
-        harness.Context.Options.SourceAuthorizationPolicy = "p";
-        harness.Context.Options.WriteAuthorizationPolicy = "w";
+        // Another module has its own policy; Kafka sets one of its own. The recording handler sees every resource a policy is asked about, and the
+        // other module's is only ever shown its own: its resource is asked about its scope, never about a cluster or a topic.
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", extra: null, clusters: [], withHostModule: true);
 
         await harness.KafkaAuthorization.FilterClustersAsync([KafkaHarness.Primary], cancellationToken: Ct);
         await harness.KafkaAuthorization.FilterTopicsAsync(KafkaHarness.Primary, ["orders.v1"], cancellationToken: Ct);
         await harness.KafkaAuthorization.IsAuthorizedAsync(KafkaHarness.Primary, "orders.v1", KafkaCapability.SearchRecords, cancellationToken: Ct);
 
-        harness.Authorization.HostCalls.Should().BeEmpty("the host studio's policies are written for its own resources");
+        harness.Authorization.HostCalls.Should().BeEmpty("another module's policies are written for its own resources");
         harness.Authorization.Calls.Select(static x => x.Policy).Distinct().Should().Equal("kafka-topics");
     }
 

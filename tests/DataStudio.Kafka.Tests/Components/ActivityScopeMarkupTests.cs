@@ -7,14 +7,12 @@ using DataStudio.Kafka.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Postgres;
-
 namespace DataStudio.Kafka.Tests.Components;
 
 /// <summary>
-/// The Activity page draws an entry's scope from what the module that wrote it says, and a database entry and a Kafka entry come out as they
-/// did when the page knew a store and a cluster: these literals are the rows of the page before the move (A2c), taken from its rendering.
+/// The Activity page draws an entry's scope from what the module that wrote it says, and a Kafka entry comes out as it did when the page knew a
+/// store and a cluster: this literal is the row of the page before the move (A2c), taken from its rendering. A database entry's row is the Marten
+/// suite's (<c>ActivityTests</c>), which has the database module.
 /// </summary>
 public class ActivityScopeMarkupTests
 {
@@ -31,10 +29,8 @@ public class ActivityScopeMarkupTests
         + Gap + "<td class=\"ms-table-cell\">-</td>"
         + Gap + "<td class=\"ms-table-cell ms-activity-message\">" + message + "</td></tr>";
 
-    private static string Separator => "<span class=\"ms-activity-scope-separator\"> · </span>";
-
     [Fact]
-    public async Task A_database_entry_and_a_Kafka_entry_render_the_rows_the_page_always_drew()
+    public async Task A_Kafka_entry_renders_the_row_the_page_always_drew()
     {
         using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
@@ -43,12 +39,7 @@ public class ActivityScopeMarkupTests
 
         StudioActionLogService ring = harness.Context.Services.GetRequiredService<StudioActionLogService>();
         DateTimeOffset at = new(2026, 11, 14, 9, 30, 15, TimeSpan.Zero);
-        string database = PostgresDescriptor.Key;
 
-        ring.Record(new StudioActionLogEntry(
-            at, "ops", new DatabaseAuditScope("default", "main", "acme").ToAuditScope(database), "OpenRow", "public.orders", true, "done", null));
-        ring.Record(new StudioActionLogEntry(
-            at.AddMinutes(1), "viewer", new DatabaseAuditScope("default", "main", null).ToAuditScope(database), "OpenAll", "public.orders", false, "nope", null));
         ring.Record(new StudioActionLogEntry(
             at.AddMinutes(2), "ops", new StudioAuditScope("kafka", ["Primary · tenant-a"], "Primary · tenant-a", new KafkaAuditScope("primary", "tenant-a", ["orders.v1"])),
             "SearchRecords", "orders.v1", true, "done", null));
@@ -56,8 +47,6 @@ public class ActivityScopeMarkupTests
         IRenderedComponent<Activity> page = harness.Context.Render<Activity>();
 
         page.FindAll("tbody tr").Select(static x => x.OuterHtml).Should().Equal(
-            Row("2026-11-14 09:32:15 +00:00", "ops", "Primary · tenant-a", "Primary · tenant-a", "SearchRecords", "orders.v1", true, "done"),
-            Row("2026-11-14 09:31:15 +00:00", "viewer", "default" + Separator + "main" + Separator + "all", "Store default, database main, tenant all", "OpenAll", "public.orders", false, "nope"),
-            Row("2026-11-14 09:30:15 +00:00", "ops", "default" + Separator + "main" + Separator + "acme", "Store default, database main, tenant acme", "OpenRow", "public.orders", true, "done"));
+            Row("2026-11-14 09:32:15 +00:00", "ops", "Primary · tenant-a", "Primary · tenant-a", "SearchRecords", "orders.v1", true, "done"));
     }
 }

@@ -5,13 +5,12 @@ using DataStudio.Services;
 using DataStudio.Kafka.Services;
 using DataStudio.Kafka.Tests.Support;
 
-using DataStudio.Postgres.Services;
-
 namespace DataStudio.Kafka.Tests.Services;
 
 /// <summary>
 /// D34: a Kafka audit entry is written under the module's own scope and read only through the module's gate - never the host's store policy -
-/// and the Activity screen shows the cluster in its Scope column.
+/// and the Activity screen shows the cluster in its Scope column. What a database module's policy and entries do beside it is the live project's
+/// (<c>KafkaAuditBesidePostgresTests</c>).
 /// </summary>
 public class KafkaAuditTests
 {
@@ -37,20 +36,6 @@ public class KafkaAuditTests
         KafkaAuditScope scope = entry.Scope.Value.Should().BeOfType<KafkaAuditScope>().Which;
         (scope.Cluster, scope.TenantId, scope.Topics).Should().Be(("primary", "tenant-a", scope.Topics));
         scope.Topics.Should().Equal("orders.v1");
-        entry.DatabaseScope().Should().BeNull("a module entry names no store, so no host policy can recognise it");
-    }
-
-    [Fact]
-    public async Task A_module_entry_is_never_judged_by_the_hosts_store_policy()
-    {
-        using KafkaHarness harness = new();
-        harness.Context.Options.SourceAuthorizationPolicy = "host-source";
-        harness.Authorization.AllowHost(static _ => false);
-
-        Record(harness, ["orders.v1"]);
-
-        (await Visible(harness)).Should().ContainSingle("the host's policy refuses every source, and says nothing about a Kafka entry");
-        harness.Authorization.HostCalls.Should().BeEmpty();
     }
 
     [Fact]
@@ -148,15 +133,6 @@ public class KafkaAuditTests
             new StudioAuditScope("removed-module", ["somewhere"], "somewhere", new object()), "Anything", "target", succeeded: true);
 
         (await Visible(harness)).Should().BeEmpty("fail closed");
-    }
-
-    [Fact]
-    public async Task A_host_entry_is_judged_as_before()
-    {
-        using KafkaHarness harness = new();
-        harness.Context.ActionLog.Record("OpenDocument", "orders/1", succeeded: true, "done");
-
-        (await Visible(harness)).Should().ContainSingle().Which.DatabaseScope().Should().NotBeNull("the studio's own entry carries the database's scope, under the database module's key");
     }
 
     [Fact]

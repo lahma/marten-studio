@@ -35,9 +35,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
     <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
-    <ProjectReference Include="../../src/DataStudio.Postgres/DataStudio.Postgres.csproj" />
-    <!-- Only for KafkaLogValueParityTests: StudioLogValue is internal there, and this suite is granted InternalsVisibleTo. -->
-    <ProjectReference Include="../../src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,26 +46,17 @@
     <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
   </ItemGroup>
 
-  <!-- M2: the shell's component context. Postgres Studio's bUnit context and the doubles it is built from are compiled in from the other
-       suites rather than copied (as DataStudio.Postgres.Tests links DataStudio.Marten.Tests'): each names only PostgresStudio's types, so a Kafka page is
-       rendered in a real Postgres Studio shell with KStudio's own services added beside it. -->
+  <!-- The shell's bUnit doubles, compiled in from the other suites rather than copied: the visitor, the browser's navigation services, the router's file
+       provider and the persisted-state store. Each names only the shell's and the framework's types, so a Kafka page is rendered in the real shell with
+       the module's own services added beside it (KafkaShellContext), and no database module is anywhere in this suite's output. -->
   <ItemGroup>
-    <Compile Include="../DataStudio.Postgres.Tests/Components/PostgresComponentContext.cs" Link="Support/Linked/PostgresComponentContext.cs" />
-    <Compile Include="../DataStudio.Postgres.Tests/Support/PostgresFakes.cs" Link="Support/Linked/PostgresFakes.cs" />
-    <Compile Include="../DataStudio.Postgres.Tests/Support/NoHealthActionService.cs" Link="Support/Linked/NoHealthActionService.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Support/RecordingNavigationManager.cs" Link="Support/Linked/RecordingNavigationManager.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/FakeDatabaseObjectService.cs" Link="Support/Linked/FakeDatabaseObjectService.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/FakeDatabaseObjects.cs" Link="Support/Linked/FakeDatabaseObjects.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/FakeTableRowService.cs" Link="Support/Linked/FakeTableRowService.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/FakeTableRows.cs" Link="Support/Linked/FakeTableRows.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/FakeRelationshipDataService.cs" Link="Support/Linked/FakeRelationshipDataService.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/ShellGolden.cs" Link="Support/Linked/ShellGolden.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />
-    <Compile Include="../DataStudio.Marten.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
   </ItemGroup>
 
 </Project>

@@ -1,10 +1,6 @@
 using DataStudio.Kafka.Services;
 using DataStudio.Kafka.Tests.Support;
 
-using Microsoft.Extensions.DependencyInjection;
-
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Kafka.Tests.Services;
 
 /// <summary>D43, decision 6: a tenant entry's key is <c>{cluster}/{tenant}</c>, and the address carries it escaped and reads it back whole.</summary>
@@ -18,7 +14,6 @@ public class KafkaAddressTests
     public void A_cluster_entry_key_survives_the_round_trip_through_the_address(string key)
     {
         using KafkaHarness harness = new();
-        IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
         string href = KafkaAddress.Href(KafkaAddress.SearchRoute, key, (KafkaAddress.TopicParameter, "orders.v1"));
         string absolute = "https://host" + (href.StartsWith('/') ? href : "/" + href);
@@ -37,7 +32,6 @@ public class KafkaAddressTests
     public void The_slash_of_a_tenant_key_is_escaped_in_the_query_string()
     {
         using KafkaHarness harness = new();
-        IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
         KafkaAddress.Href(KafkaAddress.SearchRoute, "wolverine/acme").Should().Contain("cluster=wolverine%2Facme");
     }

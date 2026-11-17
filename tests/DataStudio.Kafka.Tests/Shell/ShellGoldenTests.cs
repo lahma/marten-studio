@@ -4,30 +4,23 @@ using DataStudio.Marten.Tests.Support;
 
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
-
-using Npgsql;
-
-using DataStudio.Postgres;
 
 namespace DataStudio.Kafka.Tests.Shell;
 
 /// <summary>
-/// The golden files of the chrome a Postgres Studio host with the Kafka module prerenders around a page: the anonymous banner, the rail (every
-/// section and entry, the module's among them) and the header (scope selector, capability chip, preferences). They hold the shell's markup
-/// still while it is restructured: no rendered word, attribute or class may move, so a later packet never re-accepts these baselines.
+/// The golden files of the chrome a Kafka-only host (<c>AddDataStudio().AddKafka()</c>) prerenders around a page: the anonymous banner, the rail
+/// (the module's section and the shell's own) and the header (scope selector, capability chip with every capability on, preferences). The front address of a host with one
+/// module is a redirect to that module's home, so it has no chrome of its own here; the front page of a host with two modules is the shell suite's
+/// (<c>FrontPage</c> tiles in <c>ShellFrontEndpointTests</c>), and the chrome around a database module's pages is the Postgres and Marten suites'.
 /// </summary>
 /// <remarks>
-/// The data source and the broker are ones nothing listens on: prerendering reads nothing, because a page's body starts only once its circuit
-/// is interactive.
+/// The broker is one nothing listens on: prerendering reads nothing, because a page's body starts only once its circuit is interactive.
 /// </remarks>
 public class ShellGoldenTests
 {
-    private const string ConnectionString = "Host=127.0.0.1;Port=1;Database=app;Username=app;Password=secret;Timeout=1";
-
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static WebApplication CreateApp(bool allCapabilities = false)
+    private static WebApplication CreateApp()
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -36,8 +29,6 @@ public class ShellGoldenTests
             ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
             ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
         });
-        builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        builder.Services.AddDataStudio().AddPostgres(allCapabilities ? static options => options.Capabilities = PostgresCapabilities.All() : null);
         builder.Services.AddDataStudio().AddKafka(options =>
         {
             options.Capabilities = KafkaCapabilities.All();
@@ -51,7 +42,6 @@ public class ShellGoldenTests
     }
 
     [Theory]
-    [InlineData("/studio")]
     [InlineData("/studio/kafka")]
     [InlineData("/studio/kafka/search")]
     public async Task The_prerendered_chrome_of_a_page_is_stable(string path)
@@ -61,15 +51,5 @@ public class ShellGoldenTests
         string golden = await ShellGolden.GoldenAsync(app, path, Token);
 
         await Verify(golden).UseParameters(path);
-    }
-
-    [Fact]
-    public async Task The_capability_chip_of_the_front_page_lists_every_capability()
-    {
-        await using WebApplication app = CreateApp(allCapabilities: true);
-
-        string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
-
-        await Verify(golden);
     }
 }
