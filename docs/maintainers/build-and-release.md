@@ -1,23 +1,31 @@
 # Build, packages and release
 
-This is the full text of D3, D21, the *Package budget changes* and *Held deliberately* subsections, and the *Build* and *Release engineering* sections (their command blocks and the CHANGELOG paragraph stay in AGENTS.md), moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D3, D21, the *Package budget changes* and *Held deliberately* subsections, and the *Build* and *Release engineering* sections (their command blocks and the CHANGELOG paragraph stay in AGENTS.md). AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D3
 
-**D3 — Few dependencies a package, and no upper bound on any: MartenStudio (`Marten`, floor `9.57.0`, and PostgresStudio
-at exactly its own version), PostgresStudio (PostgresStudio.Diagnostics at exactly its own version, and
-`Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`) - each plus `FrameworkReference
-Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `9.0.4`, and four `Microsoft.Extensions.*`
-abstractions, floor `10.0.0`), with no framework reference at all.** Everything else either RCL needs (Blazor, SignalR,
-authorization, endpoint routing) is in the shared framework, so neither pins an ASP.NET Core patch onto its host; nor does
-the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no runtime assembly (D22); and the
-engine, which a worker host takes alone, needs no ASP.NET Core at all (hard rule 16). No `Marten.AspNetCore`: its value is
-ETag'd HTTP JSON writers generic over `T`, and the studio only ever has a runtime `Type`. MartenStudio has no direct
-`Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; PostgresStudio.Diagnostics, with no Marten
-to bring it, references `Npgsql` directly, and PostgresStudio takes it through that reference (*Build*; since 0.11-C, with
-the engine in a package of its own - *Package budget changes* 2026-11-01). The floors follow the latest releases (*Package budget changes*, 2026-11-03: the user's policy of
-2026-11-02 is that consumers keep up with Marten and Npgsql), tested and packed as *Build* says. The studio compiles without the JasperFx source generator Marten bundles, so its public API
-is the same whichever Marten built it.
+**D3 — Few dependencies a package, and no upper bound on any.** Seven packages, one version each (the Kafka three a preview of it):
+
+| Package | Takes |
+|---|---|
+| `DataStudio` (the shell) | `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App` |
+| `DataStudio.Postgres.Diagnostics` (the engine) | `Npgsql` (floor `9.0.4`) and four `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference at all |
+| `DataStudio.Postgres` | `DataStudio` and `DataStudio.Postgres.Diagnostics`, each at exactly its own version, and the framework reference |
+| `DataStudio.Marten` | `Marten` (floor `9.57.0`) and `DataStudio.Postgres` at exactly its own version, and the framework reference |
+| `DataStudio.Kafka.Core` (the Kafka engine) | `Confluent.Kafka` (floor `2.14.0`) and three `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference |
+| `DataStudio.Kafka` | `DataStudio` and `DataStudio.Kafka.Core`, each at exactly its own version, and the framework reference |
+| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core` at exactly its own version and `WolverineFx.Kafka` (floor `6.61.0`) |
+
+Everything else any of these needs (Blazor, SignalR, authorization, endpoint routing) is in the shared framework, so none pins an
+ASP.NET Core patch onto its host; nor does the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no
+runtime assembly (D22); and the two engines, which a worker host takes alone, need no ASP.NET Core at all (hard rule 16). No
+`Marten.AspNetCore`: its value is ETag'd HTTP JSON writers generic over `T`, and the studio only ever has a runtime `Type`. The Marten
+module has no direct `Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; the engine, with no Marten to bring it,
+references `Npgsql` directly, and the Postgres module takes it through that reference (*Build*; *Package budget changes* 2026-11-01).
+The Kafka module references no Postgres module, no engine of Postgres and no Npgsql, so a host with only Kafka gets none of them: the
+nuspecs of the shell and of the three Kafka packages are asserted to name no database package (*Build*). The floors follow the latest releases (*Package budget changes*,
+2026-11-03: the user's policy of 2026-11-02 is that consumers keep up with Marten and Npgsql), tested and packed as *Build* says. The
+Marten module compiles without the JasperFx source generator Marten bundles, so its public API is the same whichever Marten built it.
 
 ## D21
 
@@ -45,11 +53,14 @@ latest-tested move; read a package's entries before changing its row. What they 
   (GHSA-rfx3-98h7-v3xp up to 9.12.0, `ShardFailure` from 9.20.0, `ShardName.HighWaterMarkFor` from 9.22.4, the
   generator's dispatcher from 9.24.0 and the extended progression columns from 9.31.0). Each latest-tested bump's entry
   records every behavioural difference and every light-up.
-- **PostgresStudio's Npgsql floor is 9.0.4** (2026-11-03), the Npgsql Marten 9.57.0 itself references, so a Marten host is
+- **The Postgres module's Npgsql floor is 9.0.4** (2026-11-03), the Npgsql Marten 9.57.0 itself references, so a Marten host is
   never moved off Marten's own (`NpgsqlVersionTests`). It was 8.0.3 (2026-10-26, PS-7: 7.x has no pool instruments, and
   8.0.0–8.0.2 carry CVE-2024-32655).
-- **The JasperFx source generator is removed from MartenStudio's compilation by a target**, because `ExcludeAssets`
+- **The JasperFx source generator is removed from the Marten module's compilation by a target**, because `ExcludeAssets`
   does nothing for analyzers in SDK 10.0.402 (2026-10-15).
+- **The assets pack is the shell's** (2026-11-17). `Microsoft.AspNetCore.App.Internal.Assets` moved from the Postgres module to the
+  shell, which is where `blazor.web.js` is used, and the seven packages took their 2.0 ids. No package was added or removed and no
+  version moved; every nuspec that listed the pack still does.
 - **The rule for floors, since 2026-11-03.** Floors follow the latest releases: at a minor release the Marten and Npgsql
   floors may move to the latest tested versions (user, 2026-11-02), and a floor must still rise when a member the studio
   needs is absent below the new value or a published advisory makes restore at the floor fail (`NU1901`-`NU1904`). Say
@@ -92,101 +103,113 @@ behind. Moving `build/` to 11.0.x would fail to compile — `GitHubActionsAttrib
 depends on, does not exist there — and would regenerate the workflows backwards to older action versions.
 Do not "update" to it; move to a new stable release when one ships.
 
+**The solution is `data-studio.slnx`.** `ITest.TestProjects` is every project of it that matches `*.Tests`: the eight test projects.
+
 **The Marten version is `Directory.Packages.props`'s, and the build only chooses between two.**
-`MartenStudioMartenFloor` (what the package depends on) and `MartenStudioMartenLatest` (the newest 9.x CI
+`DataStudioMartenFloor` (what the package depends on) and `DataStudioMartenLatest` (the newest 9.x CI
 tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
-`$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
+`$(DataStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
 `--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
 `9.57.0`, never a range — in `OnBuildInitialized`, and passes the result as
-`-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
+`-p:DataStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
 variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
--p:MartenStudioMartenVersion=9.57.0` does the same. **`Pack` packs at the floor and refuses anything
-else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
-the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
+-p:DataStudioMartenVersion=9.57.0` does the same. **`Pack` packs at the floor and refuses anything
+else**, twice: the Fallout target asserts it, and `DataStudio.Marten.csproj` fails a bare `dotnet pack` before
+the nuspec is written unless both `DataStudioMartenVersion` is the floor *and* `project.assets.json`
 holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
-so `dotnet test … -p:MartenStudioMartenVersion=9.57.0` followed by `dotnet pack --no-restore` would
+so `dotnet test … -p:DataStudioMartenVersion=9.57.0` followed by `dotnet pack --no-restore` would
 otherwise pass a property check and still ship `Marten >= 9.57.0`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
-latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
+latest-tested version: change `DataStudioMartenLatest`, run the suites with `--marten-version latest`,
 and fix or record every difference in the same pull request. Read the release's "Action needed after upgrading" notes,
 and turn each that leaves state a host may still carry into a health check or a page note (E09 is the first, from Marten
 9.57.0). Raising the floor is a *Package budget changes* entry, never a side effect.
 
-**PostgresStudio's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
-`PostgresStudioNpgsqlFloor` (9.0.4, what the PostgresStudio package depends on; never above the Npgsql that Marten's
-own packages already require at the Marten floor, which `NpgsqlVersionTests` reads from MartenStudio's restore) and
-`PostgresStudioNpgsqlLatest` (10.0.3) are defined there once, and the `Npgsql` row reads `$(PostgresStudioNpgsqlVersion)`
-only for a project that sets `PostgresStudioPinsNpgsql`. `build/Build.Npgsql.cs` resolves `--npgsql-version` (env
+**The Postgres module's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
+`DataStudioNpgsqlFloor` (9.0.4, what the Postgres packages depend on; never above the Npgsql that Marten's
+own packages already require at the Marten floor, which `NpgsqlVersionTests` reads from the Marten module's restore) and
+`DataStudioNpgsqlLatest` (10.0.3) are defined there once, and the `Npgsql` row reads `$(DataStudioNpgsqlVersion)`
+only for a project that sets `DataStudioPostgresPinsNpgsql`. `build/Build.Npgsql.cs` resolves `--npgsql-version` (env
 `NPGSQL_VERSION`) - `floor`, the default; `latest`; or an exact version - but the whole-solution Restore, Compile and
-Test always get `-p:PostgresStudioNpgsqlVersion=<floor>`: handed to the solution, a higher Npgsql reaches MartenStudio
-and its tests through the `ProjectReference` with no diagnostic (PS-0), and MartenStudio on Npgsql 10 is not a tested
+Test always get `-p:DataStudioNpgsqlVersion=<floor>`: handed to the solution, a higher Npgsql reaches the Marten module
+and its tests through the `ProjectReference` with no diagnostic (PS-0), and the Marten module on Npgsql 10 is not a tested
 combination. Anything but the floor adds `NpgsqlPass`, which `Test` triggers: a separate restore, build and test over
-`postgres-studio.slnf`, which holds exactly the projects that set the property and reaches nothing outside itself
-(`PostgresStudioSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
+`data-studio-postgres.slnf`, which holds exactly the projects that set the property and reaches nothing outside itself
+(`PostgresSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
 pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
-latest legs. Without Fallout: `dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3` - never the
-`.slnx`. A project that sets `PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request.
+latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3` - never the
+`.slnx`. A project that sets `DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request.
 
-**KStudio's Confluent.Kafka is `Directory.Packages.props`'s too, and needs no pass of its own.**
-`KStudioConfluentFloor` (2.14.0, what `KStudio.Core` depends on: the version WolverineFx.Kafka 6.61 pins, so a Wolverine
-host is never raised) and `KStudioConfluentLatest` (2.16.0) are defined there once, and the unconditional
-`Confluent.Kafka` row reads `$(KStudioConfluentVersion)`. `build/Build.Confluent.cs` resolves `--confluent-version` (env
+**The Kafka module's Confluent.Kafka is `Directory.Packages.props`'s too, and needs no pass of its own.**
+`DataStudioConfluentFloor` (2.14.0, what `DataStudio.Kafka.Core` depends on: the version WolverineFx.Kafka 6.61 pins, so a Wolverine
+host is never raised) and `DataStudioConfluentLatest` (2.16.0) are defined there once, and the unconditional
+`Confluent.Kafka` row reads `$(DataStudioConfluentVersion)`. `build/Build.Confluent.cs` resolves `--confluent-version` (env
 `CONFLUENT_VERSION`) - `floor`, the default; `latest`; or an exact version, never a range - and passes
-`-p:KStudioConfluentVersion=<resolved>` to Restore, Compile and Test, the floor included, so an environment variable of
-that name cannot change what a run tests. Unlike Npgsql's, the property may go to the whole solution: only the KStudio
-projects reference the package, so MartenStudio and PostgresStudio never read it, and there is no second pass. `Pack`
-refuses anything but the floor (K8 packs KStudio, and this is the guard that keeps a latest-leg pack from raising a Wolverine host). `marten-latest.yml` sets `CONFLUENT_VERSION: latest` beside `MARTEN_VERSION` and `NPGSQL_VERSION`, so
+`-p:DataStudioConfluentVersion=<resolved>` to Restore, Compile and Test, the floor included, so an environment variable of
+that name cannot change what a run tests. Unlike Npgsql's, the property may go to the whole solution: only the Kafka
+projects reference the package, so the database modules never read it, and there is no second pass. `Pack`
+refuses anything but the floor (this is the guard that keeps a latest-leg pack from raising a Wolverine host). `marten-latest.yml` sets `CONFLUENT_VERSION: latest` beside `MARTEN_VERSION` and `NPGSQL_VERSION`, so
 one workflow runs all three latest legs; `build.yml` and `publish.yml` set none of them. Without Fallout: `dotnet test
-tests/KStudio.Tests -p:KStudioConfluentVersion=2.16.0`.
+tests/DataStudio.Kafka.Tests -p:DataStudioConfluentVersion=2.16.0`.
 
-**Six packages (K8), three at one version and three as a preview.** `Pack` packs `src/PostgresStudio.Diagnostics`, then
-`src/PostgresStudio`, then `src/MartenStudio`, then `src/KStudio.Core`, then `src/KStudio`, then `src/KStudio.Wolverine`,
-one after the other, all at the CHANGELOG version (the last three with the preview label, below) and all at the floors - it
-refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its
-floor, by property and by `project.assets.json` (`PostgresStudio.Diagnostics` and `PostgresStudio` for Npgsql, MartenStudio
-for Marten, and `KStudio.Core` for Confluent.Kafka, `KStudioCorePackOnlyAtTheConfluentFloor`) - and then asserts all six nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
-exactly `PostgresStudio [<version>]`, on `Marten <floor>` and on `Microsoft.AspNetCore.App.Internal.Assets` (written there
-by transitive pinning), and not on the engine, which a host gets through PostgresStudio's pin. PostgresStudio depends on
-exactly `PostgresStudio.Diagnostics [<version>]`, `Npgsql <floor>` (it no longer references Npgsql itself, but it still sets
-`PostgresStudioPinsNpgsql`, so the central row pins the Npgsql that arrives through the engine and NuGet writes that pinned
-transitive package into the nuspec) and `Microsoft.AspNetCore.App.Internal.Assets`, and nothing else.
-PostgresStudio.Diagnostics depends on `Npgsql <floor>` and the four `Microsoft.Extensions.*` abstractions at their central
-rows, and on no ASP.NET Core package and no part of the Marten family. Each exact range is a target that brackets
-NuGet-private item metadata: `MartenStudioPinsPostgresStudioExactly` in `MartenStudio.csproj` and
-`PostgresStudioPinsDiagnosticsExactly` in `PostgresStudio.csproj`; the nuspec assertion is what turns a NuGet that renamed
+**Seven packages, four at one version and three as a preview.** `Pack` packs `src/DataStudio.Postgres.Diagnostics`, then
+`src/DataStudio` (the shell), then `src/DataStudio.Postgres`, then `src/DataStudio.Marten`, then `src/DataStudio.Kafka.Core`, then
+`src/DataStudio.Kafka`, then `src/DataStudio.Kafka.Wolverine`, one after the other, all at the CHANGELOG version (the last three with the
+preview label, below) and all at the floors - it refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each
+csproj refuses a bare `dotnet pack` off its floor, by property and by `project.assets.json` (the engine and the Postgres module for
+Npgsql, the Marten module for Marten, and `DataStudio.Kafka.Core` for Confluent.Kafka) - and then asserts all seven nuspecs, each
+dependency at exactly the range NuGet wrote:
+
+| Package | Depends on, exactly | Floors written by pinning |
+|---|---|---|
+| `DataStudio.Marten` | `DataStudio.Postgres [<version>]` | `Marten <floor>`, `Microsoft.AspNetCore.App.Internal.Assets`; not the engine, which a host gets through the Postgres module's pin |
+| `DataStudio.Postgres` | `DataStudio.Postgres.Diagnostics [<version>]`, `DataStudio [<version>]` | `Npgsql <floor>` (it references Npgsql itself no longer, but sets `DataStudioPostgresPinsNpgsql`, so the central row pins the Npgsql that arrives through the engine and NuGet writes that pinned transitive package into the nuspec), `Microsoft.AspNetCore.App.Internal.Assets`; and nothing of the Marten family |
+| `DataStudio` | nothing of the family | `Microsoft.AspNetCore.App.Internal.Assets`, its one declared dependency; no driver, no Marten, no Kafka client |
+| `DataStudio.Postgres.Diagnostics` | nothing of the family | `Npgsql <floor>` and the four `Microsoft.Extensions.*` abstractions at their central rows; no ASP.NET Core package and no part of the Marten family |
+| `DataStudio.Kafka.Core` | nothing of the family | `Confluent.Kafka <floor>` and the three abstractions; no ASP.NET Core |
+| `DataStudio.Kafka` | `DataStudio [<version>]`, `DataStudio.Kafka.Core [<version>-<label>]` | `Confluent.Kafka` (through the engine) and the assets pack (through the shell); neither is a reference of the module |
+| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core [<version>-<label>]` | `WolverineFx.Kafka <floor>`, and the rest of CPM's transitive pinning: the Confluent.Kafka floor, the three abstractions and `Microsoft.Extensions.Hosting` |
+
+A last assertion, with a sentence a maintainer reads when the Kafka module grows a database dependency: the shell's nuspec and the three Kafka
+nuspecs name no `DataStudio.Postgres`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Marten`, `Npgsql`, `Marten`, `JasperFx` or `Weasel`, so a host with
+only Kafka restores none of them (`KafkaOnlyHostTests` holds the same line on the built output).
+
+Each exact range is a target that brackets NuGet-private item metadata: `DataStudioMartenPinsPostgresExactly` in `DataStudio.Marten.csproj`;
+`DataStudioPostgresPinsDiagnosticsExactly` and `DataStudioPostgresPinsShellExactly` in `DataStudio.Postgres.csproj`;
+`DataStudioKafkaPinsFamilyExactly` in `DataStudio.Kafka.csproj`; `DataStudioKafkaWolverinePinsCoreExactly` in `DataStudio.Kafka.Wolverine.csproj`
+(the last two take each range from the referenced project's `PackageVersion`). The nuspec assertion is what turns a NuGet that renamed
 it into a red build rather than a shipped `>=`. NuGet enforces a pin everywhere but one place: with
 `CentralPackageTransitivePinningEnabled` and a central `PackageVersion` for the pinned package at another version, the SDK
-drops it from the graph without a warning (PS-0; NuGet/Home#14698). So `AddMartenStudio` first runs
-`PostgresStudioVersionGuard` (D30), which throws an `InvalidOperationException` naming the central pin when PostgresStudio
-or PostgresStudio.Diagnostics is missing or its informational version (before the `+`) differs, and `AddPostgresStudio`
-first runs `PostgresStudioDiagnosticsVersionGuard`, which does the same for the engine - but only for a newer engine or
-another commit of the same version: `AddPostgresStudio`'s parameter type derives from an engine type, so a missing or older
-engine fails in the loader when it is first called, with a `FileNotFoundException` that names the engine and the version
-(measured 2026-11-01). `AddPostgresDiagnostics` needs no guard: nothing is below it.
+drops it from the graph without a warning (PS-0; NuGet/Home#14698). So `AddMarten` first runs
+`PostgresVersionGuard` (D30), which throws an `InvalidOperationException` naming the central pin when the Postgres module,
+the engine or the shell is missing or its informational version (before the `+`) differs, and `AddPostgres`
+first runs `PostgresDiagnosticsVersionGuard`, which does the same for the engine and the shell - but only for a newer assembly or
+another commit of the same version: `AddPostgres`'s parameter types derive from an engine type and name the shell's builder, so a missing or older
+engine or shell fails in the loader when it is first called, with a `FileNotFoundException` that names the assembly and the version
+(measured 2026-11-01). `AddKafka` first runs `KafkaCoreVersionGuard` (shell and engine), and `UseWolverineKafka` runs
+`KafkaWolverineVersionGuard` (the engine). `AddPostgresDiagnostics` needs no guard: nothing is below it.
 
-**KStudio's preview label (K8).** KStudio ships as a preview beside the family release, and the version is still one number
-from one file: CHANGELOG.md. The label lives in one place, `Directory.Build.props`' `KStudioPrereleaseLabel`
-(`preview.1`), and only `KStudio.Core`, `KStudio` and `KStudio.Wolverine` read it: each sets `PackageVersion` and
-`InformationalVersion` to `$(Version)-$(KStudioPrereleaseLabel)` while the label is not empty, and leaves them alone when it is
+**The Kafka preview label (K8).** The Kafka module ships as a preview beside the family release, and the version is still one number
+from one file: CHANGELOG.md. The label lives in one place, `Directory.Build.props`' `KafkaPrereleaseLabel`
+(`preview.1`), and only `DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` read it: each sets `PackageVersion` and
+`InformationalVersion` to `$(Version)-$(KafkaPrereleaseLabel)` while the label is not empty, and leaves them alone when it is
 (`Version` is a global property that `Pack` passes, so the projects read it and never set it; `AssemblyVersion` and
-`FileVersion` stay numeric). At 1.3.0 the six packages are `PostgresStudio.Diagnostics`, `PostgresStudio` and
-`MartenStudio` at `1.3.0`, and `KStudio.Core`, `KStudio` and `KStudio.Wolverine` at `1.3.0-preview.1`.
-`PackReadinessTests` holds that no other project reads the label or sets a `PackageVersion`. The exact pins carry it: `KStudio`
-depends on `PostgresStudio [<version>]` and `KStudio.Core [<version>-<label>]`, and `KStudio.Wolverine` on `KStudio.Core
-[<version>-<label>]`, because `KStudioPinsFamilyExactly` and `KStudioWolverinePinsCoreExactly` take each range from the
-referenced project's `PackageVersion`. The version guards follow: `KStudioWolverineVersionGuard` compares the adapter with
-KStudio.Core as it stands (both carry the label), and `KStudioVersionGuard` compares KStudio.Core with KStudio's own
-informational version and PostgresStudio and PostgresStudio.Diagnostics with the *family version*, KStudio's with the
-`KStudioPrereleaseLabel` assembly metadata (stamped by the three projects) taken off. A different label, or a family assembly
-of another version, is still refused. Package validation runs on the three with no baseline: `PackageValidationBaselineVersion`
-is the family's last release, and these ids have none on nuget.org until the first release. **To graduate** KStudio, empty the
+`FileVersion` stay numeric). At 2.0.0 the seven packages are `DataStudio.Postgres.Diagnostics`, `DataStudio`, `DataStudio.Postgres` and
+`DataStudio.Marten` at `2.0.0`, and `DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` at `2.0.0-preview.1`.
+`PackReadinessTests` holds that no other project reads the label or sets a `PackageVersion`. The exact pins carry it: `DataStudio.Kafka`
+depends on `DataStudio [<version>]` and `DataStudio.Kafka.Core [<version>-<label>]`, and `DataStudio.Kafka.Wolverine` on `DataStudio.Kafka.Core
+[<version>-<label>]`. The version guards follow: `KafkaWolverineVersionGuard` compares the adapter with
+`DataStudio.Kafka.Core` as it stands (both carry the label), and `KafkaCoreVersionGuard` compares `DataStudio.Kafka.Core` with the Kafka module's own
+informational version and the shell with the *family version*, the module's with the
+`KafkaPrereleaseLabel` assembly metadata (stamped by the three projects) taken off. A different label, or a family assembly
+of another version, is still refused. Package validation runs on the three with no baseline: each carries an empty
+`PackageValidationBaselineVersion` element of its own (below). **To graduate** the Kafka module, empty the
 label in `Directory.Build.props` in the release's pull request: the three then pack at the family version (`PackageVersion` is
-the `Version` `Pack` passes), no `AssemblyMetadata` is stamped, `Pack` names the six files with no label, and the guards compare
-all four assemblies as one version again. `PackReadinessTests` and `KStudioVersionGuardTests` hold both states (the element must
+the `Version` `Pack` passes), no `AssemblyMetadata` is stamped, `Pack` names the seven files with no label, and the guards compare
+all the assemblies as one version again. `PackReadinessTests` and `KafkaCoreVersionGuardTests` hold both states (the element must
 exist; its value may be empty). The rest of graduation is words, in the same pull request: the "preview" wording in `README.md`
-(the package table and the KStudio paragraph), `src/KStudio/README.md` and the changelog, and the `--prerelease` of the install
-lines. In the release after it, once a KStudio release is on nuget.org, remove the empty `PackageValidationBaselineVersion` element
-from the three projects, so the family's baseline applies (and move `PackReadinessTests`' assertion with it).
+(the package table and the Kafka paragraph), `src/DataStudio.Kafka/README.md` and the changelog, and the `--prerelease` of the install
+lines. In the release after it, once a release of the Kafka module is on nuget.org, set the baseline of the three to it (below).
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);
@@ -212,29 +235,28 @@ halves, in both directions.
 `build.yml` and `marten-latest.yml` — every push and pull request to `main`, at the Marten floor and at
 the latest-tested Marten — cannot mint anything, because neither is the file in the policy; both hold
 `contents: read` and nothing else, and `WorkflowGenerationTests` asserts that no workflow but `publish.yml`
-so much as mentions `id-token`. Neither packs: the package that `publish.yml` pushes is packed at the
-floor, and `Pack` refuses any other Marten.
+so much as mentions `id-token`. Neither packs: the packages that `publish.yml` pushes are packed at the
+floors, and `Pack` refuses any other Marten.
 
 `CHANGELOG.md` stays the version authority here too. `CreateGitHubRelease` and `Publish` both refuse unless
 `GITHUB_REF_NAME` equals `v{version parsed from CHANGELOG.md}`. To release: land the changelog entry first,
 then tag that commit.
 
-**Package validation (1.0).** Each shipped project has `EnablePackageValidation`, and `Directory.Build.props`'s
-`PackageValidationBaselineVersion` names the release the packages are compared with at `Pack` (0.11.0 for 1.0.0): `Pack`
-restores that version of each package from nuget.org and fails on a breaking change to the public surface (a removed or
-changed member, an interface member without a default body). In the pull request that lands a release's CHANGELOG section,
-move the baseline to the release before it, so the next release is compared with the last one shipped. A deliberate break
-is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline. A change to a Razor
+**Package validation.** Each shipped project has `EnablePackageValidation`, and `PackageValidationBaselineVersion` names the release the
+packages are compared with at `Pack`: `Pack` restores that version of each package from nuget.org and fails on a breaking change to the
+public surface (a removed or changed member, an interface member without a default body). **For 2.0 there is no baseline**: the seven ids
+are new, no release of them exists to compare with, and restore refuses a baseline it cannot find (NU1101), so
+`Directory.Build.props`' element is empty, and so is the Kafka three's own, each in its project, because they will take the preview version
+they shipped at. In the pull request of the release after 2.0, set it to `2.0.0` (the Kafka three, to the version they shipped at, in
+their own projects), and from then on move it, in the pull request that lands a release's CHANGELOG section, to the release before it, so the next release is compared with the last one shipped. A
+deliberate break is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline. A change to a Razor
 component's members is not a break: components are public only because Razor makes them so, and no baseline lists them
 (D20, `docs/stability.md`). Package validation still reports one, so suppress it in the project's
 `CompatibilitySuppressions.xml` (generate it with `-p:GenerateCompatibilitySuppressionFile=true`, then make it LF without a
-BOM and say why in its comment), reviewed the same way. 1.1.0 suppresses `LinqQueryPanel.OnChanged` (user, 2026-11-03).
-1.2.0 validates against 1.1.0, so that suppression is gone: the SDK's default (`ApiCompatPermitUnnecessarySuppressions`
-unset) fails `Pack` on a suppression that is no longer needed. 1.2.0 suppresses one of its own, `Query.NavigationLanded` (the
-1.1 navigation workaround's JS callback, removed by the 1.2 navigation interception, 1.2-NAV; D20; user, 2026-11-03: "we can
-ignore semver for linqpanel"); it goes when the baseline moves to 1.2.0.
+BOM and say why in its comment), reviewed the same way; a suppression that is no longer needed fails `Pack` (the SDK's default,
+`ApiCompatPermitUnnecessarySuppressions` unset), so it goes when the baseline moves past it. There is none today.
 
-The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All three packages are consumed
+The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All seven packages are consumed
 by `PackageReference`; there is nothing a user could usefully download, and attaching a copy of a .nupkg
 would only invite installing a file that never went through the trusted-publishing path. The release body
 is written by `Build.WriteReleaseNotes` into `artifacts/release-notes.md`: `ICreateGitHubRelease` composes
@@ -259,18 +281,19 @@ a logged *skip* (there is no feed for untagged builds), and once past that gate 
 GitHub Actions, that `NUGET_USER` is set, and that `GITHUB_REF_NAME` matches the changelog version. Only
 then does it mint the key, immediately before pushing — the key lives 15–60 minutes and one OIDC token
 mints exactly one key. Before it mints the key, it asserts that `artifacts/packages` holds exactly
-`PostgresStudio.Diagnostics.<version>.nupkg`, `PostgresStudio.<version>.nupkg`, `MartenStudio.<version>.nupkg`,
-`KStudio.Core.<version>-<label>.nupkg`, `KStudio.<version>-<label>.nupkg` and `KStudio.Wolverine.<version>-<label>.nupkg`, and it
-pushes them with that one key one at a time in that order (the engine first, KStudio.Wolverine last), the first failure ending
+`DataStudio.Postgres.Diagnostics.<version>.nupkg`, `DataStudio.<version>.nupkg`, `DataStudio.Postgres.<version>.nupkg`,
+`DataStudio.Marten.<version>.nupkg`, `DataStudio.Kafka.Core.<version>-<label>.nupkg`, `DataStudio.Kafka.<version>-<label>.nupkg` and
+`DataStudio.Kafka.Wolverine.<version>-<label>.nupkg`, and it
+pushes them with that one key one at a time in that order (the engine first, `DataStudio.Kafka.Wolverine` last), the first failure ending
 the run, so a push that fails never lets a package that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a
 partial failure safe. nuget.org still validates and indexes each package on its own, so for a few minutes after a release
-PostgresStudio can be listed while its PostgresStudio.Diagnostics is not yet restorable, MartenStudio while its
-PostgresStudio is not, and KStudio while its KStudio.Core is not. `ReleasePushOrderTests` pins the order and the stop.
+`DataStudio.Postgres` can be listed while its `DataStudio.Postgres.Diagnostics` or `DataStudio` is not yet restorable, `DataStudio.Marten` while its
+`DataStudio.Postgres` is not, and `DataStudio.Kafka` while its `DataStudio.Kafka.Core` is not. `ReleasePushOrderTests` pins the order and the stop.
 
 The whole ladder is exercisable locally, and should be before any tag:
 
 ```powershell
-dotnet fallout Pack                                # the package the next steps would push
+dotnet fallout Pack                                # the packages the next steps would push
 dotnet fallout Publish --skip                      # skips, and says why
 $env:GITHUB_ACTIONS='true'; $env:NUGET_USER='lahma'; $env:GITHUB_REF_NAME='v0.1.0'
 dotnet fallout Publish --skip                      # must fail with "GitHub OIDC is unavailable"
@@ -301,19 +324,18 @@ Three things about the exchange are worth not rediscovering:
 
 None of these can be done from this repository, and the first tag will fail without the first two:
 
-1. **nuget.org → Trusted Publishing → new policy.** Policy owner `lahma`; Repository Owner `lahma`;
-   Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and not
-   the `.github/workflows/` path); Environment `nuget`. The policy is not limited to one package id: the key it
-   mints pushes every id of the repository, including one that does not exist yet (confirmed by the policy owner,
-   2026-10-26); the three KStudio ids (`KStudio.Core`, `KStudio`, `KStudio.Wolverine`) are covered the same way: the three ids
-   are unowned on nuget.org (checked 2026-11-13: no registration for KStudio, KStudio.Core or KStudio.Wolverine), and the trusted
-   publishing policy covers new ids. The user confirms that before the first tag that carries them.
+1. **nuget.org → Trusted Publishing → a policy for each of the seven package ids** (`DataStudio`, `DataStudio.Postgres`,
+   `DataStudio.Postgres.Diagnostics`, `DataStudio.Marten`, `DataStudio.Kafka`, `DataStudio.Kafka.Core`,
+   `DataStudio.Kafka.Wolverine`), before the tag: a push of an id with no policy fails half-way through the family. Policy owner `lahma`;
+   Repository Owner `lahma`; Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and
+   not the `.github/workflows/` path); Environment `nuget`. The key a policy mints pushes the ids it covers.
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.
-3. **The `PostgresStudio` package id** needs nothing more: the policy covers it, so its first version goes out through
-   `publish.yml` like every other. Never push a release version by hand - `--skip-duplicate` would then pair packages
-   built from different commits; if an id ever had to be claimed by hand, push a `0.0.1-reserve` and unlist it.
+3. **After the first 2.0 tag**, deprecate the six 1.x ids (`MartenStudio`, `PostgresStudio`, `PostgresStudio.Diagnostics`, `KStudio`,
+   `KStudio.Core`, `KStudio.Wolverine`) on nuget.org, each with its successor. Never push a release version by hand -
+   `--skip-duplicate` would then pair packages built from different commits; if an id ever had to be claimed by hand, push a
+   `0.0.1-reserve` and unlist it.
 
-Both package ids are names the code carries: a rename would touch the assembly names, the root namespaces,
-`_content/PostgresStudio`, the `InternalsVisibleTo` entries and both READMEs.
+The package ids are names the code carries: a rename would touch the assembly names, the root namespaces,
+`_content/DataStudio`, the `InternalsVisibleTo` entries and every README.
