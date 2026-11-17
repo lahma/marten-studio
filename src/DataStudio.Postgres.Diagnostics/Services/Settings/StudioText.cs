@@ -301,15 +301,29 @@ internal sealed class StudioText
     // Health.
 
     /// <summary>
-    /// What a session finding (C04, C05, C06) says of the sessions it counts. A studio points at Database › Sessions, where a visitor
-    /// with the capability reads their statements. A host with no studio has no such page, and the finding carries no statement: what
-    /// <c>IncludeActivity</c> adds is each session's process id, role, application and client, which is all the sentence names.
+    /// What C04 and C05 say of the sessions they name. A studio points at Database › Sessions, where a visitor with the capability reads
+    /// their statements. A host with no studio has no such page, and these findings carry no statement: what <c>IncludeActivity</c> adds is
+    /// each session's line - its process id, role, application, client, the time it connected and what it is doing - and the sentence names
+    /// exactly those, which a test holds to the activity evidence of both checks.
     /// </summary>
     public string StatementsOnSessionsPage =>
         HasVisitors
-            ? "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
-              + "masked for the schemas you may not see."
-            : "Each session's process id, role, application and client are " + ActivityReturnedOnRequest + ".";
+            ? StatementsOnTheSessionsPage
+            : "Each session's process id, role, application, client, the time it connected and what it is doing are " + ActivityReturnedOnRequest + ".";
+
+    /// <summary>
+    /// <see cref="StatementsOnSessionsPage" /> for C06, whose session lines hold what the engine knows of a lock wait instead: no connection
+    /// time, but the lock a waiter waits for, its mode and the process ids that block it.
+    /// </summary>
+    public string LockWaitStatementsOnSessionsPage =>
+        HasVisitors
+            ? StatementsOnTheSessionsPage
+            : "Each session's process id, role, application and client, what it is doing or waiting for (the lock and its mode) and the process ids "
+              + "that block a waiter are " + ActivityReturnedOnRequest + ".";
+
+    private string StatementsOnTheSessionsPage =>
+        "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
+        + "masked for the schemas you may not see.";
 
     /// <summary>The comment above a server setting in a remedy: <c>A server setting, not a StoreOptions one</c>.</summary>
     public required string ServerSettingComment { get; init; }

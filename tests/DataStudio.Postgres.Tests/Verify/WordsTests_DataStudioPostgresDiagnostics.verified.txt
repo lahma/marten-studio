@@ -132,6 +132,9 @@ the tables in the browsable schemas
 [LeaderTimeoutClause]
 
 
+[LockWaitStatementsOnSessionsPage]
+Each session's process id, role, application and client, what it is doing or waiting for (the lock and its mode) and the process ids that block a waiter are returned only when the call sets IncludeActivity = true.
+
 [LogParametersLoggerClause]
 
 
@@ -340,7 +343,7 @@ the data source's
 The statements this database runs, their counters and their text, need PostgresDiagnosticsOptions.Capabilities.ViewDatabaseActivity.
 
 [StatementsOnSessionsPage]
-Each session's process id, role, application and client are returned only when the call sets IncludeActivity = true.
+Each session's process id, role, application, client, the time it connected and what it is doing are returned only when the call sets IncludeActivity = true.
 
 [StatementsStorePolicyDenial]
 Your account may not see this database's statements. The source policy (PostgresDiagnosticsOptions.SourceAuthorizationPolicy) refused this data source and database.

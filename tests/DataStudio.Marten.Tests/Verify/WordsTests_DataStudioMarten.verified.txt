@@ -133,6 +133,9 @@ the tables the studio judges
 [LeaderTimeoutClause]
  - but where a Marten HotCold daemon leads from a transaction, the first must be longer than its leader's idle stretch and the second unset for the store's role, or they end that leadership too (K08)
 
+[LockWaitStatementsOnSessionsPage]
+The statements themselves are on Database › Sessions, behind MartenOptions.Capabilities.ViewDatabaseActivity, masked for the schemas you may not see.
+
 [LogParametersLoggerClause]
  Marten 9 gives the data sources it builds no logger factory while StoreOptions.DisableNpgsqlLogging is on, which is its default, so there the keyword logs nothing unless the host turned that off or built its own data source with a logger factory.
 

@@ -247,7 +247,8 @@ public class AddPostgresDiagnosticsTests
                                && x.Name is not (nameof(DataStudio.Postgres.Services.Settings.StudioText.OptionsTypeName)
                                    or nameof(DataStudio.Postgres.Services.Settings.StudioText.ActivityShownWith)
                                    or nameof(DataStudio.Postgres.Services.Settings.StudioText.ActivityShownOnlyWith)
-                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.StatementsOnSessionsPage))))
+                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.StatementsOnSessionsPage)
+                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.LockWaitStatementsOnSessionsPage))))
         {
             string? own = (string?) property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
 

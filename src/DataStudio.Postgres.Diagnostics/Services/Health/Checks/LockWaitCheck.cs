@@ -291,7 +291,7 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
                 (exact
                     ? "Waits are measured by pg_locks.waitstart."
                     : "On PostgreSQL before 14 there is no pg_locks.waitstart, so a wait is measured from the session's last state change - an upper bound.")
-                + " " + evaluation.Text.StatementsOnSessionsPage),
+                + " " + evaluation.Text.LockWaitStatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
             Remedy = applyLock
                 ? new HealthRemedy(

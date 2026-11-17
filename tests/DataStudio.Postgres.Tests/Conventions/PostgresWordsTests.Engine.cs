@@ -97,24 +97,37 @@ public partial class PostgresWordsTests
         PostgresText.DiagnosticsInstance.StatementsOnSessionsPage.Should().NotContain("Sessions").And.NotContain("Capabilities");
     }
 
-    /// <summary>The fields an engine caveat may name of a session, each with what its evidence line holds when it has it (REVIEW-V2-E, finding 1).</summary>
-    private static readonly (string Field, string Token)[] SessionFields =
+    /// <summary>
+    /// What an activity evidence line of a session check holds, and the words of the engine caveat that name it: the line's own markers (as
+    /// <c>SessionEvidence.Describe</c> and the checks write them) on the left, so a field the evidence grows is found by reading the evidence, and
+    /// the words on the right. The head of a line - up to its <c>": "</c> - is only these markers; what follows is what the session is doing.
+    /// </summary>
+    private static readonly (string Marker, string Word)[] SessionLineFields =
     [
-        ("process id", "pid "),
-        ("role", ", role "),
-        ("application", "application '"),
-        ("client", ", from "),
+        ("pid ", "process id"),
+        ("role ", "role"),
+        ("application '", "application"),
+        ("from ", "client"),
+        ("connected since ", "the time it connected"),
+    ];
+
+    /// <summary>What a session line's tail holds when it is a lock wait's: the lock a waiter waits for, and the processes that block it.</summary>
+    private static readonly (string Marker, string Word)[] LockWaitTailFields =
+    [
+        ("waits for ", "waiting for"),
+        ("blocked by pid ", "process ids that block a waiter"),
     ];
 
     /// <summary>
-    /// C04, C05 and C06 name sessions, never statements: what <c>IncludeActivity</c> returns of them is the session's process id, role,
-    /// application and client. The caveat an engine-only host reads names exactly those fields and each is in that check's activity evidence.
+    /// C04, C05 and C06 name sessions, never statements: what <c>IncludeActivity</c> returns of them is each session's line. The caveat an
+    /// engine-only host reads names exactly the fields that check's lines hold - found by reading the lines, in both directions: a field of a
+    /// line the sentence does not name fails it, and so does a field the sentence names that no line holds - and the sentence is pinned whole.
     /// </summary>
     [Theory]
-    [InlineData("C04")]
-    [InlineData("C05")]
-    [InlineData("C06")]
-    public void A_session_checks_engine_caveat_names_only_fields_its_activity_evidence_holds(string code)
+    [InlineData("C04", "Each session's process id, role, application, client, the time it connected and what it is doing are returned only when the call sets IncludeActivity = true.")]
+    [InlineData("C05", "Each session's process id, role, application, client, the time it connected and what it is doing are returned only when the call sets IncludeActivity = true.")]
+    [InlineData("C06", "Each session's process id, role, application and client, what it is doing or waiting for (the lock and its mode) and the process ids that block a waiter are returned only when the call sets IncludeActivity = true.")]
+    public void A_session_checks_engine_caveat_names_exactly_what_its_activity_evidence_holds(string code, string expected)
     {
         HealthFinding[] findings =
         [
@@ -124,22 +137,46 @@ public partial class PostgresWordsTests
                     .Evaluate(x.Facts, x.Evaluation with { Text = PostgresText.DiagnosticsInstance }).Findings),
         ];
 
-        string[] activity = [.. findings.SelectMany(static x => x.Evidence).Where(static x => x.Gate == HealthGate.Activity).Select(static x => x.Value)];
-        activity.Should().NotBeEmpty(code + "'s cases reach activity-grade evidence");
+        findings.Should().NotBeEmpty(code + "'s cases reach a finding");
 
-        string[] caveats = [.. findings.Select(static x => x.Caveat).OfType<string>().Where(static x => x.Contains("returned only when", StringComparison.Ordinal))];
-        caveats.Should().NotBeEmpty(code + " says what the call returns");
-
-        foreach (string caveat in caveats)
+        foreach (HealthFinding finding in findings)
         {
-            string sentence = caveat[(caveat.IndexOf("Each session's", StringComparison.Ordinal))..];
-            sentence.Should().StartWith("Each session's process id, role, application and client are returned only when the call sets IncludeActivity = true.");
-            sentence.Should().NotContain("statements themselves", "no finding of this check carries a statement");
+            string[] lines = [.. finding.Evidence.Where(static x => x.Gate == HealthGate.Activity).Select(static x => x.Value)];
+            lines.Should().NotBeEmpty(code + "'s findings carry activity-grade evidence");
 
-            foreach ((string field, string token) in SessionFields.Where(x => sentence.Contains(x.Field, StringComparison.Ordinal)))
+            string caveat = finding.Caveat.Should().NotBeNull().And.Subject!;
+            string sentence = caveat[caveat.IndexOf("Each session's", StringComparison.Ordinal)..];
+            sentence.Should().Be(expected, "the sentence is the whole end of the caveat");
+
+            // The head of every line is only markers this test knows; anything else is a field the words do not yet say.
+            foreach (string line in lines)
             {
-                activity.Should().Contain(x => x.Contains(token, StringComparison.Ordinal), "the caveat names the " + field + " and the evidence holds it");
+                int tail = line.IndexOf(": ", StringComparison.Ordinal);
+                tail.Should().BePositive("a session line ends in what the session is doing: " + line);
+
+                foreach (string segment in line[..tail].Split(", "))
+                {
+                    SessionLineFields.Should().Contain(x => segment.StartsWith(x.Marker, StringComparison.Ordinal), "the field '" + segment + "' of " + code + "'s line is named by the words");
+                }
             }
+
+            foreach ((string marker, string word) in SessionLineFields)
+            {
+                sentence.Contains(word, StringComparison.Ordinal).Should().Be(
+                    lines.Any(x => x[..x.IndexOf(": ", StringComparison.Ordinal)].Split(", ").Any(y => y.StartsWith(marker, StringComparison.Ordinal))),
+                    code + ": the sentence names '" + word + "' exactly when the lines hold it");
+            }
+
+            sentence.Should().Contain("what it is doing", "every line ends in what the session is doing");
+
+            foreach ((string marker, string word) in LockWaitTailFields)
+            {
+                sentence.Contains(word, StringComparison.Ordinal).Should().Be(
+                    lines.Any(x => x[(x.IndexOf(": ", StringComparison.Ordinal) + 2)..].Contains(marker, StringComparison.Ordinal)),
+                    code + ": the sentence names '" + word + "' exactly when the lines' tails hold it");
+            }
+
+            sentence.Should().NotContain("statements themselves", "no finding of this check carries a statement");
         }
     }
 

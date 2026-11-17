@@ -132,6 +132,9 @@ the tables in the browsable schemas
 [LeaderTimeoutClause]
 
 
+[LockWaitStatementsOnSessionsPage]
+The statements themselves are on Database › Sessions, behind PostgresOptions.Capabilities.ViewDatabaseActivity, masked for the schemas you may not see.
+
 [LogParametersLoggerClause]
 
 
