@@ -29,6 +29,8 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 | `ConnectionStrings:Kafka` | The bootstrap servers of a cluster of your own. |
 | `ConnectionStrings:Postgres` | A Postgres of your own for the Marten half. |
 
+The sample's own settings are the section `DataStudioKafkaSample` (`DataStudioKafkaSample:Capabilities`, `DataStudioKafkaSample:TailPauseAfter`); the 1.3.x section, `KStudioSample`, is no longer read, so move an override of it. Its user-secrets id is still `kstudio-sample`, so the secrets you stored for 1.3.x (`ConnectionStrings:Kafka` among them) still apply.
+
 ## The two users
 
 | User | Data Studio | Kafka |
