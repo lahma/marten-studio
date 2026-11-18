@@ -345,21 +345,37 @@ internal static partial class KafkaMatchView
 
     /// <summary>
     /// What the record page's Value row says of a value that is not a tombstone: its kind and its format, and its size - "JSON, 1.2 KiB". The kind
-    /// and the format are said once when they are the same word (compared without case), as they are for JSON and for text, and both when they
-    /// differ ("ConfluentWireFormat, Avro (schema 7), 40 B").
+    /// is said as a person reads it (never the enum's identifier), and once when the format begins with it, as for JSON ("JSON"), text and the
+    /// schema registry's framing ("Confluent wire format, schema id 7"); both when they differ ("JSON, CloudEvents 1.0 (structured), 40 B"). An empty
+    /// value is "Empty, 0 B": its format only repeats it. Never the value itself (D40): a kind, a format and a size.
     /// </summary>
     /// <param name="match">The match.</param>
     public static string ValueSummary(KafkaMatch match)
     {
         ArgumentNullException.ThrowIfNull(match);
 
-        string kind = match.ValueKind.ToString();
         string size = KafkaDisplay.Bytes(match.ValueLength);
 
-        return string.Equals(kind, match.ValueFormat, StringComparison.OrdinalIgnoreCase)
+        if (match.ValueKind == KafkaValueKind.Empty)
+        {
+            return "Empty, " + size;
+        }
+
+        string kind = match.ValueKind switch
+        {
+            KafkaValueKind.ConfluentWireFormat => "Confluent wire format",
+            var other => other.ToString(),
+        };
+
+        return NamesTheKind(match.ValueFormat, kind)
             ? match.ValueFormat + ", " + size
             : kind + ", " + match.ValueFormat + ", " + size;
     }
+
+    /// <summary>Whether a format already begins with the kind's word (compared without case), as a whole word: "JSON" and "JSON lines" do for Json, "Jsonish" does not.</summary>
+    private static bool NamesTheKind(string format, string kind) =>
+        format.StartsWith(kind, StringComparison.OrdinalIgnoreCase)
+        && (format.Length == kind.Length || !char.IsLetterOrDigit(format[kind.Length]));
 
     /// <summary>The Type column: the CloudEvents <c>type</c> when present and unmasked, else Wolverine's <c>message-type</c> header when present and unmasked, else the value's format.</summary>
     /// <param name="match">The match.</param>
