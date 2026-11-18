@@ -83,6 +83,37 @@ public class KafkaRecordDetailTests
     }
 
     [Fact]
+    public async Task An_empty_value_reads_empty_and_its_size()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", string.Empty);
+
+        KafkaMatch empty = await ReadAsync(rig, "orders", 0);
+
+        empty.ValueKind.Should().Be(DataStudio.Kafka.Core.Decoding.KafkaValueKind.Empty);
+        ValueRow(Render(rig, empty)).Should().Be("Empty, 0 B", "the format only repeats the kind and its zero length");
+    }
+
+    [Fact]
+    public async Task A_schema_registry_value_reads_by_the_name_a_person_uses_and_never_by_the_enum_identifier()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+
+        // A zero byte, a schema id (7) and a payload: the Confluent wire format.
+        rig.Cluster.Produce("orders", 0, Encoding.UTF8.GetBytes("k1"), [0, 0, 0, 0, 7, 1, 2, 3], [], KafkaSearchRig.T0.ToUnixTimeMilliseconds() + 1000);
+
+        KafkaMatch framed = await ReadAsync(rig, "orders", 0);
+
+        framed.ValueKind.Should().Be(DataStudio.Kafka.Core.Decoding.KafkaValueKind.ConfluentWireFormat);
+        string row = ValueRow(Render(rig, framed));
+        row.Should().Be("Confluent wire format, schema id 7, 8 B", "the kind's name is the format's first words: said once, and the schema id is not a value");
+        row.Should().NotContain("ConfluentWireFormat");
+        KafkaMatchView.ValueSummary(framed).Should().Be(row);
+    }
+
+    [Fact]
     public async Task A_null_key_reads_null_and_a_tombstone_reads_tombstone()
     {
         await using KafkaSearchRig rig = new();
