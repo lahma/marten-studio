@@ -84,12 +84,14 @@ public class KafkaOnlyShellTests
         using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Navigation.Simulate("http://localhost/studio/kafka", intercepted: false);
-        _ = harness.Context.Render<StudioRoutes>();
+        IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         harness.Navigation.Requests.Clear();
 
         harness.Navigation.Simulate("http://localhost/studio", intercepted: true);
 
-        harness.Navigation.Requests.Should().NotBeEmpty().And.Subject.First().Uri.Should().Be("http://localhost/studio/kafka");
+        // The front page redirects when it renders, which is after the location change returns; and the cluster page drawn before may still write
+        // its own cluster into the address after the Clear above. So the test waits for the redirect itself, whatever else is in the list.
+        routes.WaitForAssertion(() => harness.Navigation.Requests.Should().Contain(static x => x.Uri == "http://localhost/studio/kafka"));
     }
 
     [Fact]
