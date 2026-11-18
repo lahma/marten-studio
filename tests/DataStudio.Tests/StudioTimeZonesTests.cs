@@ -10,6 +10,14 @@ public class StudioTimeZonesTests
     [Fact]
     public void A_Windows_id_is_converted_for_the_region_asked_and_for_its_default_without_one()
     {
+        if (!TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        {
+            // A host whose globalization data cannot convert a Windows id at all (a GitHub Ubuntu runner is one): the id is kept, never an error.
+            StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("FLE Standard Time");
+            StudioTimeZones.IanaId("FLE Standard Time", null).Should().Be("FLE Standard Time");
+            return;
+        }
+
         StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("Europe/Helsinki", "the region picks Helsinki among the zones the id stands for");
         StudioTimeZones.IanaId("FLE Standard Time", "XX").Should().Contain("/").And.NotContain(" ", "a region with no mapping falls back to the id's default");
         StudioTimeZones.IanaId("FLE Standard Time", null).Should().Contain("/").And.NotContain(" ");
