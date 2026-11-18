@@ -8,6 +8,7 @@ using DataStudio.Components.Layout;
 using DataStudio.Kafka.Components.Shared;
 using DataStudio.Kafka.Services;
 using DataStudio.Kafka.Tests.Support;
+using DataStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -171,6 +172,87 @@ public class ShellModuleComponentTests
 
         rail.WaitForAssertion(() => Reveals().Should().HaveCount(2, "a navigation brings the new active entry into view"));
         rail.Find(NavMenu.ActiveItemSelector).TextContent.Trim().Should().Be("Search");
+    }
+
+    /// <summary>A module's rail, as the database's is one: the entries it hides (they come later, once its scope is known) and the badges it wears.</summary>
+    private sealed class FakeHostRail : IStudioModuleRail
+    {
+        public string ModuleKey => FakeHostModule.ModuleKey;
+
+        public HashSet<string> Hidden { get; } = [];
+
+        public Dictionary<string, StudioNavBadge> Badges { get; } = [];
+
+        public string Decorate(string href) => href;
+
+        public bool IsShown(StudioNavItem item) => !Hidden.Contains(item.Label);
+
+        public event Action? LinksChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public event Func<Task>? Changed;
+
+        public Task ChangedAsync() => Changed is { } handler ? handler() : Task.CompletedTask;
+
+        public ValueTask StartAsync(Microsoft.JSInterop.IJSRuntime js, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask<IReadOnlyDictionary<string, StudioNavBadge>?> ReadBadgesAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IReadOnlyDictionary<string, StudioNavBadge>?>(new Dictionary<string, StudioNavBadge>(Badges));
+    }
+
+    [Fact]
+    public async Task An_entry_that_appears_after_the_first_reveal_brings_the_active_item_into_view_again()
+    {
+        FakeHostRail module = new();
+        module.Hidden.Add("Host page");
+        using KafkaHarness harness = new(null, services => services.AddSingleton<IStudioModuleRail>(module), [], withHostModule: true);
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        IReadOnlyList<Bunit.JSRuntimeInvocation> Reveals() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"];
+
+        rail.WaitForAssertion(() => Reveals().Should().ContainSingle());
+        rail.FindAll("a.ms-nav-link").Should().NotContain(static x => x.TextContent.Trim() == "Host page");
+
+        // The module's scope becomes known and its entry is drawn above the active one: every row below it moves down.
+        module.Hidden.Clear();
+        await module.ChangedAsync();
+
+        rail.WaitForAssertion(() => rail.FindAll("a.ms-nav-link").Should().Contain(static x => x.TextContent.Trim() == "Host page"));
+        rail.WaitForAssertion(() => Reveals().Should().HaveCount(2, "the entries drawn changed, so the active one is brought into view again"));
+
+        // Nothing else changed: another render reveals nothing.
+        rail.Render();
+        Reveals().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task A_badge_that_appears_does_not_bring_the_active_item_into_view_again()
+    {
+        FakeHostRail module = new();
+        using KafkaHarness harness = new(null, services => services.AddSingleton<IStudioModuleRail>(module), [], withHostModule: true);
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        IReadOnlyList<Bunit.JSRuntimeInvocation> Reveals() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"];
+
+        rail.WaitForAssertion(() => Reveals().Should().ContainSingle());
+
+        module.Badges[FakeHostModule.BadgeKey] = new StudioNavBadge("3", "ms-nav-badge-danger", "3 findings");
+        await module.ChangedAsync();
+
+        rail.WaitForAssertion(() => rail.Find(".ms-nav-badge").TextContent.Trim().Should().Be("3"));
+
+        // A render on the renderer's own thread settles whatever the badge's render left to do before the count is read.
+        rail.Render();
+        Reveals().Should().ContainSingle("a badge changes no row of the rail");
     }
 
     [Fact]

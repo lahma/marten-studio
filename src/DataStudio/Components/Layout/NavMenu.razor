@@ -164,7 +164,10 @@
     /// <summary>The rail's own scroll box (<c>.ms-sidebar-inner</c>): what <c>martenStudio.scroll.revealWithin</c> scrolls, and nothing above it.</summary>
     private ElementReference railElement;
 
-    /// <summary>The page the rail last brought its active item into view for, so a render that is not a navigation never moves the rail under the visitor.</summary>
+    /// <summary>
+    /// What the rail last brought its active item into view for: the page, and the entries drawn when it did (<see cref="DrawnEntries" />). A render
+    /// that changes neither - a badge poll, a visitor's click on an entry already in view - never moves the rail under the visitor.
+    /// </summary>
     private string? revealedFor;
 
     /// <summary>What the rail marks as active (<see cref="NavClass" />), and what is brought into view.</summary>
@@ -208,16 +211,25 @@
     /// comes after a long one, or the shell's Activity page under the last of them, was otherwise out of view, with nothing marked.
     /// The helper scrolls the rail alone and only as far as needed (<c>block: 'nearest'</c>), does nothing for a rail that fits its box, and
     /// leaves an entry already in view where it is, so a visitor who has scrolled the rail and then clicks an entry in view finds it still.
+    /// Once more whenever the entries drawn change after that (an entry or a section appears or goes, or the module's links differ): the database's
+    /// Tenants entry is drawn only once its scope is known, which can be after the first reveal, and pushes the entries below it down a row. A
+    /// badge never counts: it changes no row.
     /// </summary>
     private async Task RevealActiveAsync()
     {
         string? page = currentRelativePath;
-        if (disposed || page is null || string.Equals(revealedFor, page, StringComparison.Ordinal))
+        if (disposed || page is null)
         {
             return;
         }
 
-        revealedFor = page;
+        string drawn = page + "\n" + DrawnEntries();
+        if (string.Equals(revealedFor, drawn, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        revealedFor = drawn;
 
         try
         {
@@ -227,6 +239,25 @@
         {
             // A closed circuit, or a browser that refused: the rail is still the rail, only not scrolled.
         }
+    }
+
+    /// <summary>
+    /// The sections and entries the rail draws now, with the link each carries (the module's decoration included): one line for each, in order. Two
+    /// renders that draw the same list draw the same rows, whatever their badges say.
+    /// </summary>
+    private string DrawnEntries()
+    {
+        System.Text.StringBuilder drawn = new();
+        foreach (StudioNavSection section in Shell.Navigation)
+        {
+            drawn.Append(section.Title).Append('\n');
+            foreach (StudioNavItem item in section.Items.Where(entry => Shown(section, entry)))
+            {
+                drawn.Append(item.Label).Append('\t').Append(item.Route is null ? string.Empty : Link(section, item.Route)).Append('\n');
+            }
+        }
+
+        return drawn.ToString();
     }
 
     private async Task TickAsync(CancellationToken cancellationToken)
