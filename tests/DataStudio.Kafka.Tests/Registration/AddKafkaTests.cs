@@ -80,7 +80,7 @@ public class AddKafkaTests
 
         module.PageAssemblies.Should().ContainSingle().Which.CompileTimeRoot.Should().Be("/kafka");
         module.HomeRoute.Should().Be("kafka");
-        module.Summary.Should().Be("Topics, record search and live tail of the application's clusters.");
+        module.Summary.Should().Be("Topics and records of the application's clusters.");
         module.ProductName.Should().Be("Kafka");
         module.CapabilityGroups.Should().ContainSingle().Which.Name.Should().Be("reads");
         module.CapabilityGroups.Single().Capabilities.Should().Equal(

@@ -41,7 +41,7 @@
                 }
                 else
                 {
-                    <span>@match.ValueKind, @match.ValueFormat, @KafkaDisplay.Bytes(match.ValueLength)</span>
+                    <span>@KafkaMatchView.ValueSummary(match)</span>
                 }
             </dd>
             @if (match.SchemaId is { } schema)

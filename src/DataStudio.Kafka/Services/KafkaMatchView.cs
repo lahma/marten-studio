@@ -343,6 +343,24 @@ internal static partial class KafkaMatchView
     /// <param name="field">The key.</param>
     public static string KeyDisplay(KafkaMatchField field) => field.IsRedacted || field.IsNull ? field.Display : Cut(field.Text ?? string.Empty, KeyCut);
 
+    /// <summary>
+    /// What the record page's Value row says of a value that is not a tombstone: its kind and its format, and its size - "JSON, 1.2 KiB". The kind
+    /// and the format are said once when they are the same word (compared without case), as they are for JSON and for text, and both when they
+    /// differ ("ConfluentWireFormat, Avro (schema 7), 40 B").
+    /// </summary>
+    /// <param name="match">The match.</param>
+    public static string ValueSummary(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        string kind = match.ValueKind.ToString();
+        string size = KafkaDisplay.Bytes(match.ValueLength);
+
+        return string.Equals(kind, match.ValueFormat, StringComparison.OrdinalIgnoreCase)
+            ? match.ValueFormat + ", " + size
+            : kind + ", " + match.ValueFormat + ", " + size;
+    }
+
     /// <summary>The Type column: the CloudEvents <c>type</c> when present and unmasked, else Wolverine's <c>message-type</c> header when present and unmasked, else the value's format.</summary>
     /// <param name="match">The match.</param>
     public static string TypeOf(KafkaMatch match)
