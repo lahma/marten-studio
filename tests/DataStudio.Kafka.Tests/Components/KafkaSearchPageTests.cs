@@ -239,8 +239,16 @@ public class KafkaSearchPageTests
         page.WaitForAssertion(() => page.FindAll(".ms-k-absolute select option").Should().HaveCount(2));
         string[] labels = [.. page.FindAll(".ms-k-absolute select option").Select(static x => x.TextContent.Trim())];
         labels[0].Should().Be("UTC");
-        labels[1].Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+0[23]:00\)$", "an IANA id and the offset, never FLE Standard Time or the offset alone");
         labels[1].Should().NotContain("Standard Time");
+
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(stored, out TimeZoneInfo? _) || !TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        {
+            // A host that does not know the stored id, or cannot convert a Windows id at all (a GitHub Ubuntu runner is one), offers the zone it
+            // falls back to: which one is the host's, so only "never a Windows id" is held there.
+            return;
+        }
+
+        labels[1].Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+0[23]:00\)$", "an IANA id and the offset, never FLE Standard Time or the offset alone");
     }
 
     [Fact]
