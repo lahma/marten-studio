@@ -325,6 +325,12 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
     /// <summary>The section's sentence for a failure, and the log line: Debug for an expected state, 9430 at the throttle's level otherwise.</summary>
     private string Failure(Exception exception, HealthCheckContext context, string section)
     {
+        // Aurora's replica status read where the studio has no schema to call Aurora's functions in (issue #81): a sentence, and nothing to log.
+        if (exception is HealthCheckUnavailableException { Message: PostgresServerFacts.AuroraFunctionsNotFound } notFound)
+        {
+            return notFound.Message;
+        }
+
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
 
         string? expected = postgres?.SqlState switch
