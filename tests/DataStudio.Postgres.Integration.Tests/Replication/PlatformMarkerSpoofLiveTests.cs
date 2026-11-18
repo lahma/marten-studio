@@ -92,7 +92,7 @@ public class PlatformMarkerSpoofLiveTests
         }
 
         // The platform itself, read the way every check reads it.
-        PostgresPlatform platform = await host.CircuitAsync("admin", async services =>
+        PostgresServerFacts facts = await host.CircuitAsync("admin", async services =>
         {
             ResolvedSource resolved = await services.GetRequiredService<StudioSourceResolver>().ResolveAsync(new StudioScope("default", "default", null), null, Token);
             await using HealthConnection connection = new(resolved.Target);
@@ -106,10 +106,11 @@ public class PlatformMarkerSpoofLiveTests
                 new HealthSweepMemo(),
                 Token);
 
-            return (await PostgresServerFacts.ReadAsync(context, Token)).Platform;
+            return await PostgresServerFacts.ReadAsync(context, Token);
         });
 
-        platform.Kind.Should().Be(PostgresPlatformKind.SelfHosted, "no plant a role short of a superuser can make is a marker");
+        facts.Platform.Kind.Should().Be(PostgresPlatformKind.SelfHosted, "no plant a role short of a superuser can make is a marker");
+        facts.AuroraFunctionSchema.Should().BeNull("a function the owner planted is neither a marker nor a place Aurora's functions are ever called");
 
         bool planted = await ReplicationServer.Scalar<bool>(asOwner, "select exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version')");
         planted.Should().BeTrue("the owner's function is there; the detector must not count it");
@@ -201,6 +202,7 @@ public class PlatformMarkerSpoofLiveTests
         {
             await reader.ReadAsync(Token);
             markers = [.. MarkerColumns.Where(name => reader.GetBoolean(reader.GetOrdinal(name)))];
+            reader.IsDBNull(reader.GetOrdinal("aurora_schema")).Should().BeTrue("no schema is named for Aurora's functions on a server nothing marks");
         }
 
         await transaction.RollbackAsync(Token);

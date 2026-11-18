@@ -145,14 +145,16 @@ internal sealed class AuroraFactsReader : IAuroraFactsReader
             return new AuroraSessionWaits(context.Now, []);
         }
 
-        var names = AuroraQueries.WaitNames();
+        string schema = server.AuroraFunctionSchema ?? throw new HealthCheckUnavailableException(PostgresServerFacts.AuroraFunctionsNotFound);
+
+        var names = AuroraQueries.WaitNames(schema);
         IReadOnlyList<(string? Events, string? Types)> named = await context.Sql
             .QueryAsync(names, static reader => (reader.IsDBNull(0) ? null : reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)), cancellationToken)
             .ConfigureAwait(false);
 
         WaitNames waitNames = named.Count == 0 ? WaitNames.FromJson(null, null) : WaitNames.FromJson(named[0].Events, named[0].Types);
 
-        var sessions = AuroraQueries.BackendWaits();
+        var sessions = AuroraQueries.BackendWaits(schema);
         IReadOnlyList<AuroraSession> rows = await context.Sql
             .QueryAsync(
                 sessions,
@@ -202,6 +204,12 @@ internal sealed class AuroraFactsReader : IAuroraFactsReader
     /// <summary>A section's sentence for a failure, and the log line: Debug for an expected state, 9501 at the throttle's level otherwise.</summary>
     private string Failure(Exception exception, HealthCheckContext context, string section)
     {
+        // A read that has nowhere to call Aurora's functions says why in a sentence, and calls nothing: no SQLSTATE, and nothing to log.
+        if (exception is HealthCheckUnavailableException { Message: PostgresServerFacts.AuroraFunctionsNotFound } notFound)
+        {
+            return notFound.Message;
+        }
+
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
 
         string? expected = postgres?.SqlState switch

@@ -115,7 +115,7 @@ internal sealed record AuroraWaitProfile(DateTimeOffset ReadAt, IReadOnlyList<Au
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var query = AuroraQueries.SystemWaits();
+        var query = AuroraQueries.SystemWaits(await AuroraFunctions.SchemaAsync(context).ConfigureAwait(false));
         IReadOnlyList<(string? Waits, string? Events, string? Types)> rows = await context.Sql
             .QueryAsync(query, static reader => (Text(reader, 0), Text(reader, 1), Text(reader, 2)), cancellationToken)
             .ConfigureAwait(false);
@@ -233,7 +233,7 @@ internal sealed record AuroraDatabaseActivity(DateTimeOffset ReadAt, long Commit
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var query = AuroraQueries.Database();
+        var query = AuroraQueries.Database(await AuroraFunctions.SchemaAsync(context).ConfigureAwait(false));
         IReadOnlyList<(long Commits, string? Latency, string? Dml)> rows = await context.Sql
             .QueryAsync(
                 query,

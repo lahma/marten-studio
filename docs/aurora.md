@@ -24,8 +24,18 @@ name. A `public.aurora_version()` a database owner made does not turn a server o
 (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`), because Aurora's platform decides which checks stand down: the
 function counts only when a superuser owns it, and a setting `pg_settings` lists is the server's own, never a role's.
 
-Once the platform read has said Aurora, and only then, the studio calls Aurora's functions - each by its `pg_catalog`
-name, so a function of the same name in another schema is never the one read:
+Once the platform read has said Aurora, and only then, the studio calls Aurora's functions - each qualified by the schema
+the platform read found (quoted through the SQL builder, never joined into a statement as text): `pg_catalog`, where Aurora
+keeps them, or, when the `aurora_version()` a superuser owns is in another schema, that schema. The schema is only ever one
+that **only a superuser can create in**: owned by a superuser, with no `CREATE` for `PUBLIC` or for any role that is not one.
+Where a database owner can also put a function (the `public` schema, say), a function of the same name they made would be
+called as the studio's own role, so the studio calls nothing there. A function a database owner planted in `public` is
+neither a marker nor ever called (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`).
+
+A server that Aurora's settings alone mark (no `aurora_version()` is visible, or the one that is sits in a schema a database
+owner could write to) has no schema to call. Its Aurora sections say so in a sentence ("This server is Aurora by its
+settings, but no aurora_version() function that only a superuser could have made is visible to the studio, so Aurora's own
+functions are not called."), not a SQLSTATE:
 
 | Function | What the studio reads | Where it is shown |
 |---|---|---|
@@ -245,8 +255,9 @@ These need an AWS account, or a page AWS has not written:
 ## Testing
 
 `DataStudio.Postgres.Integration.Tests` has VERS's Aurora shim (`Versions/AuroraShim.cs`): Aurora's functions written as plain
-SQL in `pg_catalog`, from AWS's signatures, in a database of their own on the version matrix's PostgreSQL 17 - never one a
-self-hosted test reads, because the shim makes its database an Aurora server for the detector. `Aurora/AuroraShimLiveTests`
-proves the instance, R03 `aurora-reader` firing and quiet, the wait section, a failover between two sweeps, the
-not-applicable checks, C03's remedy with and without a capacity source, the no-lock and no-DDL reads, and that no role short
-of a superuser can plant an Aurora marker.
+SQL in `pg_catalog`, or in a schema of its own (`AuroraShim.ApplyInSchemaAsync`), from AWS's signatures, in a database of their own
+on the version matrix's PostgreSQL 17 - never one a self-hosted test reads, because the shim makes its database an Aurora server
+for the detector. `Aurora/AuroraShimLiveTests` proves the instance, R03 `aurora-reader` firing and quiet, the wait section, the
+same reads against functions in a schema of their own, that nothing is called in a schema a role short of a superuser can create
+in (the sections say why in a sentence), a failover between two sweeps, the not-applicable checks, C03's remedy with and without a
+capacity source, the no-lock and no-DDL reads, and that no role short of a superuser can plant an Aurora marker.

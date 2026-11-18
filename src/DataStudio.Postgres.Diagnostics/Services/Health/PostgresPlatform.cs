@@ -206,6 +206,20 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
     public string? InstanceNotRead { get; init; }
 
     /// <summary>
+    /// The schema Aurora's own functions are called in on this server (<c>pg_catalog</c>, or where a superuser keeps its <c>aurora_version()</c> when that is
+    /// a schema only a superuser can create in - issue #81), or <see langword="null" /> where there is none: a server Aurora's settings alone mark, or whose
+    /// <c>aurora_version()</c> is in a schema a database owner could also have put a function in. Nothing of Aurora's is called then.
+    /// </summary>
+    public string? AuroraFunctionSchema { get; init; }
+
+    /// <summary>
+    /// What an Aurora section says where the studio has no schema to call Aurora's functions in (<see cref="AuroraFunctionSchema" />): a sentence in
+    /// place of the SQLSTATE of a call that was never made.
+    /// </summary>
+    public const string AuroraFunctionsNotFound =
+        "This server is Aurora by its settings, but no aurora_version() function that only a superuser could have made is visible to the studio, so Aurora's own functions are not called.";
+
+    /// <summary>
     /// What the studio hands a host's <see cref="IPostgresCapacitySource" />, and the API (D31): the public shape of these
     /// facts.
     /// </summary>
@@ -280,6 +294,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         {
             InRecovery = row.InRecovery,
             StartedAt = row.StartedAt,
+            AuroraFunctionSchema = platform.Kind == PostgresPlatformKind.AmazonAurora ? row.AuroraSchema : null,
         };
 
         return platform.Kind == PostgresPlatformKind.AmazonAurora
@@ -299,7 +314,12 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         ILogger? logger,
         CancellationToken cancellationToken)
     {
-        var query = AuroraQueries.Instance(identifier);
+        if (facts.AuroraFunctionSchema is not { } schema)
+        {
+            return facts with { InstanceNotRead = AuroraFunctionsNotFound };
+        }
+
+        var query = AuroraQueries.Instance(schema, identifier);
 
         try
         {
@@ -334,10 +354,11 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         new PostgresPlatformMarkers(reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(10), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6)),
         reader.GetBoolean(7),
         reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
-        reader.GetBoolean(9));
+        reader.GetBoolean(9),
+        reader.IsDBNull(11) ? null : reader.GetString(11));
 
     /// <summary>One row of <see cref="HealthServerQueries.Platform" />.</summary>
-    private sealed record PlatformRow(int Number, string Version, PostgresPlatformMarkers Markers, bool InRecovery, DateTimeOffset? StartedAt, bool InstanceFunction);
+    private sealed record PlatformRow(int Number, string Version, PostgresPlatformMarkers Markers, bool InRecovery, DateTimeOffset? StartedAt, bool InstanceFunction, string? AuroraSchema);
 }
 
 /// <summary>Where a store database's data source connects: its hosts and ports, read from its connection string.</summary>
