@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Connection;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
 
@@ -94,5 +95,72 @@ public sealed class NpgsqlPoolLiveTests(PostgresFixture postgres)
         }
 
         observer.IsListening.Should().BeFalse("the listener lives only while a sweep or a page holds a lease");
+    }
+
+    /// <summary>
+    /// Issue #86: a data source the host gave a name (<c>NpgsqlDataSourceBuilder.Name</c>) and registered with <c>AddDataSource</c>
+    /// reports its pool to Npgsql's meter under that name, and Sessions, the Connection page and C01 find it there.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_named_data_sources_pool_is_found_by_its_name()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_named_pool"], Token);
+
+        NpgsqlDataSourceBuilder builder = new(new NpgsqlConnectionStringBuilder(owned[0])
+        {
+            MaxPoolSize = 5,
+            ApplicationName = "DataStudio.Postgres.Tests.named",
+        }.ConnectionString)
+        {
+            Name = "reports-pool",
+        };
+
+        await using NpgsqlDataSource source = builder.Build();
+
+        TestAuthenticationStateProvider visitor = new();
+        visitor.SignIn("operator");
+
+        ServiceCollection services = new();
+        services.AddLogging();
+        services.AddAuthorization();
+        services.AddSingleton<AuthenticationStateProvider>(visitor);
+        services.AddDataStudio().AddPostgres(options => options.AddDataSource("reports", _ => source));
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        SessionPoolObserver observer = provider.GetRequiredService<SessionPoolObserver>();
+        StudioScope scope = new("reports", "reports", null);
+
+        await using NpgsqlConnection first = await source.OpenConnectionAsync(Token);
+        await using NpgsqlConnection second = await source.OpenConnectionAsync(Token);
+
+        // Sessions' panel: "n of max in use", not "not matched to this database".
+        await using (AsyncServiceScope circuit = provider.CreateAsyncScope())
+        {
+            using SessionPoolLease lease = observer.Lease();
+
+            SessionActivitySummary summary = await circuit.ServiceProvider.GetRequiredService<ISessionActivityService>()
+                .GetSummaryAsync(scope, Token);
+
+            summary.Refusal.Should().Be(DatabaseRefusal.None, summary.Reason);
+            summary.Pool.Should().Be(new SessionPoolSummary(true, 2, summary.Pool?.Idle, 5, true), "the pool is found by the data source's name");
+
+            // The Connection page: the same pool's usage beside its settings.
+            ConnectionPageView page = await circuit.ServiceProvider.GetRequiredService<IConnectionInsightService>().GetAsync(scope, Token);
+
+            page.Refusal.Should().Be(ConnectionRefusal.None, page.Reason);
+            page.Header.Single(static x => x.Label == "Pool").Value.Should().StartWith("max 5 · 2 in use, ");
+        }
+
+        // C01, as the Health page's report runs it: checked, not "not among the pools Npgsql reports".
+        await using (AsyncServiceScope circuit = provider.CreateAsyncScope())
+        {
+            HealthReport report = await circuit.ServiceProvider.GetRequiredService<IHealthService>()
+                .GetReportAsync(scope, HealthReportRequest.Regular, Token);
+
+            report.Refusal.Should().Be(HealthRefusal.None, report.Reason);
+
+            HealthCheckStatus c01 = report.Checks.Should().ContainSingle(static x => x.Code == "C01").Subject;
+            c01.Outcome.Should().Be(HealthCheckOutcome.Checked, c01.Problem);
+        }
     }
 }

@@ -1,3 +1,4 @@
+using DataStudio.Postgres.Services.Connection;
 using DataStudio.Postgres.Services.Sources;
 
 using Npgsql;
@@ -68,15 +69,20 @@ internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, strin
     /// Whether <paramref name="poolName" /> - Npgsql's pool name tag, <c>pool.name</c> (from Npgsql 10
     /// <c>db.client.connection.pool.name</c>) - is <paramref name="database" />'s
     /// pool. Npgsql names a data source after its connection string unless the host gave it a name of its own
-    /// (<c>NpgsqlDataSourceBuilder.Name</c>, which Npgsql keeps internal); such a pool cannot be matched, and
-    /// C01 says so rather than guessing.
+    /// (<c>NpgsqlDataSourceBuilder.Name</c>, which Npgsql keeps internal), and reports its pool under that name (issue #86).
     /// </summary>
+    /// <remarks>
+    /// The data source's own name when it has one, and its connection string otherwise - the way C18 identifies a named pool since #56,
+    /// through the one reader of the name (<see cref="NamedPoolIdentities.NameOf" />), applied to the data source the studio reads
+    /// through. Two data sources with one connection string and different names are two pools, and are told apart by it. A name that
+    /// cannot be read (a Npgsql that renamed the property) is the connection string, which is what Npgsql reports for an unnamed one.
+    /// </remarks>
     public static bool IsPoolOf(IStudioDatabase database, string poolName)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(poolName);
 
         return database.DataSource is { } dataSource
-            && string.Equals(dataSource.ConnectionString, poolName, StringComparison.Ordinal);
+            && string.Equals(NamedPoolIdentities.NameOf(dataSource) ?? dataSource.ConnectionString, poolName, StringComparison.Ordinal);
     }
 }

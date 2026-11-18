@@ -145,8 +145,9 @@ the shapes of Npgsql's own instruments, so a later Npgsql that changes one fails
 and read a real pool - C01's report and the Sessions panel - at the Npgsql floor and at the latest-tested Npgsql 10.
 
 The pool is matched to the database by its pool name tag, which is the data source's connection string unless the
-host named the data source (`NpgsqlDataSourceBuilder.Name`); a named pool cannot be matched, and the check says
-so instead of guessing. Two pools built from one connection string - the host's own `AddNpgsqlDataSource(cs)`
+host named the data source (`NpgsqlDataSourceBuilder.Name`), and then its name - the one the studio reads through, so
+Sessions' pool panel, the Connection page's pool line and this check find a named data source's pool too; a pool neither
+finds is not guessed at, and the check says so. Two pools built from one connection string - the host's own `AddNpgsqlDataSource(cs)`
 beside Marten's, or `new NpgsqlConnection(cs)` with Marten's connection string, which Npgsql pools on its own -
 report under the same name: the observer counts the pools behind each
 name, and when they report different numbers the check says it cannot tell which is Marten's and judges nothing

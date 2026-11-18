@@ -64,8 +64,8 @@ internal sealed record PoolFacts(
 /// <para>
 /// The pool is matched to the database by Npgsql's pool name tag (<c>pool.name</c>, from Npgsql 10
 /// <c>db.client.connection.pool.name</c>), which is the data source's connection string unless the host named the
-/// data source; a named one cannot be matched, and the check says so (<see cref="HealthCheckUnavailableException" />)
-/// rather than guessing. The caveat names the instruments that were read, so a host on Npgsql 9 reads what it always
+/// data source, and then its name (issue #86); a pool the data source's name or connection string does not find is not
+/// guessed at, and the check says so (<see cref="HealthCheckUnavailableException" />). The caveat names the instruments that were read, so a host on Npgsql 9 reads what it always
 /// has.
 /// </para>
 /// </remarks>
@@ -103,9 +103,8 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
 
         NpgsqlPoolReading? mine = pools.FirstOrDefault(x => DatabasePoolSettings.IsPoolOf(context.Target, x.PoolName))
             ?? throw new HealthCheckUnavailableException(
-                "This database's Npgsql pool is not among the pools Npgsql reports in this process - most likely its data "
-                + "source was given a name of its own (NpgsqlDataSourceBuilder.Name), which Npgsql reports instead of the "
-                + "connection string the studio matches on. The pool is not judged.");
+                "This database's Npgsql pool is not among the pools Npgsql reports in this process, by its data source's name "
+                + "(NpgsqlDataSourceBuilder.Name) or its connection string. The pool is not judged.");
 
         if (mine.IsAmbiguous)
         {
