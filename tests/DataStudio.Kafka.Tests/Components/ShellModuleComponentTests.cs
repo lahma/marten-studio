@@ -276,11 +276,15 @@ public class ShellModuleComponentTests
         using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
-        IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "Europe/Helsinki"));
+        // The machine's own zone, under the id the helper lists it by: what that is depends on the host's operating system and region, so the test
+        // asks the helper (a Windows host outside Finland lists FLE Standard Time as Europe/Kiev, not Europe/Helsinki) and holds the rest to it.
+        string own = DataStudio.Services.StudioTimeZones.IanaId(TimeZoneInfo.Local.Id, DataStudio.Services.StudioTimeZones.CurrentRegion);
 
-        IElement helsinki = menu.FindAll("#ms-timezone-select option").Single(static x => x.GetAttribute("value") == "Europe/Helsinki");
-        helsinki.TextContent.Trim().Should().MatchRegex(@"^Europe/Helsinki \(UTC\+0[23]:00\)$");
-        helsinki.HasAttribute("selected").Should().BeTrue();
+        IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, own));
+
+        IElement listed = menu.FindAll("#ms-timezone-select option").Single(x => x.GetAttribute("value") == own);
+        listed.TextContent.Trim().Should().MatchRegex("^" + System.Text.RegularExpressions.Regex.Escape(own) + @"( \(UTC([+-]\d\d:\d\d)?\))?$", "the id, and the offset beside it unless the id is UTC itself");
+        listed.HasAttribute("selected").Should().BeTrue();
 
         string[] values = [.. menu.FindAll("#ms-timezone-select option").Select(static x => x.GetAttribute("value")!)];
         values.Should().OnlyHaveUniqueItems().And.Contain("UTC");
