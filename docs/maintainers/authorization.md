@@ -6,7 +6,9 @@ This is the full text of D4 and D5 (see also D27's *Reach, not scope* in sql-and
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a
 read-only browser; `marten.Capabilities = MartenCapabilities.All()` is the one-line, greppable opt-in, and
-every disabled control names the exact property a host would have to set. This is Hangfire's
+a disabled control names the exact property a host would have to set. A page reached by its address for a feature that is off says
+only that it is not available here (the Kafka module's pages since #74, the SQL console since #88); the capability chip names the
+property there. This is Hangfire's
 GHSA-7rq6-7gv8-c37h applied to the write axis: the dashboard that is dangerous by default is the one
 someone maps without reading the docs. Each module has its own class: `MartenCapabilities`, `PostgresCapabilities` and
 `KafkaCapabilities`. `PostgresCapabilities` has four, all reads authorized like writes

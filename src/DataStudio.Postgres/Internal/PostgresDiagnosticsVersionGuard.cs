@@ -69,8 +69,8 @@ internal static class PostgresDiagnosticsVersionGuard
     /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">DataStudio.Postgres.Diagnostics is missing, or is another version.</exception>
-    internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics) =>
-        EnsureAssembly(DiagnosticsAssemblyName, postgresStudio, loadDiagnostics);
+    internal static void Ensure(Assembly postgresAssembly, Func<Assembly> loadDiagnostics) =>
+        EnsureAssembly(DiagnosticsAssemblyName, postgresAssembly, loadDiagnostics);
 
     /// <summary>
     /// The whole check, with the three assemblies supplied - a seam the tests use: the engine first, then the shell
@@ -80,20 +80,20 @@ internal static class PostgresDiagnosticsVersionGuard
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
-    internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics, Func<Assembly> loadShell)
+    internal static void Ensure(Assembly postgresAssembly, Func<Assembly> loadDiagnostics, Func<Assembly> loadShell)
     {
-        EnsureAssembly(DiagnosticsAssemblyName, postgresStudio, loadDiagnostics);
-        EnsureAssembly(ShellAssemblyName, postgresStudio, loadShell);
+        EnsureAssembly(DiagnosticsAssemblyName, postgresAssembly, loadDiagnostics);
+        EnsureAssembly(ShellAssemblyName, postgresAssembly, loadShell);
     }
 
     /// <summary>One required assembly: loaded, and the same build as DataStudio.Postgres' own.</summary>
     /// <param name="name">The required package, <c>DataStudio.Postgres.Diagnostics</c> or <c>DataStudio</c>.</param>
     /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
-    private static void EnsureAssembly(string name, Assembly postgresStudio, Func<Assembly> load)
+    private static void EnsureAssembly(string name, Assembly postgresAssembly, Func<Assembly> load)
     {
-        string? postgresStudioVersion = InformationalVersion(postgresStudio);
-        string required = ReleaseVersion(postgresStudioVersion);
+        string? postgresVersion = InformationalVersion(postgresAssembly);
+        string required = ReleaseVersion(postgresVersion);
         Assembly loaded;
 
         try
@@ -112,16 +112,16 @@ internal static class PostgresDiagnosticsVersionGuard
         }
 
         string? loadedVersion = InformationalVersion(loaded);
-        bool bothRelease = IsReleaseBuild(postgresStudio) && IsReleaseBuild(loaded);
+        bool bothRelease = IsReleaseBuild(postgresAssembly) && IsReleaseBuild(loaded);
 
-        if (SameBuild(postgresStudioVersion, loadedVersion, bothRelease))
+        if (SameBuild(postgresVersion, loadedVersion, bothRelease))
         {
             return;
         }
 
         // The commits were compared: name them, since the release version may well be the same on both sides.
-        bool commits = bothRelease && HasBuildMetadata(postgresStudioVersion) && HasBuildMetadata(loadedVersion);
-        string shownRequired = commits ? postgresStudioVersion! : required;
+        bool commits = bothRelease && HasBuildMetadata(postgresVersion) && HasBuildMetadata(loadedVersion);
+        string shownRequired = commits ? postgresVersion! : required;
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
@@ -137,13 +137,13 @@ internal static class PostgresDiagnosticsVersionGuard
     /// must match: a Debug build is a development tree, where an IDE's incremental build after a commit recompiles
     /// DataStudio.Postgres with the new commit and leaves an unchanged engine with the old one, and that is not a skew.
     /// </summary>
-    /// <param name="postgresStudio">DataStudio.Postgres' informational version.</param>
-    /// <param name="diagnostics">DataStudio.Postgres.Diagnostics' informational version.</param>
+    /// <param name="postgresVersion">DataStudio.Postgres' informational version.</param>
+    /// <param name="loadedVersion">The loaded assembly's informational version: the engine's, or the shell's.</param>
     /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
-    internal static bool SameBuild(string? postgresStudio, string? diagnostics, bool bothRelease) =>
-        bothRelease && HasBuildMetadata(postgresStudio) && HasBuildMetadata(diagnostics)
-            ? string.Equals(postgresStudio, diagnostics, StringComparison.Ordinal)
-            : string.Equals(ReleaseVersion(postgresStudio), ReleaseVersion(diagnostics), StringComparison.Ordinal);
+    internal static bool SameBuild(string? postgresVersion, string? loadedVersion, bool bothRelease) =>
+        bothRelease && HasBuildMetadata(postgresVersion) && HasBuildMetadata(loadedVersion)
+            ? string.Equals(postgresVersion, loadedVersion, StringComparison.Ordinal)
+            : string.Equals(ReleaseVersion(postgresVersion), ReleaseVersion(loadedVersion), StringComparison.Ordinal);
 
     /// <summary>Whether an assembly was built in the Release configuration, as every pack of the packages is.</summary>
     /// <param name="assembly">The assembly.</param>

@@ -59,7 +59,7 @@ internal static class PostgresDescriptor
             new StudioHealthCheckAssembly(typeof(StudioHome).Assembly),
         ],
         Navigation = Navigation,
-        Summary = "Health, queries, tables and sessions of the application's data sources.",
+        Summary = "The health, storage and structure of the application's PostgreSQL databases.",
         QueryComponent = typeof(PostgresQuery),
         SourceQueryParameter = "store",
         SourceNoun = "data source",
