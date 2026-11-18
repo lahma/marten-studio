@@ -145,7 +145,9 @@ public class KafkaSearchTextTests
 
         // What a host can convert depends on its globalization data, and the two forms are independent: a GitHub Ubuntu runner converts a Windows
         // id for a region it is given and none without a region. Where a form is missing the label is the offset alone, never the Windows id.
-        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? _))
+        // A conversion counts only when the host also knows the zone it names (the runner converts with no region to Europe/Kiev, a name its zone
+        // database no longer carries).
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? forFinland) && TimeZoneInfo.TryFindSystemTimeZoneById(forFinland, out TimeZoneInfo? _))
         {
             KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "the region picks Helsinki among the zones FLE Standard Time stands for");
         }
@@ -154,7 +156,7 @@ public class KafkaSearchTextTests
             KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("UTC+02:00");
         }
 
-        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? byDefault) && TimeZoneInfo.TryFindSystemTimeZoneById(byDefault, out TimeZoneInfo? _))
         {
             KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+02:00\)$", "with no region the id's default IANA zone, still never the Windows id");
             KafkaSearchText.ZoneLabel(windowsStyle, at, "XX").Should().Contain("/", "a region the conversion does not know falls back to the id's default");

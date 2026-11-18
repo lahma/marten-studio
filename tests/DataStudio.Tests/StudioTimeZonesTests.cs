@@ -17,7 +17,7 @@ public class StudioTimeZonesTests
         {
             StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("Europe/Helsinki", "the region picks Helsinki among the zones the id stands for");
 
-            if (TimeZoneInfo.TryConvertWindowsIdToIanaId("Pacific Standard Time", "FI", out string? pacific))
+            if (TimeZoneInfo.TryConvertWindowsIdToIanaId("Pacific Standard Time", "FI", out string? pacific) && TimeZoneInfo.TryFindSystemTimeZoneById(pacific, out TimeZoneInfo? _))
             {
                 StudioTimeZones.IanaId("Pacific Standard Time", "FI").Should().Be(pacific).And.Be("America/Los_Angeles");
             }
@@ -38,9 +38,13 @@ public class StudioTimeZonesTests
         }
     }
 
-    private static bool ConvertsForARegion => TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? _);
+    // A conversion counts only when the host also knows the zone it names: a GitHub Ubuntu runner converts FLE Standard Time with no region to
+    // Europe/Kiev, an old name its zone database no longer carries, and the studio then keeps the id it was given.
+    private static bool ConvertsForARegion =>
+        TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? iana) && TimeZoneInfo.TryFindSystemTimeZoneById(iana, out TimeZoneInfo? _);
 
-    private static bool ConvertsWithoutARegion => TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _);
+    private static bool ConvertsWithoutARegion =>
+        TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? iana) && TimeZoneInfo.TryFindSystemTimeZoneById(iana, out TimeZoneInfo? _);
 
     [Fact]
     public void An_IANA_id_is_kept_and_so_is_one_that_cannot_be_converted()
