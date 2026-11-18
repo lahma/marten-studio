@@ -10,19 +10,37 @@ public class StudioTimeZonesTests
     [Fact]
     public void A_Windows_id_is_converted_for_the_region_asked_and_for_its_default_without_one()
     {
-        if (!TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        // What a host can convert depends on its globalization data, and the two forms are independent: a GitHub Ubuntu runner converts a Windows
+        // id for a region it is given and none without a region; a host with no such data converts neither. Where a form is missing the id is
+        // kept, never an error.
+        if (ConvertsForARegion)
         {
-            // A host whose globalization data cannot convert a Windows id at all (a GitHub Ubuntu runner is one): the id is kept, never an error.
+            StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("Europe/Helsinki", "the region picks Helsinki among the zones the id stands for");
+
+            if (TimeZoneInfo.TryConvertWindowsIdToIanaId("Pacific Standard Time", "FI", out string? pacific))
+            {
+                StudioTimeZones.IanaId("Pacific Standard Time", "FI").Should().Be(pacific).And.Be("America/Los_Angeles");
+            }
+        }
+        else
+        {
             StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("FLE Standard Time");
-            StudioTimeZones.IanaId("FLE Standard Time", null).Should().Be("FLE Standard Time");
-            return;
         }
 
-        StudioTimeZones.IanaId("FLE Standard Time", "FI").Should().Be("Europe/Helsinki", "the region picks Helsinki among the zones the id stands for");
-        StudioTimeZones.IanaId("FLE Standard Time", "XX").Should().Contain("/").And.NotContain(" ", "a region with no mapping falls back to the id's default");
-        StudioTimeZones.IanaId("FLE Standard Time", null).Should().Contain("/").And.NotContain(" ");
-        StudioTimeZones.IanaId("Pacific Standard Time", "FI").Should().Be("America/Los_Angeles");
+        if (ConvertsWithoutARegion)
+        {
+            StudioTimeZones.IanaId("FLE Standard Time", "XX").Should().Contain("/").And.NotContain(" ", "a region with no mapping falls back to the id's default");
+            StudioTimeZones.IanaId("FLE Standard Time", null).Should().Contain("/").And.NotContain(" ");
+        }
+        else
+        {
+            StudioTimeZones.IanaId("FLE Standard Time", null).Should().Be("FLE Standard Time");
+        }
     }
+
+    private static bool ConvertsForARegion => TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? _);
+
+    private static bool ConvertsWithoutARegion => TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _);
 
     [Fact]
     public void An_IANA_id_is_kept_and_so_is_one_that_cannot_be_converted()
@@ -41,7 +59,8 @@ public class StudioTimeZonesTests
         TimeZoneInfo unknown = TimeZoneInfo.CreateCustomTimeZone("Studio Test Standard Time", TimeSpan.FromHours(-8), "Test", "Studio Test Standard Time");
 
         StudioTimeZones.Label(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), At, "FI").Should().Be("Europe/Helsinki (UTC+02:00)");
-        StudioTimeZones.Label(windowsStyle, At, "FI").Should().Be("Europe/Helsinki (UTC+02:00)");
+        StudioTimeZones.Label(windowsStyle, At, "FI").Should().Be(
+            ConvertsForARegion ? "Europe/Helsinki (UTC+02:00)" : "FLE Standard Time (UTC+02:00)", "a host that cannot convert the id names the zone by its own");
         StudioTimeZones.Label(unknown, At, "FI").Should().Be("Studio Test Standard Time (UTC-08:00)", "a list names a zone it cannot convert by its own id");
         StudioTimeZones.Label(TimeZoneInfo.Utc, At, "FI").Should().Be("UTC");
     }
