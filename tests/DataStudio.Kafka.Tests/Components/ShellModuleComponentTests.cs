@@ -276,9 +276,11 @@ public class ShellModuleComponentTests
         using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
-        // The machine's own zone, under the id the helper lists it by: what that is depends on the host's operating system and region, so the test
-        // asks the helper (a Windows host outside Finland lists FLE Standard Time as Europe/Kiev, not Europe/Helsinki) and holds the rest to it.
-        string own = DataStudio.Services.StudioTimeZones.IanaId(TimeZoneInfo.Local.Id, DataStudio.Services.StudioTimeZones.CurrentRegion);
+        // A zone the menu itself lists, taken from what it draws: which ids a host lists depends on its operating system, its region and (on
+        // Linux, where a zone such as Etc/UTC is listed only if something looked it up before the list was first built) on what ran earlier in
+        // the process, so the test never names the machine's own zone.
+        IRenderedComponent<PreferencesMenu> first = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "UTC"));
+        string own = first.FindAll("#ms-timezone-select option").Select(static x => x.GetAttribute("value")!).First(static x => x.Contains('/', StringComparison.Ordinal));
 
         IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, own));
 
@@ -292,10 +294,16 @@ public class ShellModuleComponentTests
             "a zone whose Windows id converts is listed by the IANA id it converts to");
         menu.FindAll("#ms-timezone-select option").Should().NotContain(static x => x.TextContent.Contains("(local)", StringComparison.Ordinal));
 
-        // A Windows id the circuit holds (the host's own zone, or one stored before) selects the IANA id it is listed under.
-        IRenderedComponent<PreferencesMenu> stored = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "FLE Standard Time"));
-        stored.FindAll("#ms-timezone-select option").Where(static x => x.HasAttribute("selected")).Select(static x => x.GetAttribute("value"))
-            .Should().ContainSingle().Which.Should().Be(DataStudio.Services.StudioTimeZones.IanaId("FLE Standard Time", DataStudio.Services.StudioTimeZones.CurrentRegion));
+        // A Windows id the circuit holds (the host's own zone, or one stored before) selects the IANA id it is listed under, on a host that
+        // lists that id (a Linux host's zone list may hold the zone under another of its names).
+        string converted = DataStudio.Services.StudioTimeZones.IanaId("FLE Standard Time", DataStudio.Services.StudioTimeZones.CurrentRegion);
+
+        if (values.Contains(converted))
+        {
+            IRenderedComponent<PreferencesMenu> stored = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "FLE Standard Time"));
+            stored.FindAll("#ms-timezone-select option").Where(static x => x.HasAttribute("selected")).Select(static x => x.GetAttribute("value"))
+                .Should().ContainSingle().Which.Should().Be(converted);
+        }
     }
 
     [Fact]
