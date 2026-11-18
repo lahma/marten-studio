@@ -96,6 +96,22 @@ public class KafkaRecordDetailTests
     }
 
     [Fact]
+    public async Task A_cloud_event_with_no_data_reads_its_kind_its_format_and_its_envelopes_size()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", """{"specversion":"1.0","type":"order.placed","source":"/orders","id":"e-1"}""", ("content-type", "application/cloudevents+json"));
+
+        KafkaMatch noData = await ReadAsync(rig, "orders", 0);
+
+        noData.ValueKind.Should().Be(DataStudio.Kafka.Core.Decoding.KafkaValueKind.Empty);
+        noData.ValueLength.Should().BeGreaterThan(0, "the length is the envelope's, not zero");
+        string row = ValueRow(Render(rig, noData));
+        row.Should().Be("Empty, CloudEvents (structured), no data, " + noData.ValueLength + " B", "the format says more than the kind, so both are said, as before the Empty special case");
+        KafkaMatchView.ValueSummary(noData).Should().Be(row);
+    }
+
+    [Fact]
     public async Task A_schema_registry_value_reads_by_the_name_a_person_uses_and_never_by_the_enum_identifier()
     {
         await using KafkaSearchRig rig = new();

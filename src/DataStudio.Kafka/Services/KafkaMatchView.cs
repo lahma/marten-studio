@@ -345,9 +345,12 @@ internal static partial class KafkaMatchView
 
     /// <summary>
     /// What the record page's Value row says of a value that is not a tombstone: its kind and its format, and its size - "JSON, 1.2 KiB". The kind
-    /// is said as a person reads it (never the enum's identifier), and once when the format begins with it, as for JSON ("JSON"), text and the
-    /// schema registry's framing ("Confluent wire format, schema id 7"); both when they differ ("JSON, CloudEvents 1.0 (structured), 40 B"). An empty
-    /// value is "Empty, 0 B": its format only repeats it. Never the value itself (D40): a kind, a format and a size.
+    /// is said once when the format begins with it, as for JSON ("JSON"), text, an empty value ("Empty, 0 B": its format only repeats it) and the
+    /// schema registry's framing, whose kind is said as "Confluent wire format" and not as the enum's identifier ("Confluent wire format, schema id 7,
+    /// 8 B"); and both when the format says more: "Json, CloudEvents (binary), JSON, 7 B" for a CloudEvent
+    /// (the kind is the enum's name, as it always was, but for the schema registry's), and "Empty, CloudEvents (structured), no data, 312 B" for one with no
+    /// data, whose size is its envelope's. Never the value itself (D40): a
+    /// kind, a format and a size.
     /// </summary>
     /// <param name="match">The match.</param>
     public static string ValueSummary(KafkaMatch match)
@@ -356,16 +359,17 @@ internal static partial class KafkaMatchView
 
         string size = KafkaDisplay.Bytes(match.ValueLength);
 
-        if (match.ValueKind == KafkaValueKind.Empty)
-        {
-            return "Empty, " + size;
-        }
-
         string kind = match.ValueKind switch
         {
             KafkaValueKind.ConfluentWireFormat => "Confluent wire format",
             var other => other.ToString(),
         };
+
+        // An empty value's own format ("Empty (0 bytes)") only repeats the kind and its zero size: the one case that reads shorter than the rule below.
+        if (match.ValueKind == KafkaValueKind.Empty && NamesTheKind(match.ValueFormat, kind))
+        {
+            return kind + ", " + size;
+        }
 
         return NamesTheKind(match.ValueFormat, kind)
             ? match.ValueFormat + ", " + size
