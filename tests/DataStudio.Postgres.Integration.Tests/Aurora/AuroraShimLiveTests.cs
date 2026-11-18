@@ -433,6 +433,33 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
     }
 
     /// <summary>
+    /// Issue #81: an <c>aurora_version()</c> a superuser owns counts in any schema - an Aurora cluster that keeps it outside
+    /// <c>pg_catalog</c> is still Aurora - and the platform read answers the same on plain Postgres, where it names no
+    /// provider. The functions the studio then calls are <c>pg_catalog</c>'s, so the version and instance are unknown, as
+    /// a value, never a failure of the read.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_superusers_aurora_version_outside_pg_catalog_is_still_Aurora()
+    {
+        MatrixServer server = await ServerAsync();
+        string database = await server.CreateDatabaseAsync("aur_anyschema", Token);
+        await server.ExecuteAsync("create schema aurora_utils; create function aurora_utils.aurora_version() returns varchar language sql as $$ select '16.4.1'::varchar $$", database, Token);
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        (HealthCheckContext context, HealthConnection connection) = host.Context();
+
+        await using (connection)
+        {
+            PostgresServerFacts facts = await PostgresServerFacts.ReadAsync(context, Token);
+
+            facts.Platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+            facts.Platform.Marker.Should().Contain("aurora_version()");
+            facts.Instance.Should().BeNull();
+            facts.InstanceNotRead.Should().Contain("could not be read");
+        }
+    }
+
+    /// <summary>
     /// W5-index §2.4: Aurora's reads - the sweep's waits and commit latency, the page's facts and its per-session read - lock
     /// nothing and create nothing. A second session holds <c>ACCESS EXCLUSIVE</c> on a table of the shimmed database; the sweep
     /// and the section's reads return under a 300 ms <c>lock_timeout</c>, hold no lock beyond a catalog read, and the database's

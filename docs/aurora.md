@@ -12,11 +12,17 @@ capacity is the host's to supply if it wants it. Every quotation is from the AWS
 
 ## How the studio knows it is Aurora
 
-The platform read looks up `aurora_version()` in `pg_proc` - in `pg_catalog` only, where nobody short of a superuser may
-create a function - and calls nothing. A `public.aurora_version()` a database owner made does not turn a server of
-somebody's own into an Aurora cluster (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`), because Aurora's platform
-decides which checks stand down. AWS's page for `aurora_version` does not name the function's schema; Aurora's own
-functions are built in, and the studio's test shim puts them in `pg_catalog` for the same reason.
+The platform read calls a server Aurora when either of two markers is there, and calls nothing:
+
+- a function named `aurora_version`, in **any** schema (`pg_proc` by name), that a superuser owns; or
+- a setting whose name starts with `aurora_` or `apg_` (`pg_settings`, from the server's own configuration).
+
+Either one is enough, and Aurora wins over the `rds.*` settings an Aurora cluster has too, so one missing marker does not
+turn a cluster into plain Amazon RDS (and `full_page_writes = off`, which is Aurora's normal value, into a Critical S02
+finding). AWS's page for `aurora_version` does not name the function's schema, which is why the function is looked up by
+name. A `public.aurora_version()` a database owner made does not turn a server of somebody's own into an Aurora cluster
+(`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`), because Aurora's platform decides which checks stand down: the
+function counts only when a superuser owns it, and a setting `pg_settings` lists is the server's own, never a role's.
 
 Once the platform read has said Aurora, and only then, the studio calls Aurora's functions - each by its `pg_catalog`
 name, so a function of the same name in another schema is never the one read:

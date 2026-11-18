@@ -135,7 +135,7 @@ internal sealed class PostgresServerReader : IPostgresServerReader
                 cancellationToken)
             .ConfigureAwait(false);
 
-        PostgresPlatformMarkers markers = new(row.RdsSettings, row.AuroraVersionFunction, row.AzureExtensions, row.CloudSqlSettings, row.NeonSuperuserRole);
+        PostgresPlatformMarkers markers = new(row.RdsSettings, row.AuroraVersionFunction, row.AuroraSettings, row.AzureExtensions, row.CloudSqlSettings, row.NeonSuperuserRole);
         PostgresPlatform platform = PostgresPlatform.Detect(markers, DataSourceEndpoints.Of(database)?.Hosts ?? []);
         // The instance an Aurora server names is database-wide information (D29), and this read is S01's, at the scope
         // policy alone: the Overview shows it from the Health report, through the database-wide gate, never from here.

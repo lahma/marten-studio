@@ -12,19 +12,21 @@ namespace DataStudio.Postgres.Services.Health;
 
 /// <summary>What the platform read found on the server: one flag per provider marker.</summary>
 /// <param name="RdsSettings">An <c>rds.extensions</c> or <c>rds.allowed_extensions</c> setting exists.</param>
-/// <param name="AuroraVersionFunction">An <c>aurora_version()</c> function exists.</param>
+/// <param name="AuroraVersionFunction">An <c>aurora_version()</c> function a superuser owns exists, in any schema.</param>
+/// <param name="AuroraSettings">A setting whose name starts with <c>aurora_</c> or <c>apg_</c> exists.</param>
 /// <param name="AzureExtensions">An <c>azure.extensions</c> setting exists.</param>
 /// <param name="CloudSqlSettings">A <c>cloudsql.*</c> setting exists.</param>
 /// <param name="NeonSuperuserRole">A <c>neon_superuser</c> role exists.</param>
 internal sealed record PostgresPlatformMarkers(
     bool RdsSettings,
     bool AuroraVersionFunction,
+    bool AuroraSettings,
     bool AzureExtensions,
     bool CloudSqlSettings,
     bool NeonSuperuserRole)
 {
     /// <summary>A server with none of them.</summary>
-    public static PostgresPlatformMarkers None { get; } = new(false, false, false, false, false);
+    public static PostgresPlatformMarkers None { get; } = new(false, false, false, false, false, false);
 }
 
 /// <summary>
@@ -46,7 +48,7 @@ internal sealed record PostgresPlatformMarkers(
 /// <b>No marker a role short of a superuser can plant</b> (W5-R2-fix B3), because a platform silences findings: each server
 /// marker is fenced in <c>HealthServerQueries.Platform</c> - a setting read from <c>pg_settings</c>, which never lists a
 /// placeholder a session or a client made and refuses a database's or role's one to all but a superuser (and, as defence
-/// in depth, only from the server's own configuration), the Aurora function only in <c>pg_catalog</c>, Neon's role only
+/// in depth, only from the server's own configuration), the Aurora function only when a superuser owns it, Neon's role only
 /// with the attributes only a superuser grants.
 /// </para>
 /// <para>
@@ -58,8 +60,11 @@ internal sealed record PostgresPlatformMarkers(
 /// <c>psql</c> by showing the <c>rds.extensions</c> parameter" - <i>Supported PostgreSQL extension versions</i>, Amazon
 /// RDS User Guide) and <c>rds.allowed_extensions</c> (same page, and the Aurora User Guide's <i>Working with extensions
 /// and foreign data wrappers</i>).</item>
-/// <item><b>Amazon Aurora</b>: the <c>aurora_version()</c> function, "returns the Aurora PostgreSQL version" (<i>aurora_version</i>,
-/// Aurora User Guide). Looked up in <c>pg_proc</c>, in <c>pg_catalog</c> only, never called.</item>
+/// <item><b>Amazon Aurora</b>, by either of two markers (issue #81): the <c>aurora_version()</c> function, "returns the Aurora
+/// PostgreSQL version" (<i>aurora_version</i>, Aurora User Guide), looked up in <c>pg_proc</c> by name in any schema - the
+/// guide does not name its schema - and counted only when a superuser owns it, never called; or a setting whose name starts
+/// with <c>aurora_</c> or <c>apg_</c>, which Aurora's parameter groups use. Either one is enough, so a missing function does
+/// not demote a cluster to RDS.</item>
 /// <item><b>Azure</b>: the <c>azure.extensions</c> server parameter, "Run <c>SHOW azure.extensions;</c>" (<i>PostgreSQL
 /// extensions in Azure Database for PostgreSQL</i>, Microsoft Learn).</item>
 /// <item><b>Cloud SQL</b>: any of the <c>cloudsql.*</c> database flags (<c>cloudsql.iam_authentication</c>,
@@ -132,6 +137,11 @@ internal sealed record PostgresPlatform(PostgresPlatformKind Kind, string? Marke
         if (markers.AuroraVersionFunction)
         {
             return new PostgresPlatform(PostgresPlatformKind.AmazonAurora, "the server has Aurora's aurora_version() function");
+        }
+
+        if (markers.AuroraSettings)
+        {
+            return new PostgresPlatform(PostgresPlatformKind.AmazonAurora, "the server has Aurora's aurora_* or apg_* settings");
         }
 
         if (markers.RdsSettings)
@@ -321,7 +331,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
     private static PlatformRow MapPlatform(NpgsqlDataReader reader) => new(
         reader.GetInt32(0),
         reader.GetString(1),
-        new PostgresPlatformMarkers(reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6)),
+        new PostgresPlatformMarkers(reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(10), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6)),
         reader.GetBoolean(7),
         reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
         reader.GetBoolean(9));

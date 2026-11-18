@@ -19,8 +19,8 @@ namespace DataStudio.Postgres.Integration.Tests.Versions;
 /// server still sees a server of somebody's own.
 /// </para>
 /// <para>
-/// <b>In <c>pg_catalog</c>, as the superuser</b> (W5-R2-fix B3): the detector counts <c>aurora_version()</c> only there,
-/// where no role short of a superuser may create a function, so a <c>public.aurora_version()</c> a database owner made does
+/// <b>In <c>pg_catalog</c>, as the superuser</b> (W5-R2-fix B3): the detector counts <c>aurora_version()</c> only when a
+/// superuser owns it (issue #81: in any schema), so a <c>public.aurora_version()</c> a database owner made does
 /// not turn a server of somebody's own into an Aurora cluster and silence R02-R04.
 /// </para>
 /// </remarks>
