@@ -97,7 +97,7 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         HealthEvidence named = finding.Evidence.Single(static x => x.Label == "Replica 1 (furthest behind)");
         named.Value.Should().StartWith("studio-test-instance-2, 6 min behind, replay expected to take 0.1 ms");
         named.Gate.Should().Be(HealthGate.Database, "an instance id is the cluster's own name for an instance, not a session's (D29)");
-        r03.Statements.Should().Contain(static x => x.Sql.Contains("pg_catalog.aurora_replica_status()", StringComparison.Ordinal))
+        r03.Statements.Should().Contain(static x => x.Sql.Contains("\"pg_catalog\".\"aurora_replica_status\"()", StringComparison.Ordinal))
             .And.NotContain(static x => x.Sql.Contains("pg_stat_replication", StringComparison.Ordinal));
     }
 
@@ -235,7 +235,7 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         view.Replicas!.Value!.Instances.Select(static x => x.Instance).Should().Equal("studio-test-instance-1", "studio-test-instance-2");
         view.SessionsShown.Should().BeTrue("the matrix host has every capability on, and its write policy allows everything");
         view.Sessions!.Value.Should().NotBeNull("aurora_stat_backend_waits is read for this database's sessions");
-        view.Statements.Should().Contain(static x => x.Sql.Contains("pg_catalog.aurora_stat_system_waits()", StringComparison.Ordinal));
+        view.Statements.Should().Contain(static x => x.Sql.Contains("\"pg_catalog\".\"aurora_stat_system_waits\"()", StringComparison.Ordinal));
     }
 
     [PostgresFact]
@@ -435,15 +435,18 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
     /// <summary>
     /// Issue #81: an <c>aurora_version()</c> a superuser owns counts in any schema - an Aurora cluster that keeps it outside
     /// <c>pg_catalog</c> is still Aurora - and the platform read answers the same on plain Postgres, where it names no
-    /// provider. The functions the studio then calls are <c>pg_catalog</c>'s, so the version and instance are unknown, as
-    /// a value, never a failure of the read.
+    /// provider. The studio then calls it where it lives, in a schema only a superuser can create in: the version is read,
+    /// and the instance, whose function this schema does not have, is unknown as a value, never a failure of the read.
     /// </summary>
     [PostgresFact]
-    public async Task A_superusers_aurora_version_outside_pg_catalog_is_still_Aurora()
+    public async Task A_superusers_aurora_version_outside_pg_catalog_is_still_Aurora_and_is_called_where_it_lives()
     {
         MatrixServer server = await ServerAsync();
         string database = await server.CreateDatabaseAsync("aur_anyschema", Token);
-        await server.ExecuteAsync("create schema aurora_utils; create function aurora_utils.aurora_version() returns varchar language sql as $$ select '16.4.1'::varchar $$", database, Token);
+        await server.ExecuteAsync(
+            "create schema aurora_utils; grant usage on schema aurora_utils to public; create function aurora_utils.aurora_version() returns varchar language sql as $$ select '16.4.1'::varchar $$",
+            database,
+            Token);
 
         await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
         (HealthCheckContext context, HealthConnection connection) = host.Context();
@@ -454,9 +457,94 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
 
             facts.Platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
             facts.Platform.Marker.Should().Contain("aurora_version()");
-            facts.Instance.Should().BeNull();
-            facts.InstanceNotRead.Should().Contain("could not be read");
+            facts.AuroraFunctionSchema.Should().Be("aurora_utils");
+            facts.AuroraVersion.Should().Be(AuroraShim.Version, "the version is read where the function is, not from pg_catalog");
+            facts.Instance.Should().BeNull("this schema has no aurora_db_instance_identifier()");
+            facts.InstanceNotRead.Should().BeNull();
         }
+    }
+
+    /// <summary>
+    /// Issue #81: where the functions live in a schema of their own, every Aurora read qualifies its calls with it - the
+    /// instance, R03's replica status, the waits, the commit latency and the sessions' waits - and none of them says it could
+    /// not be read. The statements name the schema, quoted.
+    /// </summary>
+    [PostgresFact]
+    public async Task Aurora_functions_in_a_schema_of_their_own_are_called_where_they_live()
+    {
+        MatrixServer server = await ServerAsync();
+        string database = await AuroraShim.ApplyInSchemaAsync(server, "aur_ownschema", "aurora_own", cancellationToken: Token);
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        HealthSweep sweep = await host.SweepAsync(HealthSweepKind.Regular);
+
+        sweep.TryShared(Internal.Sql.HealthServerQueries.PlatformKey, out PostgresServerFacts? facts).Should().BeTrue();
+        facts!.Platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        facts.AuroraFunctionSchema.Should().Be("aurora_own");
+        facts.Instance.Should().Be(AuroraShim.InstanceIdentifier);
+        facts.AuroraVersion.Should().Be(AuroraShim.Version);
+        facts.InstanceNotRead.Should().BeNull();
+
+        HealthCheckResult r03 = sweep.Results.Single(static x => x.Check.Code == "R03");
+        r03.Outcome.Should().Be(HealthCheckOutcome.Checked);
+        r03.Statements.Should().Contain(static x => x.Sql.Contains("\"aurora_own\".\"aurora_replica_status\"()", StringComparison.Ordinal))
+            .And.NotContain(static x => x.Sql.Contains("pg_catalog\".\"aurora", StringComparison.Ordinal), "no call is still qualified with pg_catalog");
+
+        await using AsyncServiceScope circuit = host.Services.CreateAsyncScope();
+        AuroraView view = await circuit.ServiceProvider.GetRequiredService<IAuroraService>().GetAsync(new StudioScope("default", "default", null), Token);
+
+        view.InstanceNotRead.Should().BeNull();
+        view.AnsweredBy.Should().Be("instance studio-test-instance-1 (the writer), Aurora 16.4.1");
+        view.Waits!.Value!.Rows.Select(static x => x.Event.Name).Should().Equal("IO:XactSync");
+        view.Database!.Value!.Activity.CommitLatencyMicroseconds.Should().Be(22011);
+        view.Replicas!.Value!.Instances.Select(static x => x.Instance).Should().Equal("studio-test-instance-1", "studio-test-instance-2");
+        view.Sessions!.Value.Should().NotBeNull("aurora_stat_backend_waits is read in the schema too");
+        view.Statements.Should().Contain(static x => x.Sql.Contains("\"aurora_own\".\"aurora_stat_system_waits\"()", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Issue #81, and the anti-spoof property it must not give up: <c>aurora_version()</c> is a marker wherever a superuser owns it, but Aurora's
+    /// functions are called only in a schema only a superuser can create in. In a schema anybody may create in, or that a database owner owns, a function
+    /// of the same name the owner made would run as the studio's own role - so nothing is called there: the platform is still Aurora, and each section says
+    /// why in a sentence instead of a SQLSTATE. A function the owner planted is never called.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData("PUBLIC", "a schema every role may create in")]
+    [InlineData("app", "a schema the database owner owns")]
+    public async Task A_schema_a_role_short_of_a_superuser_can_create_in_is_never_called(string authorization, string what)
+    {
+        MatrixServer server = await ServerAsync();
+        string database = await AuroraShim.ApplyInSchemaAsync(server, "aur_open_" + authorization.ToLowerInvariant(), "aurora_open", authorization, Token);
+
+        // The database owner can create a function in this schema (that is what makes it unsafe to call Aurora's in it): the plant is accepted.
+        await using (NpgsqlConnection owner = await server.OpenAsync(MatrixRole.App, database, Token))
+        await using (NpgsqlCommand plant = new(
+            "create function aurora_open.aurora_planted_by_the_owner() returns int language sql as $$ select 1 $$", owner))
+        {
+            await plant.ExecuteNonQueryAsync(Token);
+        }
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        HealthSweep sweep = await host.SweepAsync(HealthSweepKind.Regular);
+
+        sweep.TryShared(Internal.Sql.HealthServerQueries.PlatformKey, out PostgresServerFacts? facts).Should().BeTrue();
+        facts!.Platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora, "{0} still holds a superuser's aurora_version(): the marker counts", what);
+        facts.AuroraFunctionSchema.Should().BeNull("{0} is not a place Aurora's functions are called", what);
+        facts.Instance.Should().BeNull();
+        facts.InstanceNotRead.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
+
+        HealthCheckResult r03 = sweep.Results.Single(static x => x.Check.Code == "R03");
+        r03.Statements.Should().NotContain(static x => x.Sql.Contains("aurora_replica_status", StringComparison.Ordinal), "nothing of Aurora's is called");
+
+        await using AsyncServiceScope circuit = host.Services.CreateAsyncScope();
+        AuroraView view = await circuit.ServiceProvider.GetRequiredService<IAuroraService>().GetAsync(new StudioScope("default", "default", null), Token);
+
+        view.IsAurora.Should().BeTrue();
+        view.InstanceNotRead.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
+        view.Statements.Should().NotContain(static x => x.Sql.Contains("aurora_stat", StringComparison.Ordinal) || x.Sql.Contains("aurora_replica_status", StringComparison.Ordinal));
+        view.Waits!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound, "a sentence, not a SQLSTATE");
+        view.Replicas!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
+        view.Database!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
     }
 
     /// <summary>

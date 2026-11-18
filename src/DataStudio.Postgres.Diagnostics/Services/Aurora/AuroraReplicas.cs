@@ -104,7 +104,7 @@ internal sealed record AuroraReplicaStatus(DateTimeOffset ReadAt, IReadOnlyList<
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var query = AuroraQueries.ReplicaStatus();
+        var query = AuroraQueries.ReplicaStatus(await AuroraFunctions.SchemaAsync(context).ConfigureAwait(false));
         IReadOnlyList<string> rows = await context.Sql
             .QueryAsync(query, static reader => reader.IsDBNull(0) ? "{}" : reader.GetString(0), cancellationToken)
             .ConfigureAwait(false);

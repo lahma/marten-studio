@@ -84,8 +84,27 @@ internal static class HealthServerQueries
         "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon,\n" +
         "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
         "       pg_catalog.pg_postmaster_start_time() as started_at,\n" +
-        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where (pg_catalog.left(s.name, 7) = 'aurora_' or pg_catalog.left(s.name, 4) = 'apg_') and " + ServerConfigured + ") as aurora_settings");
+        "       exists (select 1 from pg_catalog.pg_proc p join pg_catalog.pg_roles o on o.oid = p.proowner where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and o.rolsuper and p.pronamespace = " + AuroraNamespace + ") as aurora_instance,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where (pg_catalog.left(s.name, 7) = 'aurora_' or pg_catalog.left(s.name, 4) = 'apg_') and " + ServerConfigured + ") as aurora_settings,\n" +
+        "       (select an.nspname::text from pg_catalog.pg_namespace an where an.oid = " + AuroraNamespace + ") as aurora_schema");
+
+    /// <summary>
+    /// The oid of the schema Aurora's own functions are called in (issue #81), or null: the schema of an <c>aurora_version</c> function a superuser owns,
+    /// where only superusers can create a function - the schema's owner is a superuser and no ACL entry gives <c>CREATE</c> to <c>PUBLIC</c> or to a role
+    /// that is not one. <c>pg_catalog</c> first when there are several. The owner of the function alone would not fence the calls that follow: a schema a
+    /// database owner can create in could also hold a <c>aurora_replica_status()</c> of theirs, which the studio would then call as its own role.
+    /// </summary>
+    private const string AuroraNamespace =
+        "(select (pg_catalog.array_agg(n.oid order by n.oid = 'pg_catalog'::pg_catalog.regnamespace desc, n.nspname))[1]\n" +
+        "          from pg_catalog.pg_proc p\n" +
+        "          join pg_catalog.pg_roles o on o.oid = p.proowner\n" +
+        "          join pg_catalog.pg_namespace n on n.oid = p.pronamespace\n" +
+        "         where p.proname = 'aurora_version' and o.rolsuper\n" +
+        "           and pg_catalog.strpos(n.nspname, '\"') = 0\n" +
+        "           and exists (select 1 from pg_catalog.pg_roles so where so.oid = n.nspowner and so.rolsuper)\n" +
+        "           and not exists (select 1 from pg_catalog.aclexplode(coalesce(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) a\n" +
+        "                            where a.privilege_type = 'CREATE'\n" +
+        "                              and (a.grantee = 0 or not exists (select 1 from pg_catalog.pg_roles g where g.oid = a.grantee and g.rolsuper))))";
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -137,8 +156,9 @@ internal static class HealthServerQueries
     /// </list>
     /// <para>
     /// <b>And which server answered</b> (issue #8 A1, W5-AUR): <c>pg_is_in_recovery()</c>, <c>pg_postmaster_start_time()</c>,
-    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c>, where
-    /// only a superuser creates a function, because the instance it names decides whether the statistics window looks reset, and a
+    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - in the schema Aurora's functions are called in, owned by a superuser
+    /// there as everywhere (<c>aurora_schema</c>: <c>pg_catalog</c>, or another schema only a superuser can create in, issue #81), because the
+    /// instance it names decides whether the statistics window looks reset, and a
     /// window that looks reset holds back every verdict that needs a long one. Neither Aurora function is called here: an
     /// Aurora server's instance is read by <see cref="AuroraQueries.Instance" />, only once this read has said Aurora, and a
     /// release before 13.7, 12.11, 11.16 or 10.21 has no identifier function (<i>aurora_db_instance_identifier</i>, Aurora

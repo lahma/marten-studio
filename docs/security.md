@@ -345,7 +345,9 @@ page's Aurora replicas, the "Answered by" line, the Server page's Aurora section
 for a visitor through that gate, are shown as counts and shares, never as a time, and are audited on first view
 ("Read Aurora session waits").
 Aurora's functions are called only once the platform read has found an Aurora marker - an `aurora_version()` function a
-superuser owns, or an `aurora_*` or `apg_*` setting - and each is called by its `pg_catalog` name ([aurora.md](aurora.md)).
+superuser owns, or an `aurora_*` or `apg_*` setting - and each is called in the schema that `aurora_version()` is in, `pg_catalog`
+or another schema only a superuser can create in, and in no schema a database owner or `PUBLIC` can create in, where a function of
+the same name would run as the studio's own role ([aurora.md](aurora.md)).
 
 ### Storage
 
