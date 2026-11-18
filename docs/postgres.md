@@ -57,7 +57,7 @@ A non-null `AuthorizationOptions.FallbackPolicy` satisfies the guard too. `Allow
 K07 then raises as a finding while any capability is on.
 
 **One shell per application.** `AddDataStudio()` and `.AddPostgres()` are idempotent, `.AddPostgres()` beside `.AddMarten()`
-is refused (the Marten module registers the Postgres module itself), and `MapDataStudio()` serves every module there is.
+is refused (`AddMarten()` brings the Postgres module's pages over the stores' databases, as part of the Marten module), and `MapDataStudio()` serves every module there is.
 
 **Hosting.** It works in an API-only host with no `.razor` file of its own, needs no `app.UseAntiforgery()` (it has no
 forms; every action is a Blazor event over the circuit), and registers no global style or script: the stylesheet and

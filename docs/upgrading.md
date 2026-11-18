@@ -14,7 +14,7 @@ to a new one. [docs/stability.md](stability.md) says what is still promised (cap
 never widened, finding codes and log event ids that keep their meaning), and the tables below name every break. What a
 host relies on for safety did not change, with one exception it must act on: a module's own `ReadOnly` no longer turns the
 Kafka module's capabilities off (set `DataStudioOptions.ReadOnly`; see "The read-only switches"). There is no
-step-by-step path through 1.3.x: go to 2.0.0 in one move.
+step-by-step path through 1.3.x: go to 2.0 in one move.
 
 ### What to do, in order
 
