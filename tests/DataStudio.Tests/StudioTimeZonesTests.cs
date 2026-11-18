@@ -39,6 +39,15 @@ public class StudioTimeZonesTests
     }
 
     [Fact]
+    public void A_label_of_a_name_already_held_converts_nothing_again()
+    {
+        TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "Helsinki", "FLE Standard Time");
+
+        StudioTimeZones.Label("Listed/Name", windowsStyle, At).Should().Be("Listed/Name (UTC+02:00)", "the list's own id is the name: the zone's id is not converted again");
+        StudioTimeZones.Label("UTC", TimeZoneInfo.Utc, At).Should().Be("UTC");
+    }
+
+    [Fact]
     public void The_listed_zones_are_distinct_found_by_the_id_they_are_listed_under_and_in_the_order_of_those_ids()
     {
         IReadOnlyList<(string Id, TimeZoneInfo Zone)> listed = StudioTimeZones.Listed("FI");
