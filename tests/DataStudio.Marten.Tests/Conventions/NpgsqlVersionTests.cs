@@ -16,7 +16,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </para>
 /// <para>
 /// The floor invariant is read from the Marten module's restore rather than stated: The Postgres module's <c>Npgsql &gt;= floor</c>
-/// reaches every Marten module host through the exact <c>The Postgres module</c> dependency, so a floor above what Marten's
+/// reaches every Marten module host through the exact <c>DataStudio.Postgres</c> dependency, so a floor above what Marten's
 /// own packages already require would move every one of those hosts' Npgsql. Compared against what those packages
 /// <em>declare</em>, not against what the Marten module resolved - that is the larger of the two and would always pass.
 /// </para>

@@ -7,7 +7,7 @@ namespace DataStudio.Postgres.Tests.Conventions;
 
 /// <summary>
 /// The other half of hard rule 16, for the Kafka module (D34): The Postgres module and DataStudio.Postgres.Diagnostics reference no <c>Confluent.*</c>,
-/// <c>librdkafka</c>, <c>Wolverine*</c> or <c>The Kafka module*</c> assembly, package or project - at their project files, restore graphs, built references
+/// <c>librdkafka</c>, <c>Wolverine*</c> or <c>DataStudio.Kafka*</c> assembly, package or project - at their project files, restore graphs, built references
 /// and this suite's output folder - so a host with no Kafka never gets a Kafka client through the shell. (<c>InternalsVisibleTo</c> is an attribute,
 /// not a reference, and grants the module its seams without either assembly knowing it exists.)
 /// </summary>

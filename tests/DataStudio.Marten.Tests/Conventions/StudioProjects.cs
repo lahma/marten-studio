@@ -5,8 +5,8 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
-/// The four projects of the studio under <c>src/</c>: the shell, <c>DataStudio</c> (v2 step 3), the shared studio, <c>The Postgres module</c>, the
-/// diagnostics engine it is built on, <c>DataStudio.Postgres.Diagnostics</c> (no ASP.NET Core), and <c>The Marten module</c>, which references
+/// The four projects of the studio under <c>src/</c>: the shell, <c>DataStudio</c> (v2 step 3), the shared studio, <c>DataStudio.Postgres</c>, the
+/// diagnostics engine it is built on, <c>DataStudio.Postgres.Diagnostics</c> (no ASP.NET Core), and <c>DataStudio.Marten</c>, which references
 /// them. The Kafka module is a studio of its own and is read by its own suite. A convention that scanned one folder or one assembly before the move scans all of them through here, and asserts
 /// what it found is not nothing.
 /// </summary>
