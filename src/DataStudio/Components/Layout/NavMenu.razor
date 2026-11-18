@@ -12,7 +12,7 @@
     scrolls inside itself. The aside round it (StudioLayout) keeps the full height of the page for the rail's
     background and border.
 *@
-<div class="ms-sidebar-inner">
+<div class="ms-sidebar-inner" @ref="railElement">
     <div class="ms-sidebar-brand">
         <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2" />
@@ -161,8 +161,19 @@
         await RefreshBadgesAsync(cancellation.Token);
     }
 
+    /// <summary>The rail's own scroll box (<c>.ms-sidebar-inner</c>): what <c>martenStudio.scroll.revealWithin</c> scrolls, and nothing above it.</summary>
+    private ElementReference railElement;
+
+    /// <summary>The page the rail last brought its active item into view for, so a render that is not a navigation never moves the rail under the visitor.</summary>
+    private string? revealedFor;
+
+    /// <summary>What the rail marks as active (<see cref="NavClass" />), and what is brought into view.</summary>
+    internal const string ActiveItemSelector = ".ms-nav-active";
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await RevealActiveAsync();
+
         if (!firstRender || started || disposed)
         {
             return;
@@ -190,6 +201,32 @@
         // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
         // sidebar is the last place in the studio that should put an error on the screen.
         await live.StartAsync(Settings.RefreshInterval, TickAsync, cancellation.Token);
+    }
+
+    /// <summary>
+    /// Brings the active entry into view inside the rail's own scroll box, once for each page the rail is drawn for (#83): a module whose group
+    /// comes after a long one, or the shell's Activity page under the last of them, was otherwise out of view, with nothing marked.
+    /// The helper scrolls the rail alone and only as far as needed (<c>block: 'nearest'</c>), does nothing for a rail that fits its box, and
+    /// leaves an entry already in view where it is, so a visitor who has scrolled the rail and then clicks an entry in view finds it still.
+    /// </summary>
+    private async Task RevealActiveAsync()
+    {
+        string? page = currentRelativePath;
+        if (disposed || page is null || string.Equals(revealedFor, page, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        revealedFor = page;
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.scroll.revealWithin", new object?[] { railElement, ActiveItemSelector });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A closed circuit, or a browser that refused: the rail is still the rail, only not scrolled.
+        }
     }
 
     private async Task TickAsync(CancellationToken cancellationToken)

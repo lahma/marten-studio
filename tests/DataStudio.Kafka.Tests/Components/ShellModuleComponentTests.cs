@@ -148,6 +148,47 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
+    public async Task The_rail_brings_its_active_item_into_view_inside_its_own_scroll_box_after_each_navigation_and_only_then()
+    {
+        using KafkaHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        IReadOnlyList<Bunit.JSRuntimeInvocation> Reveals() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"];
+
+        rail.WaitForAssertion(() => Reveals().Should().ContainSingle("the first load reveals what the page marks"));
+        Reveals()[0].Arguments[0].Should().BeOfType<ElementReference>("the rail's own scroll box, not the page, is what is scrolled");
+        Reveals()[0].Arguments[1].Should().Be(NavMenu.ActiveItemSelector);
+        rail.Find(NavMenu.ActiveItemSelector).TextContent.Trim().Should().Be("Topics", "the selector finds the entry the page marks");
+
+        // A render that is not a navigation (a badge poll, a scope change) must not move a rail the visitor has scrolled.
+        rail.Render();
+        Reveals().Should().ContainSingle();
+
+        harness.Navigation.Simulate("studio/kafka/search", intercepted: true);
+
+        rail.WaitForAssertion(() => Reveals().Should().HaveCount(2, "a navigation brings the new active entry into view"));
+        rail.Find(NavMenu.ActiveItemSelector).TextContent.Trim().Should().Be("Search");
+    }
+
+    [Fact]
+    public async Task A_rail_whose_browser_went_away_while_revealing_is_still_drawn()
+    {
+        using KafkaHarness harness = new();
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+        harness.Context.JSInterop.Setup<bool>("martenStudio.scroll.revealWithin", _ => true)
+            .SetException(new Microsoft.JSInterop.JSDisconnectedException("the tab closed"));
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        rail.WaitForAssertion(() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Should().ContainSingle());
+        rail.Find(NavMenu.ActiveItemSelector).TextContent.Trim().Should().Be("Topics");
+    }
+
+    [Fact]
     public async Task The_rail_credit_names_the_module()
     {
         using KafkaHarness harness = new();
