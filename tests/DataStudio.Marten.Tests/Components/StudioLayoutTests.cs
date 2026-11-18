@@ -310,6 +310,171 @@ public class StudioLayoutTests
     }
 
     /// <summary>
+    /// A page that spells one fixed moment in the circuit's time zone, and draws again when a time-zone change reaches it (<c>StudioState.ScopeChanged</c>, as
+    /// every page that formats a time does): what the pages of the studio do with <c>StudioPreferences</c>, in one element.
+    /// </summary>
+    private sealed class MomentPage : ComponentBase, IDisposable
+    {
+        public static readonly DateTimeOffset Moment = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        [Inject]
+        public StudioPreferences Preferences { get; set; } = null!;
+
+        [Inject]
+        public StudioState State { get; set; } = null!;
+
+        protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+        private Task OnScopeChangedAsync() => InvokeAsync(StateHasChanged);
+
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder)
+        {
+            builder.OpenElement(0, "time");
+            builder.AddAttribute(1, "id", "moment");
+            builder.AddContent(2, Preferences.FormatInSelectedTimeZone(Moment, "yyyy-MM-dd HH:mm"));
+            builder.CloseElement();
+        }
+
+        public void Dispose() => State.ScopeChanged -= OnScopeChangedAsync;
+    }
+
+    private static readonly RenderFragment MomentBody = builder =>
+    {
+        builder.OpenComponent<MomentPage>(0);
+        builder.CloseComponent();
+    };
+
+    /// <summary>Renders the frame over <see cref="MomentBody" /> with no zone stored in the browser and the browser answering <paramref name="browserZone" />, and waits for the first-render read.</summary>
+    private static IRenderedComponent<StudioLayout> RenderWithBrowserZone(StudioComponentContext context, string? browserZone)
+    {
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.timeZone.get").SetResult(browserZone);
+
+        IRenderedComponent<StudioLayout> layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, MomentBody));
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        return layout;
+    }
+
+    private static DateTime MomentShown(IRenderedComponent<StudioLayout> layout) =>
+        DateTime.ParseExact(layout.Find("#moment").TextContent, "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A visitor with no stored zone reads times in their browser's own, not the server's: the layout asks the browser once, and every page that formats a time
+    /// draws it in the zone it answered. Two zones as far apart as there are (UTC+14 and UTC-11) are used, and the test holds the difference between what the
+    /// same page spells in each - never a clock time, and nothing about this machine's own zone.
+    /// </summary>
+    [Fact]
+    public void A_visitor_with_no_stored_zone_reads_times_in_their_browsers_zone()
+    {
+        using var kiritimatiContext = new StudioComponentContext();
+        var kiritimati = RenderWithBrowserZone(kiritimatiContext, "Pacific/Kiritimati");
+        kiritimatiContext.Preferences.SelectedTimeZoneId.Should().Be("Pacific/Kiritimati");
+        kiritimati.WaitForAssertion(() => MomentShown(kiritimati).Should().Be(MomentPage.Moment.UtcDateTime.AddHours(14)));
+        DateTime inKiritimati = MomentShown(kiritimati);
+
+        using var niueContext = new StudioComponentContext();
+        var niue = RenderWithBrowserZone(niueContext, "Pacific/Niue");
+        niueContext.Preferences.SelectedTimeZoneId.Should().Be("Pacific/Niue");
+        niue.WaitForAssertion(() => MomentShown(niue).Should().Be(MomentPage.Moment.UtcDateTime.AddHours(-11)));
+        DateTime inNiue = MomentShown(niue);
+
+        (inKiritimati - inNiue).Should().Be(TimeSpan.FromHours(25), "the two zones are twenty-five hours apart, and the one page spelt the one moment in each");
+    }
+
+    [Fact]
+    public void The_browsers_zone_is_the_default_and_never_stored()
+    {
+        using var context = new StudioComponentContext();
+        long version = context.Preferences.PreferenceVersion;
+        var layout = RenderWithBrowserZone(context, "Pacific/Kiritimati");
+
+        context.Preferences.BrowserTimeZoneId.Should().Be("Pacific/Kiritimati");
+        context.Preferences.PreferenceVersion.Should().Be(version, "a default is not the visitor's choice");
+        context.JSInterop.Invocations["martenStudio.prefs.set"].Should().BeEmpty("only a choice in Preferences is stored, and nothing is sent anywhere");
+
+        // The Preferences select holds it under its own id and says whose it is.
+        layout.WaitForAssertion(() =>
+        {
+            IElement option = layout.FindAll("#ms-timezone-select option").Single(static x => x.GetAttribute("value") == "Pacific/Kiritimati");
+            option.HasAttribute("selected").Should().BeTrue();
+            option.TextContent.Trim().Should().Be("Pacific/Kiritimati (UTC+14:00), this browser");
+            layout.FindAll("#ms-timezone-select option").Should().ContainSingle(static x => x.TextContent.Contains("this browser", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void A_stored_zone_is_the_visitors_and_the_browser_is_not_asked()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult("Pacific/Niue");
+        context.JSInterop.Setup<string?>("martenStudio.timeZone.get").SetResult("Pacific/Kiritimati");
+
+        var layout = RenderLayout(context);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be("Pacific/Niue");
+        context.Preferences.BrowserTimeZoneId.Should().BeNull();
+        context.JSInterop.Invocations["martenStudio.timeZone.get"].Should().BeEmpty();
+        layout.FindAll("#ms-timezone-select option").Should().NotContain(static x => x.TextContent.Contains("this browser", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Mars/Olympus_Mons")]
+    [InlineData("../../etc/passwd")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void An_id_the_server_does_not_know_leaves_the_servers_zone(string? browserZone)
+    {
+        using var context = new StudioComponentContext();
+        string server = context.Preferences.SelectedTimeZoneId;
+
+        var layout = RenderWithBrowserZone(context, browserZone);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be(server);
+        context.Preferences.BrowserTimeZoneId.Should().BeNull();
+        layout.FindAll("#ms-timezone-select option").Should().NotContain(static x => x.TextContent.Contains("this browser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_browser_that_cannot_be_asked_leaves_the_servers_zone_and_the_stored_theme_still_applies()
+    {
+        using var context = new StudioComponentContext();
+        string server = context.Preferences.SelectedTimeZoneId;
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult("dark");
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.timeZone.get").SetException(new Microsoft.JSInterop.JSException("the script failed"));
+
+        var layout = RenderLayout(context);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be(server);
+        layout.ThemeAttribute().Should().Be("dark", "a failed zone call does not cost the visitor the preferences that were read");
+    }
+
+    /// <summary>The browser's answer arrives after the visitor has chosen a zone in Preferences: the choice wins, as a stored preference's late read never undoes a choice.</summary>
+    [Fact]
+    public void A_zone_chosen_while_the_browser_is_being_asked_wins()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult(null);
+        JSRuntimeInvocationHandler<string?> browser = context.JSInterop.Setup<string?>("martenStudio.timeZone.get");
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+        layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
+
+        string chosen = layout.SelectorOptions("ms-timezone-select").First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
+        layout.Find("#ms-timezone-select").Change(chosen);
+        layout.WaitForAssertion(() => context.Preferences.SelectedTimeZoneId.Should().Be(chosen));
+
+        browser.SetResult("Pacific/Kiritimati");
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be(chosen, "the visitor's choice is the newer answer");
+    }
+
+    /// <summary>
     /// The database's circuit host is the first subscriber to the scope (Shell A2a, DESIGN-A 5.4): <c>StudioLayout</c> renders it before the rail,
     /// so its handler - which writes the scope into the address, then asks the scope policy - runs before the rail's, which 1.2's N5b window
     /// depends on. Read from the event's invocation list after a real render of the layout, with the rail and the header in it.

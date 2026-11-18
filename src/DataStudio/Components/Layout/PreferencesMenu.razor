@@ -61,11 +61,11 @@
         <select id="ms-timezone-select"
                 class="ms-select ms-header-select"
                 aria-label="Time zone"
-                value="@SelectedZoneName"
+                value="@selectedName"
                 @onchange="TimeZoneChanged">
-            @foreach ((string id, TimeZoneInfo timeZone) in ListedZones)
+            @foreach (StudioTimeZones.ZoneOption option in zoneOptions)
             {
-                <option value="@id" selected="@(string.Equals(id, SelectedZoneName, StringComparison.Ordinal))">@StudioTimeZones.Label(id, timeZone, now)</option>
+                <option value="@option.Id" selected="@(string.Equals(option.Id, selectedName, StringComparison.Ordinal))">@(StudioTimeZones.Label(option.Id, option.Zone, now) + (option.IsBrowser ? StudioTimeZones.BrowserMark : string.Empty))</option>
             }
         </select>
     </div>
@@ -97,8 +97,26 @@
 
     private readonly DateTimeOffset now = DateTimeOffset.UtcNow;
 
-    /// <summary>The selected zone under the id the select lists it by: a stored Windows id is the IANA id it converts to (#80).</summary>
-    private string SelectedZoneName => StudioTimeZones.IanaId(SelectedTimeZoneId, StudioTimeZones.CurrentRegion);
+    /// <summary>The selected zone under the id the select lists it by: a stored Windows id is the IANA id it converts to (#80). Converted once for each set of parameters, not once for each option.</summary>
+    private string selectedName = string.Empty;
+
+    /// <summary>What the select draws: the host's zones, and the circuit's and the browser's own where the list does not hold them under their ids.</summary>
+    private IReadOnlyList<StudioTimeZones.ZoneOption> zoneOptions = [];
+
+    protected override void OnParametersSet()
+    {
+        selectedName = StudioTimeZones.IanaId(SelectedTimeZoneId, StudioTimeZones.CurrentRegion);
+
+        (string Id, TimeZoneInfo Zone)? selected = TimeZoneInfo.TryFindSystemTimeZoneById(SelectedTimeZoneId, out TimeZoneInfo? selectedZone)
+            ? (selectedName, selectedZone)
+            : null;
+
+        (string Id, TimeZoneInfo Zone)? browser = BrowserTimeZoneId is { Length: > 0 } browserId && TimeZoneInfo.TryFindSystemTimeZoneById(browserId, out TimeZoneInfo? browserZone)
+            ? (browserId, browserZone)
+            : null;
+
+        zoneOptions = StudioTimeZones.Options(ListedZones, selected, browser);
+    }
 
     /// <summary><c>system</c>, <c>light</c> or <c>dark</c>, as the shell currently has it.</summary>
     [Parameter]
@@ -107,6 +125,13 @@
     /// <summary>The time zone every timestamp in the studio is rendered in.</summary>
     [Parameter]
     public string SelectedTimeZoneId { get; set; } = TimeZoneInfo.Utc.Id;
+
+    /// <summary>
+    /// The IANA id of the zone the visitor's browser reported when the circuit started, or <see langword="null" />: the select marks that option "this
+    /// browser", so the default stays visible after another is picked, and lists it under its own id even where the host's list holds the zone under another.
+    /// </summary>
+    [Parameter]
+    public string? BrowserTimeZoneId { get; set; }
 
     /// <summary>Raised with the picked theme.</summary>
     /// <remarks>

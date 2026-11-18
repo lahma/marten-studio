@@ -372,6 +372,27 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
+    public async Task The_preferences_select_marks_the_browsers_zone_and_holds_the_circuits_zone_whatever_the_list_says()
+    {
+        using KafkaHarness harness = new();
+        await harness.Context.ReadyAsync();
+
+        // A zone the menu itself lists (see the test above for why none is named): the browser's, which is not the circuit's.
+        string[] ids = [.. harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "UTC")).FindAll("#ms-timezone-select option").Select(static x => x.GetAttribute("value")!)];
+        string browser = ids.First(static x => x.Contains('/', StringComparison.Ordinal));
+
+        IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p
+            .Add(x => x.SelectedTimeZoneId, "UTC")
+            .Add(x => x.BrowserTimeZoneId, browser));
+
+        IElement[] options = [.. menu.FindAll("#ms-timezone-select option")];
+        options.Where(static x => x.TextContent.Contains("this browser", StringComparison.Ordinal)).Select(static x => x.GetAttribute("value")).Should().Equal(browser);
+        options.Single(x => x.GetAttribute("value") == browser).TextContent.Trim().Should().EndWith(", this browser");
+        options.Where(static x => x.HasAttribute("selected")).Select(static x => x.GetAttribute("value")).Should().ContainSingle().Which.Should().Be("UTC", "the circuit's zone is the one selected, not the browser's");
+        options.Select(static x => x.GetAttribute("value")!).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task The_rail_credit_names_the_module()
     {
         using KafkaHarness harness = new();
