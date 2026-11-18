@@ -115,6 +115,57 @@ public class HealthCriticalListTests
         page.Markup.Should().NotContain("S01");
     }
 
+    /// <summary>
+    /// A host that accepted a check (<c>AcceptedChecks</c>, #35) has said its Critical finding is not one: it is shown in its check's row, out of
+    /// every count, and so out of the list that asks for attention. The one that is not accepted is listed beside it, so the list is not empty for
+    /// another reason.
+    /// </summary>
+    [Fact]
+    public async Task An_accepted_critical_finding_is_not_in_the_list_and_one_that_is_not_accepted_is()
+    {
+        await using StudioComponentContext context = await ReadyAsync(
+            Warning("T04"),
+            Critical("K05", "The console reads as the data source's role") with { Accepted = true, AcceptedReason = "Roles are managed by the platform team." },
+            Critical("S01", "PostgreSQL 14 is past its end of life"));
+
+        var page = context.Render<HealthPage>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-health-critical-link").Should().ContainSingle(), TimeSpan.FromSeconds(5));
+        page.Find(".ms-health-critical .ms-section-title").TextContent.Trim().Should().Be("1 critical finding");
+        page.TextOfAll(".ms-health-critical-link .ms-health-code").Should().Equal("S01");
+        page.Find(".ms-health-critical").TextContent.Should().NotContain("K05").And.NotContain("The console reads as the data source's role");
+    }
+
+    [Fact]
+    public async Task An_accepted_critical_finding_alone_draws_no_region()
+    {
+        await using StudioComponentContext context = await ReadyAsync(
+            Warning("T04"),
+            Critical("K05", "The console reads as the data source's role") with { Accepted = true, AcceptedReason = "Roles are managed by the platform team." });
+
+        var page = context.Render<HealthPage>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-health-area").Should().NotBeEmpty(), TimeSpan.FromSeconds(5));
+        page.FindAll(".ms-health-critical").Should().BeEmpty("an accepted Critical finding is not one the page asks attention for");
+    }
+
+    /// <summary>A finding the visitor muted in this browser is out of every count, the list included, and is kept under "muted in this browser".</summary>
+    [Fact]
+    public async Task A_muted_critical_finding_leaves_the_list_and_is_kept_under_the_muted_ones()
+    {
+        await using StudioComponentContext context = await ReadyAsync(Warning("T04"), Critical("S01", "PostgreSQL 14 is past its end of life"));
+
+        var page = context.Render<HealthPage>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-health-critical-link").Should().ContainSingle(), TimeSpan.FromSeconds(5));
+
+        page.Find(".ms-health-finding-critical .ms-health-mute").Click();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-health-critical").Should().BeEmpty("the one Critical finding is muted"), TimeSpan.FromSeconds(5));
+        page.Find(".ms-health-muted summary").TextContent.Should().Contain("1 finding muted in this browser");
+        page.Find(".ms-health-muted").TextContent.Should().Contain("S01");
+    }
+
     [Fact]
     public async Task Each_links_target_is_a_card_on_the_page_and_is_the_address_of_the_page_with_that_card_as_its_fragment()
     {
