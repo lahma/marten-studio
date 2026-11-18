@@ -66,7 +66,7 @@ internal static class PostgresDiagnosticsVersionGuard
     public static void Ensure() => Ensure(typeof(PostgresDiagnosticsVersionGuard).Assembly, LoadDiagnostics, LoadShell);
 
     /// <summary>The check for the engine alone, with the two assemblies supplied - a seam the tests use.</summary>
-    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
+    /// <param name="postgresAssembly">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">DataStudio.Postgres.Diagnostics is missing, or is another version.</exception>
     internal static void Ensure(Assembly postgresAssembly, Func<Assembly> loadDiagnostics) =>
@@ -76,7 +76,7 @@ internal static class PostgresDiagnosticsVersionGuard
     /// The whole check, with the three assemblies supplied - a seam the tests use: the engine first, then the shell
     /// (<c>DataStudio</c>, v2 step 3), which this assembly names in every signature and a deployment can lack or skew in the same way.
     /// </summary>
-    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
+    /// <param name="postgresAssembly">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
@@ -88,7 +88,7 @@ internal static class PostgresDiagnosticsVersionGuard
 
     /// <summary>One required assembly: loaded, and the same build as DataStudio.Postgres' own.</summary>
     /// <param name="name">The required package, <c>DataStudio.Postgres.Diagnostics</c> or <c>DataStudio</c>.</param>
-    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
+    /// <param name="postgresAssembly">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
     private static void EnsureAssembly(string name, Assembly postgresAssembly, Func<Assembly> load)
     {
