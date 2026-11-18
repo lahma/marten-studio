@@ -70,7 +70,21 @@ internal static class StudioTimeZones
     {
         ArgumentNullException.ThrowIfNull(zone);
 
-        string name = IanaId(zone.Id, region);
+        return Label(IanaId(zone.Id, region), zone, at);
+    }
+
+    /// <summary>
+    /// <see cref="Label(TimeZoneInfo, DateTimeOffset, string?)" /> for a zone whose name is already known - the id <see cref="Listed" /> holds it under -
+    /// so a list drawn on every render converts nothing again.
+    /// </summary>
+    /// <param name="name">The name the zone is listed under (<see cref="IanaId(string, string?)" /> of its id).</param>
+    /// <param name="zone">The zone.</param>
+    /// <param name="at">The moment the offset is read at.</param>
+    public static string Label(string name, TimeZoneInfo zone, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(zone);
+
         string offset = Offset(zone, at);
 
         return string.Equals(name, offset, StringComparison.Ordinal) ? name : name + " (" + offset + ")";

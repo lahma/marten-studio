@@ -65,7 +65,7 @@
                 @onchange="TimeZoneChanged">
             @foreach ((string id, TimeZoneInfo timeZone) in ListedZones)
             {
-                <option value="@id" selected="@(string.Equals(id, SelectedZoneName, StringComparison.Ordinal))">@StudioTimeZones.Label(timeZone, now, StudioTimeZones.CurrentRegion)</option>
+                <option value="@id" selected="@(string.Equals(id, SelectedZoneName, StringComparison.Ordinal))">@StudioTimeZones.Label(id, timeZone, now)</option>
             }
         </select>
     </div>
