@@ -22,12 +22,22 @@ eight and ships `2.0.0-beta.2`. #58 (a JSON API for the Kafka module) is a decis
 
 ## Steps
 
-- [ ] 1. Two packets in parallel, files disjoint: **B2-A** (Postgres, engine, Marten: #81, #84, #86, #87, #88) and
+- [x] 1. Two packets in parallel, files disjoint: **B2-A** (Postgres, engine, Marten: #81, #84, #86, #87, #88) and
       **B2-B** (shell, Kafka: #83, #85, #80). Sonnet implements, Opus reviews each.
-- [ ] 2. Integrate; `CHANGELOG.md` `# 2.0.0-beta.2` (one bullet an issue), written by the coordinator.
-- [ ] 3. Full `Test` at the floors and at the latest-tested versions; the Postgres projects at Npgsql 10.0.3.
+- [x] 2. Integrate; `CHANGELOG.md` `# 2.0.0-beta.2` (one bullet an issue), written by the coordinator.
+- [x] 3. Full `Test` at the floors and at the latest-tested versions; the Postgres projects at Npgsql 10.0.3.
 - [ ] 4. Pull request, green CI, merge (rebase-merge: the commits are few and each says what it fixes), tag
       `v2.0.0-beta.2`, confirm the seven packages on nuget.org, close the issues with the release named.
+
+## What was added on the way
+
+- Tasks `kh77` and `hpjq`: the Kafka live tests' records were expiring under the broker's default retention; the test
+  brokers keep them now.
+- Task `cx59` (B2-C): garbled comments, beta markers, the Kafka sample's user-secrets id, the cluster selector, the
+  Health page at a phone's width.
+- B2-D, B2-E, B2-F, from the reviews and the owner's "do everything that was going to wait": the rail's reveal when a
+  late entry appears, the browser's time zone as a visitor's default (a display change that reads nothing), Aurora's
+  reads in the schema its functions live in, "(shared servers)" in the cluster selector.
 
 ## Decisions
 
