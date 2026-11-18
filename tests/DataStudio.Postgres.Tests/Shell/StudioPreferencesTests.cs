@@ -136,6 +136,20 @@ public sealed class StudioPreferencesTests
         pages.Should().Be(0, "a page that reads its data when the scope changes does not read again because of a time zone");
     }
 
+    /// <summary>One page that throws while it handles a scope change does not keep the pages after it from hearing of the change.</summary>
+    [Fact]
+    public async Task A_page_that_throws_on_a_scope_change_does_not_stop_the_next_page()
+    {
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
+        bool second = false;
+        context.State.ScopeChanged += () => throw new InvalidOperationException("a page broke");
+        context.State.ScopeChanged += () => { second = true; return Task.CompletedTask; };
+
+        await context.State.NotifyAsync();
+
+        second.Should().BeTrue();
+    }
+
     [Fact]
     public void The_shell_settings_are_the_shells_own_and_the_modules_answer_the_shell_members_from_them()
     {
