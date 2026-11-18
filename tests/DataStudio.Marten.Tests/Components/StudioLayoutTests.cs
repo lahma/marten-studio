@@ -262,12 +262,11 @@ public class StudioLayoutTests
     }
 
     /// <summary>
-    /// A time-zone change reaches every page that listens to <see cref="StudioState.ScopeChanged" /> exactly once (Shell A1 follow-up F3): the
-    /// layout calls <c>StudioPreferences.NotifyChangedAsync()</c>, whose one subscriber is the scope state. Without this a later packet could drop
-    /// that call with every other test still green.
+    /// A time-zone change is not a scope change: neither the picker nor the zone stored in the browser raises <see cref="StudioState.ScopeChanged" />, which
+    /// is what a page that reads its data hears (F6). What the zone does reach is drawn by the cascaded display version (<see cref="ZoneChangeTests" />).
     /// </summary>
     [Fact]
-    public async Task The_time_zone_picker_raises_the_scope_changed_event_once()
+    public async Task The_time_zone_picker_does_not_raise_the_scope_changed_event()
     {
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
@@ -284,12 +283,13 @@ public class StudioLayoutTests
         // The dispatch task completes only once the handler and its render have, so nothing is still in flight when the count is read.
         await layout.Find("#ms-timezone-select").ChangeAsync(other);
 
-        raised.Should().Be(1);
+        context.Preferences.SelectedTimeZoneId.Should().Be(other);
+        raised.Should().Be(0);
     }
 
-    /// <summary>The stored zone read on the first render moves the zone the same way (follow-up F3, second half): once.</summary>
+    /// <summary>The stored zone read on the first render moves the zone the same way: no scope change.</summary>
     [Fact]
-    public void A_stored_time_zone_that_differs_raises_the_scope_changed_event_once()
+    public void A_stored_time_zone_that_differs_does_not_raise_the_scope_changed_event()
     {
         using var context = new StudioComponentContext();
         string stored = TimeZoneInfo.GetSystemTimeZones().First(x => !string.Equals(x.Id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal)).Id;
@@ -305,27 +305,20 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         context.Preferences.SelectedTimeZoneId.Should().Be(stored);
-        raised.Should().Be(1);
+        raised.Should().Be(0);
         layout.Instance.PreferencesLoaded.Should().BeTrue();
     }
 
     /// <summary>
-    /// A page that spells one fixed moment in the circuit's time zone, and draws again when a time-zone change reaches it (<c>StudioState.ScopeChanged</c>, as
-    /// every page that formats a time does): what the pages of the studio do with <c>StudioPreferences</c>, in one element.
+    /// A page that spells one fixed moment in the circuit's time zone and takes the layout's display version, as every page that formats a time does: what the
+    /// pages of the studio do with <c>StudioPreferences</c>, in one element.
     /// </summary>
-    private sealed class MomentPage : ComponentBase, IDisposable
+    private sealed class MomentPage : DataStudio.Components.StudioDisplayComponent
     {
         public static readonly DateTimeOffset Moment = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         [Inject]
         public StudioPreferences Preferences { get; set; } = null!;
-
-        [Inject]
-        public StudioState State { get; set; } = null!;
-
-        protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
-
-        private Task OnScopeChangedAsync() => InvokeAsync(StateHasChanged);
 
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder)
         {
@@ -334,8 +327,6 @@ public class StudioLayoutTests
             builder.AddContent(2, Preferences.FormatInSelectedTimeZone(Moment, "yyyy-MM-dd HH:mm"));
             builder.CloseElement();
         }
-
-        public void Dispose() => State.ScopeChanged -= OnScopeChangedAsync;
     }
 
     private static readonly RenderFragment MomentBody = builder =>

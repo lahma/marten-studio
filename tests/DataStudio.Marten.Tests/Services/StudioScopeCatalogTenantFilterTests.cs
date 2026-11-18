@@ -1,6 +1,5 @@
 using Bunit;
 
-using DataStudio.Services;
 using Marten;
 using Marten.Storage;
 
@@ -9,7 +8,6 @@ using DataStudio.Marten.Services;
 using DataStudio.Marten.Tests.Components;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -103,7 +101,7 @@ public class StudioScopeCatalogTenantFilterTests
         await using Harness harness = await Harness.CreateAsync(StorePolicy);
         harness.Policies.Allow(static resource => resource.TenantId is null or "acme");
 
-        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance);
         await state.EnsureInitializedAsync(Token);
 
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, harness.DatabaseId, "acme", Token);

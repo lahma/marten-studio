@@ -156,25 +156,8 @@ public class ActivityTests
         page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+00:00");
     }
 
-    /// <summary>
-    /// The page follows the visitor's time zone live, through the preferences themselves: it holds no reference to the database's state to hear a
-    /// scope change through (A2c), and a time zone change is the only change of the circuit that alters what it draws.
-    /// </summary>
-    [Fact]
-    public async Task A_time_zone_change_after_the_first_render_is_drawn()
-    {
-        using var context = new StudioComponentContext();
-        context.Preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
-        Record(context, "ops", "DeleteDocument", succeeded: true);
-
-        var page = context.Render<Activity>();
-        page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+00:00");
-
-        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
-        await page.InvokeAsync(context.Preferences.NotifyChangedAsync);
-
-        page.WaitForAssertion(() => page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+05:30"));
-    }
+    // A time zone change after the first render is drawn by the layout's cascaded display version, as it is on every page: ZoneChangeTests holds
+    // it through the real layout, which is what moves it.
 
     // -------------------------------------------------------------------------------------------
     // The ring is process-wide, so what it shows is not

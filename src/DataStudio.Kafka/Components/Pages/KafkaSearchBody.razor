@@ -15,6 +15,7 @@
 @inject KafkaExportService ExportService
 @inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
+@inherits DataStudio.Components.StudioDisplayComponent
 @inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaSearchBody> Logger
@@ -568,6 +569,9 @@
     private string absoluteTo = string.Empty;
     private WindowMode mode = WindowMode.Relative;
     private ZoneChoice zone = ZoneChoice.Utc;
+
+    /// <summary>The preferences' zone the window's typed times were last spelt in; empty until the first parameters are set.</summary>
+    private string spelledInZoneId = string.Empty;
     private MatchSort sort = MatchSort.Arrival;
     private int presetMinutes = 60;
     private int droppedFromLink;
@@ -862,11 +866,35 @@
         absoluteTo = hadTo ? FormatLocal(to) : absoluteTo;
     }
 
-    private TimeZoneInfo PreferenceZone()
+    /// <summary>
+    /// The visitor's time zone moved (a choice in Preferences, or the browser's own at circuit start): a window typed in it keeps its instants,
+    /// as a change of the zone choice above does, and is spelt in the new one. The preference's zone is the circuit's, which this component
+    /// is told of by <see cref="StudioDisplayComponent.DisplayVersion" /> and nothing else: nothing is read, and a search that is running
+    /// is not touched - its window was planned from instants.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        string current = Preferences.SelectedTimeZoneId;
+        string previous = spelledInZoneId;
+        spelledInZoneId = current;
+
+        if (previous.Length == 0 || string.Equals(previous, current, StringComparison.Ordinal) || zone != ZoneChoice.Preference)
+        {
+            return;
+        }
+
+        TimeZoneInfo before = ZoneById(previous);
+        bool hadFrom = TryParseLocal(absoluteFrom, before, out DateTimeOffset from, out _);
+        bool hadTo = TryParseLocal(absoluteTo, before, out DateTimeOffset to, out _);
+        absoluteFrom = hadFrom ? FormatLocal(from) : absoluteFrom;
+        absoluteTo = hadTo ? FormatLocal(to) : absoluteTo;
+    }
+
+    private static TimeZoneInfo ZoneById(string id)
     {
         try
         {
-            return TimeZoneInfo.FindSystemTimeZoneById(Preferences.SelectedTimeZoneId);
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
         }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
@@ -874,12 +902,17 @@
         }
     }
 
+    private TimeZoneInfo PreferenceZone() => ZoneById(Preferences.SelectedTimeZoneId);
+
     private TimeZoneInfo ChosenZone() => zone == ZoneChoice.Utc ? TimeZoneInfo.Utc : PreferenceZone();
 
     private string FormatLocal(DateTimeOffset instant) =>
         TimeZoneInfo.ConvertTime(instant, ChosenZone()).ToString(LocalFormat, CultureInfo.InvariantCulture);
 
-    private bool TryParseLocal(string text, out DateTimeOffset instant, out string? problem)
+    private bool TryParseLocal(string text, out DateTimeOffset instant, out string? problem) =>
+        TryParseLocal(text, ChosenZone(), out instant, out problem);
+
+    private bool TryParseLocal(string text, TimeZoneInfo chosen, out DateTimeOffset instant, out string? problem)
     {
         instant = default;
         problem = null;
@@ -889,8 +922,6 @@
             problem = "Enter both times of the window.";
             return false;
         }
-
-        TimeZoneInfo chosen = ChosenZone();
 
         if (chosen.IsInvalidTime(local))
         {

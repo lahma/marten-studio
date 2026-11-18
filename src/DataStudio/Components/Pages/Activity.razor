@@ -1,5 +1,5 @@
 @page "/activity"
-@implements IDisposable
+@inherits DataStudio.Components.StudioDisplayComponent
 @inject IShellSettings Settings
 @inject StudioActivity ActivityRing
 @inject StudioPreferences Preferences
@@ -118,7 +118,6 @@
 
     protected override async Task OnInitializedAsync()
     {
-        Preferences.Changed += OnPreferencesChanged;
         await ReloadAsync();
     }
 
@@ -155,26 +154,10 @@
         visible = matches;
     }
 
-    /// <summary>
-    /// A time zone change reads the ring again and draws it again, as the page always did. The page does not follow the
-    /// visitor's scope any more: what the ring shows a visitor never depended on the scope on screen, so a scope change has
-    /// nothing to re-judge, and the page keeps no reference to the database's state to hear of one.
-    /// </summary>
-    private async Task OnPreferencesChanged()
-    {
-        await ReloadAsync();
-        await InvokeAsync(StateHasChanged);
-    }
-
     private async Task OnFilterChangedAsync(string value)
     {
         filter = value;
         await ReloadAsync();
         await InvokeAsync(StateHasChanged);
-    }
-
-    public void Dispose()
-    {
-        Preferences.Changed -= OnPreferencesChanged;
     }
 }

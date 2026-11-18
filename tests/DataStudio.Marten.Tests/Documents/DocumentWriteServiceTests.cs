@@ -10,7 +10,6 @@ using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -87,7 +86,7 @@ public class DocumentWriteServiceTests
         var authorization = MartenSpine.Authorization(wrapped, authorizationService, users);
         var tenants = new TenantDiscovery(wrapped, NullLogger<TenantDiscovery>.Instance);
         var (_, catalog, resolver) = MartenSpine.Scope(wrapped, registry, authorization, tenants, provider);
-        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        var state = new StudioState(catalog, NullLogger<StudioState>.Instance);
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();

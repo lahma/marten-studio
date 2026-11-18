@@ -1,11 +1,9 @@
 using DataStudio.Services.Settings;
-using DataStudio.Services;
 using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Tests.Events;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using DataStudio.Postgres.Services;
@@ -392,7 +390,7 @@ public class NavIndicatorServiceTests
             FakeStudioScopeCatalog catalog = new();
             catalog.WithStore(storeKey, "Default", databaseIdentities: databaseId);
 
-            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+            StudioState state = new(catalog, NullLogger<StudioState>.Instance);
             await state.EnsureInitializedAsync(TestContext.Current.CancellationToken);
 
             TestAuthenticationStateProvider visitor = new();
@@ -516,7 +514,7 @@ public class NavIndicatorServiceTests
 
             AuthenticationState.SignIn("operator");
 
-            State = new StudioState(Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+            State = new StudioState(Catalog, NullLogger<StudioState>.Instance);
 
             Contributor = new MartenNavIndicatorContributor(Events, Projections);
 

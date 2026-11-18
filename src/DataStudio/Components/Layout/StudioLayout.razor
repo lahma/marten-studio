@@ -18,6 +18,10 @@
    navigation interception before that render batch was sent, so the attribute in the DOM means a link, Back or NavigateTo is
    handled by the circuit. It is the browser suites' readiness signal; nothing else reads it. *@
 <div class="ms-studio" data-theme="@Preferences.SelectedTheme" data-ms-interactive="@(preferencesLoaded ? "true" : null)">
+  @* The zone every time is spelt in, as a number that moves whenever it does: a component that draws a time (StudioDisplayComponent) takes it, so
+     a change of zone draws them all again in this one render pass, from what they hold, and reads nothing - it is not a change of scope.
+     No markup of its own, and not fixed: a fixed value is never told of a change. *@
+  <CascadingValue Name="@StudioPreferences.DisplayVersionName" Value="@Preferences.DisplayVersion">
     @* A module's circuit host (D34): no markup, one per module that has one, rendered first and kept for the life of the circuit - before the
        rail, so that what it subscribes to is subscribed to before the rail's own handlers - and told whether the page on screen is its module's. *@
     @foreach (IStudioModule hosted in Descriptor.Modules)
@@ -104,6 +108,7 @@
     </div>
     <ToastHost />
     <ShortcutSheet />
+  </CascadingValue>
 </div>
 
 @code {
@@ -279,8 +284,6 @@
                 return;
             }
 
-            string previousTimeZoneId = Preferences.SelectedTimeZoneId;
-
             if (!string.IsNullOrWhiteSpace(storedTheme))
             {
                 Preferences.SelectedTheme = storedTheme;
@@ -295,12 +298,9 @@
                 Preferences.TryUseBrowserTimeZone(browserTimeZoneId);
             }
 
-            if (!string.Equals(previousTimeZoneId, Preferences.SelectedTimeZoneId, StringComparison.Ordinal))
-            {
-                // Every page re-renders its timestamps in the new zone. The theme needs no such notice:
-                // it is one attribute on this component's own root.
-                await Preferences.NotifyChangedAsync();
-            }
+            // A moved zone is drawn by the render OnAfterRenderAsync asks for next: StudioPreferences.DisplayVersion moved with it and every
+            // component that draws a time takes it, so there is nothing to tell and no page is asked to read again. The theme needs no
+            // notice either: it is one attribute on this component's own root.
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
@@ -333,9 +333,9 @@
         Preferences.SelectedTimeZoneId = selected;
         if (!string.Equals(previous, Preferences.SelectedTimeZoneId, StringComparison.Ordinal))
         {
-            await Preferences.NotifyChangedAsync();
-            await PersistPreferenceAsync(StudioPreferences.TimeZonePreferenceKey);
+            // Drawn first, from what every page holds (DisplayVersion moved with the zone); persisting the choice is a call to the browser.
             await InvokeAsync(StateHasChanged);
+            await PersistPreferenceAsync(StudioPreferences.TimeZonePreferenceKey);
         }
     }
 

@@ -26,14 +26,20 @@ function counts only when a superuser owns it, and a setting `pg_settings` lists
 
 Once the platform read has said Aurora, and only then, the studio calls Aurora's functions - each qualified by the schema
 the platform read found (quoted through the SQL builder, never joined into a statement as text): `pg_catalog`, where Aurora
-keeps them, or, when the `aurora_version()` a superuser owns is in another schema, that schema. The schema is only ever one
-that **only a superuser can create in**: owned by a superuser, with no `CREATE` for `PUBLIC` or for any role that is not one.
-Where a database owner can also put a function (the `public` schema, say), a function of the same name they made would be
-called as the studio's own role, so the studio calls nothing there. A function a database owner planted in `public` is
-neither a marker nor ever called (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`).
+keeps them, or, when the `aurora_version()` a superuser owns is in another schema, that schema. What the studio checks of that
+schema is its own access list, in the catalog: **a superuser owns the schema, and no `CREATE` entry on it names `PUBLIC` or a
+role that is not a superuser** (`pg_database_owner`, which is not one, included; a schema with no list of its own is the
+owner's alone). It counts the entries the schema carries, so a role that has `CREATE` only through *membership* of a role
+that holds it - a role granted the superuser owner's privileges with `INHERIT`, which PostgreSQL 16 and later can grant without
+the right to `SET ROLE` - is not seen: a host that lends a superuser's schema privileges that way is a host where the studio
+may call a function that role made. Where a database owner or `PUBLIC` can put a function by a grant the list names (the
+`public` schema, say, or a superuser's schema with `CREATE` granted to an ordinary role), a function of the same name they
+made would be called as the studio's own role, so the studio calls nothing there. A function a database owner planted in
+`public` is neither a marker nor ever called, and neither is one in a superuser's schema an ordinary role was granted `CREATE`
+on (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`).
 
 An Aurora server with no schema to call (its settings alone mark it, no `aurora_version()` is visible, or the one that is
-sits in a schema somebody short of a superuser could create in) has its Aurora sections say so in a sentence ("This server
+sits in a schema whose list gives `CREATE` to `PUBLIC` or to a role short of a superuser) has its Aurora sections say so in a sentence ("This server
 is Aurora, but the studio found no aurora_version() function in a schema that only a superuser can create in, so Aurora's
 own functions are not called."), not a SQLSTATE:
 
@@ -258,6 +264,6 @@ These need an AWS account, or a page AWS has not written:
 SQL in `pg_catalog`, or in a schema of its own (`AuroraShim.ApplyInSchemaAsync`), from AWS's signatures, in a database of their own
 on the version matrix's PostgreSQL 17 - never one a self-hosted test reads, because the shim makes its database an Aurora server
 for the detector. `Aurora/AuroraShimLiveTests` proves the instance, R03 `aurora-reader` firing and quiet, the wait section, the
-same reads against functions in a schema of their own, that nothing is called in a schema a role short of a superuser can create
-in (the sections say why in a sentence), a failover between two sweeps, the not-applicable checks, C03's remedy with and without a
+same reads against functions in a schema of their own, that nothing is called in a schema whose list gives `CREATE` to `PUBLIC`, to
+a role short of a superuser or to `pg_database_owner`, or that a database owner owns (the sections say why in a sentence), a failover between two sweeps, the not-applicable checks, C03's remedy with and without a
 capacity source, the no-lock and no-DDL reads, and that no role short of a superuser can plant an Aurora marker.

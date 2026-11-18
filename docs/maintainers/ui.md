@@ -138,7 +138,7 @@ so a visitor who has scrolled the rail away is not scrolled back), and a badge n
 zone** (no `ms_tz` in `localStorage` or the cookie), `StudioLayout` asks the browser once for its IANA id through
 `martenStudio.timeZone.get` (`Intl.DateTimeFormat().resolvedOptions().timeZone`, in `studio.js`) and, when
 `TimeZoneInfo.TryFindSystemTimeZoneById` knows it and it has the shape of a zone id, `StudioPreferences.TryUseBrowserTimeZone`
-makes it the circuit's zone and tells every page (`NotifyChangedAsync`), so the page redraws in it. Nothing is stored (only a choice in
+makes it the circuit's zone, and every time on screen is spelt again in it (below). Nothing is stored (only a choice in
 Preferences is), no preference is counted as the visitor's (`PreferenceVersion` does not move, so a choice made while the
 browser was being asked still wins), and an id the server does not know, a call that failed (interop loss is caught with
 `StudioLiveUpdates.IsInteropUnavailable`) or a prerender leaves the server's zone. A visitor with a stored zone is never asked. The
@@ -146,6 +146,24 @@ Preferences select always holds the circuit's zone under its own id, even where 
 Windows host names a zone by its region: "Europe/Kiev" for the Helsinki visitor's "Europe/Helsinki"), adds the browser's under its
 own id as well, and says "this browser" beside it ("Europe/Helsinki (UTC+02:00), this browser"). Every page formats through
 `StudioPreferences`, and the Kafka search's absolute window reads the same zone and the same label.
+
+**A zone change is a display change, never a scope change, and it draws every time on screen in one render pass.** However the
+circuit's zone moves (a choice in Preferences, a stored zone read once the circuit has started, the browser's own),
+`StudioPreferences.DisplayVersion` moves with it, and nothing else does: there is no event, `StudioState.ScopeChanged` is not
+raised, no page reads its data again, no cache is invalidated, nothing is audited and no address is rewritten. `StudioLayout`
+cascades the number around everything it draws (`CascadingValue`, not fixed, under `StudioPreferences.DisplayVersionName`), and every
+component that spells a time takes it by deriving from `StudioDisplayComponent`, which has no member but the cascading parameter. A
+retained page is drawn again only when its parameters change and a page has none, so a value the components take is the one thing that
+reaches a page of every module, the pages with no scope gate included; a component that derives draws again, and its children by the
+usual rule. `DisplayVersionConventionTests` fails a component under `src/` that calls `Preferences.FormatInSelectedTimeZone`,
+`ConvertToSelectedTimeZone`, `SelectedTimeZoneId` or `SinceMarkTime.When` and does not derive from it. What a page holds is spelt again
+from the data it holds, so a time is spelt where it is drawn, never when it is read: a string made at load time and kept does not follow
+the zone (the rail's health badge holds its glance and a `TitleOf` that spells its tooltip at each draw). A page in the middle of a load
+when the zone changes keeps the load and draws what it reads in the new zone; a running search and a live tail are not touched, and a
+window typed in the Kafka search's own "visitor's zone" keeps its instants and is spelt in the new one (`OnParametersSet`). A time in a
+tooltip that is the same in every zone (a UTC `title`) is not a time to follow. The theme is one attribute on the layout's own root and
+has no such value. `StudioDisplayComponent` is public only because the Razor SDK emits every component as `public` and a public class
+cannot derive from an internal one; it is a `ComponentBase`, which the public API snapshot leaves out (D20).
 
 ## Navigation inside the studio
 

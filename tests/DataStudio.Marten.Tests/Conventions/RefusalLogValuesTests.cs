@@ -6,7 +6,6 @@ using Marten;
 using DataStudio.Marten.Services;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -154,7 +153,7 @@ public partial class RefusalLogValuesTests
             new StudioActivity(ring, users, []),
             captured.CreateFactory().CreateLogger<StudioActionLog>(),
             users,
-            new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor())),
+            new StudioState(catalog, NullLogger<StudioState>.Instance),
             MartenDescriptor.Instance,
             MartenSettings.Of(new MartenOptions()));
 

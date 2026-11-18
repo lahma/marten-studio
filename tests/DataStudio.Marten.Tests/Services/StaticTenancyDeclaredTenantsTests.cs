@@ -1,4 +1,3 @@
-using DataStudio.Services;
 using Marten;
 using Marten.Storage;
 
@@ -6,7 +5,6 @@ using DataStudio.Marten.Services;
 using DataStudio.Marten.Tests.Links;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -405,7 +403,7 @@ public class StaticTenancyDeclaredTenantsTests
         /// <summary>A circuit's state over the catalog, opened on the tenancy's first listed database.</summary>
         public async Task<StudioState> StateAsync()
         {
-            StudioState state = new(Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+            StudioState state = new(Catalog, NullLogger<StudioState>.Instance);
             await state.EnsureInitializedAsync(Token);
             return state;
         }

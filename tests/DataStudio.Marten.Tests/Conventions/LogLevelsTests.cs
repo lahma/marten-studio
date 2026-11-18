@@ -336,8 +336,6 @@ public class LogLevelsTests
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.StatementsPage.cs : 9451 StatementsReadFailed"] = (Verdict.Throttled,
             "The Statements page could not take the statement sweep for a reason nobody chose; an expected state is the page's sentence, a check that failed is the sweep's 9222, and the page re-reads every HealthInterval."),
         // ---- Faults ---------------------------------------------------------------------------------
-        ["src/DataStudio/Services/StudioPreferences.cs : A studio page failed to handle a preference change"] = (Verdict.Fault,
-            "Shell A1: a page's preference-change handler threw (a time-zone change that did not redraw): a studio bug, and the page keeps spelling its moments in the old zone. In practice the scope state's relay contains its pages' failures first, so this line is reached only by a handler registered on the preferences directly."),
         ["src/DataStudio.Postgres/Services/StudioState.cs : A Data Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
         ["src/DataStudio.Postgres/Services/StudioState.cs : A Data Studio page failed to handle a change of the scope its links carry"] = (Verdict.Fault,

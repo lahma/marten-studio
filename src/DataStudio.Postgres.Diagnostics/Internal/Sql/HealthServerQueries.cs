@@ -93,6 +93,8 @@ internal static class HealthServerQueries
     /// where only superusers can create a function - the schema's owner is a superuser and no ACL entry gives <c>CREATE</c> to <c>PUBLIC</c> or to a role
     /// that is not one. <c>pg_catalog</c> first when there are several. The owner of the function alone would not fence the calls that follow: a schema a
     /// database owner can create in could also hold a <c>aurora_replica_status()</c> of theirs, which the studio would then call as its own role.
+    /// The statement reads the schema's own access list, so it counts direct entries only: a role that has <c>CREATE</c> through membership of a role that
+    /// holds it (a member of the superuser owner with <c>INHERIT</c>, which PostgreSQL 16 can grant without <c>SET</c>) is not seen (<c>docs/aurora.md</c>).
     /// </summary>
     private const string AuroraNamespace =
         "(select (pg_catalog.array_agg(n.oid order by n.oid = 'pg_catalog'::pg_catalog.regnamespace desc, n.nspname))[1]\n" +

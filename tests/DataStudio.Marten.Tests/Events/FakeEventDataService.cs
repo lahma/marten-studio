@@ -172,7 +172,13 @@ internal sealed partial class FakeEventDataService : IEventDataService
     public Task<EventStoreShape> DescribeAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(Shape);
 
-    public Task<StreamPage> ListStreamsAsync(
+    /// <summary>
+    /// When set, every stream-list read waits until the test completes it (after the read is counted in <see cref="StreamRequests" />): a page
+    /// held in the middle of its load.
+    /// </summary>
+    public TaskCompletionSource? StreamListGate { get; set; }
+
+    public async Task<StreamPage> ListStreamsAsync(
         StudioScope scope,
         StreamListRequest request,
         CancellationToken cancellationToken = default)
@@ -180,6 +186,16 @@ internal sealed partial class FakeEventDataService : IEventDataService
         StreamRequests.Add(request);
         StreamRequestScopes.Add(scope);
 
+        if (StreamListGate is { } held)
+        {
+            await held.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await StreamListAnswer(request).ConfigureAwait(false);
+    }
+
+    private Task<StreamPage> StreamListAnswer(StreamListRequest request)
+    {
         if (request.StreamId is { Length: > 0 } && StreamPageForId is not null)
         {
             return Task.FromResult(StreamPageForId);

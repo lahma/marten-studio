@@ -2,7 +2,6 @@ using DataStudio.Services.Settings;
 using DataStudio.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
@@ -14,7 +13,7 @@ namespace DataStudio.Postgres.Tests.Shell;
 
 /// <summary>
 /// <see cref="StudioPreferences" />: what moved out of <see cref="StudioState" /> when the shell's preferences became their own
-/// scoped service (shell A1), and the one relay that keeps a time-zone change reaching every page that listens to the scope.
+/// scoped service (shell A1), and the display version a time-zone change moves, which is not a scope change.
 /// </summary>
 public sealed class StudioPreferencesTests
 {
@@ -96,58 +95,45 @@ public sealed class StudioPreferencesTests
         preferences.ConvertToSelectedTimeZone(moment).Offset.Should().Be(TimeSpan.FromMinutes(330));
     }
 
+    /// <summary>
+    /// What the layout cascades: it moves when the zone does, however it moved (a choice, a stored zone read after the circuit started, the
+    /// browser's own), and for nothing else - not a theme, not a zone picked again.
+    /// </summary>
     [Fact]
-    public async Task Every_subscriber_hears_of_a_change_even_when_one_throws_and_the_failure_is_logged()
+    public void The_display_version_moves_with_the_zone_however_it_moves_and_with_nothing_else()
     {
-        ListLogger logger = new();
-        StudioPreferences preferences = new(new HttpContextAccessor(), null, logger);
-        List<string> told = [];
+        StudioPreferences preferences = new(new HttpContextAccessor()) { SelectedTimeZoneId = "Asia/Kolkata" };
+        long version = preferences.DisplayVersion;
 
-        preferences.Changed += () => { told.Add("first"); return Task.CompletedTask; };
-        preferences.Changed += () => throw new InvalidOperationException("a page broke");
-        preferences.Changed += () => { told.Add("third"); return Task.CompletedTask; };
-
-        await preferences.NotifyChangedAsync();
-
-        told.Should().Equal("first", "third");
-        logger.Messages.Should().ContainSingle().Which.Should().Be("A studio page failed to handle a preference change");
-    }
-
-    [Fact]
-    public async Task A_change_on_a_circuit_that_never_resolved_the_scope_state_throws_nothing()
-    {
-        StudioPreferences preferences = new(new HttpContextAccessor());
-
+        preferences.SelectedTheme = "dark";
         preferences.SelectedTimeZoneId = "Asia/Kolkata";
-        Func<Task> notify = preferences.NotifyChangedAsync;
+        preferences.DisplayVersion.Should().Be(version, "a theme, and a zone that is the zone already, are no change of the zone");
 
-        await notify.Should().NotThrowAsync("nothing subscribes until the scope state is built");
+        preferences.SelectedTimeZoneId = "Pacific/Niue";
+        preferences.DisplayVersion.Should().Be(version + 1, "a choice in Preferences");
+
+        long preference = preferences.PreferenceVersion;
+        preferences.TryUseBrowserTimeZone("Pacific/Kiritimati").Should().BeTrue();
+        preferences.DisplayVersion.Should().Be(version + 2, "the browser's zone, a default");
+        preferences.PreferenceVersion.Should().Be(preference, "which is still not the visitor's choice");
+
+        preferences.TryUseBrowserTimeZone("Pacific/Kiritimati").Should().BeTrue();
+        preferences.TryUseBrowserTimeZone("Mars/Olympus_Mons").Should().BeFalse();
+        preferences.DisplayVersion.Should().Be(version + 2, "an answer that changes nothing, and one the server does not know");
     }
 
+    /// <summary>A zone change is a display change: the scope state that pages read their data for hears nothing of it.</summary>
     [Fact]
-    public async Task A_time_zone_change_still_reaches_a_page_subscribed_to_the_scope_changed_event()
+    public async Task A_time_zone_change_is_not_a_scope_change()
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         int pages = 0;
         context.State.ScopeChanged += () => { pages++; return Task.CompletedTask; };
 
         context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
-        await context.Preferences.NotifyChangedAsync();
+        context.Preferences.TryUseBrowserTimeZone("Pacific/Kiritimati");
 
-        pages.Should().Be(1, "the state relays the preferences' change to ScopeChanged, as the layout's State.NotifyAsync() did");
-    }
-
-    [Fact]
-    public async Task A_page_that_throws_on_a_time_zone_change_does_not_stop_the_next_page()
-    {
-        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
-        bool second = false;
-        context.State.ScopeChanged += () => throw new InvalidOperationException("a page broke");
-        context.State.ScopeChanged += () => { second = true; return Task.CompletedTask; };
-
-        await context.Preferences.NotifyChangedAsync();
-
-        second.Should().BeTrue();
+        pages.Should().Be(0, "a page that reads its data when the scope changes does not read again because of a time zone");
     }
 
     [Fact]
@@ -215,18 +201,5 @@ public sealed class StudioPreferencesTests
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = false;
         guard.IsEnabled(StudioCapability.RunSql).Should().BeTrue("neither switch is on");
-    }
-
-    private sealed class ListLogger : ILogger<StudioPreferences>
-    {
-        public List<string> Messages { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Messages.Add(formatter(state, exception));
     }
 }

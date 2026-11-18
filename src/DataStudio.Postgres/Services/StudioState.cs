@@ -18,9 +18,9 @@ namespace DataStudio.Postgres.Services;
 /// store in the process and every subscribed page would re-read for it.
 /// </para>
 /// <para>
-/// The theme, the time zone and the clock are <see cref="StudioPreferences" />'s, not this class's. A change of preference still
-/// reaches every page that listens to <see cref="ScopeChanged" />: the constructor subscribes <see cref="NotifyAsync" /> to
-/// <see cref="StudioPreferences.Changed" />, so a time-zone change redraws them as it always has.
+/// The theme, the time zone and the clock are <see cref="StudioPreferences" />'s, not this class's, and a change of preference is not a
+/// change of scope: <see cref="ScopeChanged" /> is raised for the scope alone, so a page that reads its data when it hears it does not read
+/// again because a visitor picked a time zone. A zone change draws what is on screen again (<c>StudioDisplayComponent</c>).
 /// </para>
 /// </remarks>
 internal sealed class StudioState
@@ -42,20 +42,12 @@ internal sealed class StudioState
 
     /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
     /// <param name="logger">Where a page's failed scope-change handler goes.</param>
-    /// <param name="preferences">
-    /// The circuit's preferences, whose change this state relays to every page that listens to <see cref="ScopeChanged" />. Never
-    /// unsubscribed: both are scoped to the same circuit.
-    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
-        ILogger<StudioState> logger,
-        StudioPreferences preferences)
+        ILogger<StudioState> logger)
     {
-        ArgumentNullException.ThrowIfNull(preferences);
-
         this.catalog = catalog;
         this.logger = logger;
-        preferences.Changed += NotifyAsync;
     }
 
     /// <summary>

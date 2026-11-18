@@ -4,7 +4,6 @@ using Marten;
 using DataStudio.Marten.Services;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -48,7 +47,7 @@ public class StudioActionLogTest
             authorization,
             new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
             provider);
-        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        var state = new StudioState(catalog, NullLogger<StudioState>.Instance);
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();

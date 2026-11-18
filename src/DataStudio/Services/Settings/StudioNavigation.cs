@@ -54,8 +54,19 @@ internal sealed record StudioNavItem(
 /// <summary>What one sidebar badge renders as.</summary>
 /// <param name="Text">The count, or empty for a dot.</param>
 /// <param name="CssClass">The badge's <c>ms-nav-badge-*</c> classes.</param>
-/// <param name="Title">Its tooltip and accessible name.</param>
-internal sealed record StudioNavBadge(string Text, string CssClass, string Title);
+/// <param name="Title">Its tooltip and accessible name, as it was spelt when the badge was read.</param>
+internal sealed record StudioNavBadge(string Text, string CssClass, string Title)
+{
+    /// <summary>
+    /// Spells the title again, for a badge whose title holds a time (the health badge's "as of"): the rail draws <see cref="TitleNow" />, so a
+    /// change of the visitor's time zone is drawn on the badge from the data it was read with, without reading anything again. A badge with no
+    /// time in its title leaves it <see langword="null" />.
+    /// </summary>
+    public Func<string>? TitleOf { get; init; }
+
+    /// <summary>What the rail draws as the tooltip and accessible name: <see cref="TitleOf" />'s spelling, or <see cref="Title" />.</summary>
+    public string TitleNow => TitleOf is { } spell ? spell() : Title;
+}
 
 /// <summary>The badge keys the shared sidebar draws itself.</summary>
 internal static class StudioNavBadgeKeys

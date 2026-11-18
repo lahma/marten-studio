@@ -311,7 +311,11 @@ internal sealed class DatabaseModuleRail : IStudioModuleRail
             [StudioNavBadgeKeys.Health] = new StudioNavBadge(
                 (health.Critical + health.Warning).ToString("N0", CultureInfo.InvariantCulture),
                 health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
-                HealthBadgeTitle(health)),
+                HealthBadgeTitle(health))
+            {
+                // The title holds a time ("as of 14:05"): spelt again whenever the rail draws, so the visitor's zone follows with no read.
+                TitleOf = () => HealthBadgeTitle(health),
+            },
         };
 
         return badges;
