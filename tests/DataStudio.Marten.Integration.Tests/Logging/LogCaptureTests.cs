@@ -12,7 +12,7 @@ namespace DataStudio.Marten.Integration.Tests.Logging;
 /// </summary>
 /// <remarks>
 /// Worth a test because the failure is silence. After the 0.5 move every shared service logs under
-/// <c>The Postgres module.*</c>, and a filter that kept only <c>The Marten module</c> handed those loggers a
+/// <c>DataStudio.Postgres.*</c>, and a filter that kept only <c>DataStudio.Marten</c> handed those loggers a
 /// <c>NullLogger</c>: every "no Warning from polling" assertion over them passed over nothing, and every assertion that
 /// an event was written failed for a reason that had nothing to do with the code under test.
 /// </remarks>

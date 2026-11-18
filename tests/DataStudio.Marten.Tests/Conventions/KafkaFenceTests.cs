@@ -5,7 +5,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
 /// The Kafka fence at the Marten module (hard rule 16, D34): its project file, restore graph, built references and this suite's output folder hold no
-/// <c>Confluent.*</c>, <c>librdkafka</c>, <c>Wolverine*</c> or <c>The Kafka module*</c>. A Marten host takes the Kafka module as a package of its own, never through Data Studio.
+/// <c>Confluent.*</c>, <c>librdkafka</c>, <c>Wolverine*</c> or <c>DataStudio.Kafka*</c>. A Marten host takes the Kafka module as a package of its own, never through Data Studio.
 /// </summary>
 public class KafkaFenceTests
 {

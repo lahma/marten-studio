@@ -203,7 +203,7 @@ beta says so in a few marked places, each carrying the text `beta: remove at 2.0
 Kafka and database pages' install lines, `docs/upgrading.md`'s and `docs/stability.md`'s notes, and `SECURITY.md`'s 1.3.x row. In prose and
 tables the marker is the HTML comment `<!-- beta: remove at 2.0.0 -->`; a command block gets the same comment on the line directly above its fence,
 because inside the fence a comment would be shown, and a `#` comment after a command breaks it when pasted into `cmd.exe`. The release of `2.0.0`
-finds every place with one command, `git grep "beta: remove at 2.0.0"`, and removes the markers together with the `--prerelease` of the install lines.
+finds every place with one command, `git grep "beta: remove at 2.0.0"`, and removes what each marks (the note, the row, the `--prerelease` of an install line) together with the marker.
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);

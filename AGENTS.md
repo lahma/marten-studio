@@ -422,7 +422,7 @@ ASP.NET Core in it and the same exact-pin discipline one level down: the Postgre
 `DataStudio.Postgres.Diagnostics [x.y.z]` and `DataStudio [x.y.z]`, and `AddPostgres()` first runs
 `PostgresDiagnosticsVersionGuard`, which `AddMarten()`'s guard repeats for the engine and the shell. The modules register the engine
 themselves: one registration per container, `AddPostgresDiagnostics()` refused beside `AddPostgres()` or `AddMarten()`. **One shell per
-application**, and `AddDataStudio()` and each `Add…()` are idempotent; `AddMarten()` registers the Postgres module itself and is refused
+application**, and `AddDataStudio()` and each `Add…()` are idempotent; `AddMarten()` brings the Postgres module's pages as part of the Marten module and is refused
 beside `AddPostgres()`. Settings split in seams: `IShellSettings` (the shell's, which a module's settings answer), `IDiagnosticsSettings`
 for the engine and `IStudioSettings` for the Postgres module; a module's one options object answers the ones it is. The public
 `AddMarten`'s own body stays free of Postgres types (`PostgresVersionGuardTests` scans its IL). `PostgresResource` has no tenant and

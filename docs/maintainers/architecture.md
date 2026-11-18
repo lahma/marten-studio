@@ -128,7 +128,8 @@ plug-in model nobody asked for (*Out of scope* in the 2.0 plan: a public module 
 *One shell per application, and what a module is.* The shell's options (`DataStudioOptions`: `Path`, `Title`, `ApplicationPath`,
 `AuthorizationPolicy`, `ReadOnly`, `RefreshInterval`) are the shell's, and a module's options have none of them. `AddDataStudio()`
 and every `Add…()` are idempotent: called twice they configure the options twice and register once. **One database module per
-application:** `AddMarten()` registers the Postgres module itself, over the Marten stores' databases (it needs `DataStudio.Postgres`),
+application:** `AddMarten()` brings the Postgres module's pages over the Marten stores' databases as part of the Marten module (it needs
+`DataStudio.Postgres`),
 and `AddMarten()` beside `AddPostgres()` is refused, in either order; `AddPostgresDiagnostics()` is refused in a container that holds
 either, in either order. A module (D34) is an internal `IStudioModule` that the shell composes into its descriptor at first
 resolution, so registration is order-independent for what is refused and order-*dependent* for what is shown: the rail, the banner, the

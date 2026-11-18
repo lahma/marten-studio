@@ -96,7 +96,7 @@ public partial class PostgresWordsTests
     public void Every_shared_check_is_evaluated_to_a_finding_and_to_quiet()
     {
         IReadOnlyList<Type> shared = HealthCheckRegistry.Discover(typeof(PostgresText).Assembly);
-        shared.Should().HaveCountGreaterThanOrEqualTo(39, "every shared check of 0.4 and of wave 5 is in the DataStudio.Postgres assembly");
+        shared.Should().HaveCountGreaterThanOrEqualTo(39, "every shared check of 0.4 and of wave 5 is in the DataStudio.Postgres.Diagnostics assembly");
 
         List<string> missing = [];
 
