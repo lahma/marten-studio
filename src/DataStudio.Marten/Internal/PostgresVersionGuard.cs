@@ -36,7 +36,7 @@ namespace DataStudio.Marten.Internal;
 /// </remarks>
 internal static class PostgresVersionGuard
 {
-    /// <summary>The shared studio's assembly name: a string, never a type, for the reason in the remarks.</summary>
+    /// <summary>The Postgres module's assembly name: a string, never a type, for the reason in the remarks.</summary>
     internal const string PostgresAssemblyName = "DataStudio.Postgres";
 
     /// <summary>The engine's assembly name, checked the same way: a string, never a type.</summary>
@@ -56,7 +56,7 @@ internal static class PostgresVersionGuard
 
     /// <summary>The check for DataStudio.Postgres alone, with the two assemblies supplied - a seam the tests use.</summary>
     /// <param name="martenAssembly">DataStudio.Marten's own assembly, whose version is the one required.</param>
-    /// <param name="loadPostgres">Loads the shared studio's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadPostgres">Loads the Postgres module's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">DataStudio.Postgres is missing, or is another version.</exception>
     internal static void Ensure(Assembly martenAssembly, Func<Assembly> loadPostgres) =>
         EnsureAssembly(PostgresAssemblyName, "DataStudio.Marten", martenAssembly, loadPostgres);
@@ -67,7 +67,7 @@ internal static class PostgresVersionGuard
     /// (the health export), and which a deployment can lack or skew in the same way.
     /// </summary>
     /// <param name="martenAssembly">DataStudio.Marten's own assembly, whose version is the one required.</param>
-    /// <param name="loadPostgres">Loads the shared studio's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadPostgres">Loads the Postgres module's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
     internal static void Ensure(Assembly martenAssembly, Func<Assembly> loadPostgres, Func<Assembly> loadDiagnostics)
@@ -81,7 +81,7 @@ internal static class PostgresVersionGuard
     /// (<c>DataStudio</c>), which DataStudio.Marten reaches through DataStudio.Postgres and names directly (the layout, the rail and the JSON viewer are its).
     /// </summary>
     /// <param name="martenAssembly">DataStudio.Marten's own assembly, whose version is the one required.</param>
-    /// <param name="loadPostgres">Loads the shared studio's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadPostgres">Loads the Postgres module's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
@@ -148,13 +148,13 @@ internal static class PostgresVersionGuard
     /// must match: a Debug build is a development tree, where an IDE's incremental build after a commit recompiles
     /// DataStudio.Marten with the new commit and leaves an unchanged DataStudio.Postgres with the old one, and that is not a skew.
     /// </summary>
-    /// <param name="martenAssembly">DataStudio.Marten's informational version.</param>
-    /// <param name="postgresStudio">DataStudio.Postgres' informational version.</param>
+    /// <param name="martenVersion">DataStudio.Marten's informational version.</param>
+    /// <param name="loadedVersion">The loaded assembly's informational version.</param>
     /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
-    internal static bool SameBuild(string? martenAssembly, string? postgresStudio, bool bothRelease) =>
-        bothRelease && HasBuildMetadata(martenAssembly) && HasBuildMetadata(postgresStudio)
-            ? string.Equals(martenAssembly, postgresStudio, StringComparison.Ordinal)
-            : string.Equals(ReleaseVersion(martenAssembly), ReleaseVersion(postgresStudio), StringComparison.Ordinal);
+    internal static bool SameBuild(string? martenVersion, string? loadedVersion, bool bothRelease) =>
+        bothRelease && HasBuildMetadata(martenVersion) && HasBuildMetadata(loadedVersion)
+            ? string.Equals(martenVersion, loadedVersion, StringComparison.Ordinal)
+            : string.Equals(ReleaseVersion(martenVersion), ReleaseVersion(loadedVersion), StringComparison.Ordinal);
 
     /// <summary>Whether an assembly was built in the Release configuration, as every pack of the packages is.</summary>
     /// <param name="assembly">The assembly.</param>
@@ -191,7 +191,7 @@ internal static class PostgresVersionGuard
         return plus < 0 ? informationalVersion : informationalVersion[..plus];
     }
 
-    /// <summary>Loads the shared studio by name - the one place its name meets the loader.</summary>
+    /// <summary>Loads the Postgres module by name - the one place its name meets the loader.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadPostgres() => Assembly.Load(new AssemblyName(PostgresAssemblyName));
 

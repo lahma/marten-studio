@@ -17913,7 +17913,7 @@ dialog.ms-modal::backdrop {
    which `<TableScroll>` announces and a keyboard can reach), the code stays
    on one line, and the section and the cards give back 16 px of padding each.
    Measured with the Marten sample at 390 px: 16 808 px before, about 12 700 after.
-   CSS only: the page's markup is another change's.
+   The padding rule also reaches the finding cards the Connection and Server pages draw.
    -------------------------------------------------------------------------- */
 
 @media (max-width: 640px) {

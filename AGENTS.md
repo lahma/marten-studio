@@ -243,8 +243,9 @@ version and `WolverineFx.Kafka` (floor `6.61.0`). No `Marten.AspNetCore`. The fl
 2026-11-03), tested and packed as *Build* says. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a read-only
-browser; `marten.Capabilities = MartenCapabilities.All()` is the one-line, greppable opt-in, and every disabled control
-names the exact property a host would have to set. `PostgresCapabilities` has four, all reads authorized like
+browser; `marten.Capabilities = MartenCapabilities.All()` is the one-line, greppable opt-in, and a disabled control
+names the exact property a host would have to set (a page reached by its address for a feature that is off says only that it is
+not available here: the Kafka module's pages and the SQL console, #74 and #88; the capability chip names the property). `PostgresCapabilities` has four, all reads authorized like
 writes, and `KafkaCapabilities` four. Full text: [authorization.md](docs/maintainers/authorization.md#d4).
 
 **D5 — Three authorization layers, plus two process-wide switches.** The shell's `AuthorizationPolicy` decides who gets in, on every

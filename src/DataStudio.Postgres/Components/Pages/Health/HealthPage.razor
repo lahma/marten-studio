@@ -342,7 +342,7 @@
         report is null ? [] : [.. report.Findings.Where(x => x.Counts(Mutes.IsMuted))];
 
     /// <summary>
-    /// The Critical findings this visitor is shown and has not muted, in the page's own order (area, then the report's): the report
+    /// The Critical findings this visitor is shown and has not muted, in the report's order: the report
     /// holds only what the gates let this visitor see, so none is named here that the cards below would not draw.
     /// </summary>
     private List<HealthReportFinding> CriticalFindings =>
