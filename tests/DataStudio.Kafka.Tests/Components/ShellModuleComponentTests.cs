@@ -183,9 +183,27 @@ public class ShellModuleComponentTests
 
         public Dictionary<string, StudioNavBadge> Badges { get; } = [];
 
-        public string Decorate(string href) => href;
+        /// <summary>What the module's links carry after their address, as the database's carry the scope.</summary>
+        public string Scope { get; set; } = string.Empty;
 
-        public bool IsShown(StudioNavItem item) => !Hidden.Contains(item.Label);
+        /// <summary>An entry that is hidden the first time the rail asks and shown every time after: the state moving between a render and what is read after it.</summary>
+        public string? HiddenOnlyFirstTime { get; set; }
+
+        private bool askedAbout;
+
+        public string Decorate(string href) => href + Scope;
+
+        public bool IsShown(StudioNavItem item)
+        {
+            if (item.Label == HiddenOnlyFirstTime)
+            {
+                bool first = !askedAbout;
+                askedAbout = true;
+                return !first;
+            }
+
+            return !Hidden.Contains(item.Label);
+        }
 
         public event Action? LinksChanged
         {
@@ -229,6 +247,53 @@ public class ShellModuleComponentTests
         // Nothing else changed: another render reveals nothing.
         rail.Render();
         Reveals().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task A_scope_that_changes_only_the_links_does_not_bring_the_active_item_into_view_again()
+    {
+        FakeHostRail module = new();
+        using KafkaHarness harness = new(null, services => services.AddSingleton<IStudioModuleRail>(module), [], withHostModule: true);
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        IReadOnlyList<Bunit.JSRuntimeInvocation> Reveals() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"];
+
+        rail.WaitForAssertion(() => Reveals().Should().ContainSingle());
+
+        // A scope switch changes every address of the module's entries and moves no row: a visitor who has scrolled the rail away from the active
+        // entry to read another group is not scrolled back by it.
+        module.Scope = "?db=other";
+        await module.ChangedAsync();
+
+        rail.WaitForAssertion(() => rail.FindAll("a.ms-nav-link").Where(static x => x.GetAttribute("href")!.EndsWith("?db=other", StringComparison.Ordinal)).Should().NotBeEmpty());
+        rail.Render();
+        Reveals().Should().ContainSingle("an address moves no row");
+    }
+
+    [Fact]
+    public async Task An_entry_drawn_by_a_render_is_judged_by_what_that_render_drew_and_not_by_what_the_state_says_after_it()
+    {
+        // The rail's answer for the entry moves between the render and what is read after it (the scope's facts are written on the thread pool): the first
+        // render draws no Host page entry, so the second, which does, is a change in what is drawn and reveals again.
+        FakeHostRail module = new() { HiddenOnlyFirstTime = "Host page" };
+        using KafkaHarness harness = new(null, services => services.AddSingleton<IStudioModuleRail>(module), [], withHostModule: true);
+        await harness.Context.ReadyAsync();
+        harness.Navigation.Simulate("studio/kafka", intercepted: false);
+
+        IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
+
+        IReadOnlyList<Bunit.JSRuntimeInvocation> Reveals() => harness.Context.JSInterop.Invocations["martenStudio.scroll.revealWithin"];
+
+        rail.WaitForAssertion(() => Reveals().Should().ContainSingle());
+        rail.FindAll("a.ms-nav-link").Should().NotContain(static x => x.TextContent.Trim() == "Host page", "the first render drew it hidden");
+
+        await module.ChangedAsync();
+
+        rail.WaitForAssertion(() => rail.FindAll("a.ms-nav-link").Should().Contain(static x => x.TextContent.Trim() == "Host page"));
+        rail.WaitForAssertion(() => Reveals().Should().HaveCount(2, "the second render drew an entry the first did not"));
     }
 
     [Fact]

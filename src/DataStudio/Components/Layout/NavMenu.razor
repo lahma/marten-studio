@@ -24,12 +24,15 @@
 
     <nav>
         <ul class="ms-sidebar-nav">
+            @{ BeginDrawing(); }
             @foreach (StudioNavSection section in Shell.Navigation)
             {
+                DrewSection(section.Title);
                 <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
                 @foreach (StudioNavItem item in section.Items.Where(entry => Shown(section, entry)))
                 {
+                    DrewEntry(item.Label);
                     <li class="ms-nav-item" @key="item.Label">
                         @if (item.Route is null)
                         {
@@ -165,10 +168,28 @@
     private ElementReference railElement;
 
     /// <summary>
-    /// What the rail last brought its active item into view for: the page, and the entries drawn when it did (<see cref="DrawnEntries" />). A render
-    /// that changes neither - a badge poll, a visitor's click on an entry already in view - never moves the rail under the visitor.
+    /// What the rail last brought its active item into view for: the page, and the sections and entries drawn when it did (<see cref="drawing" />).
+    /// A render that changes neither - a badge poll, a visitor's click on an entry already in view, a scope switch that only changes the links'
+    /// addresses - never moves the rail under the visitor.
     /// </summary>
     private string? revealedFor;
+
+    /// <summary>
+    /// The sections and entries the render in progress draws, in order, as the markup draws them: the page, then one line for each section title and
+    /// each entry label. Built by the markup itself, from the very lists it draws, so the key is what was drawn and not what the state says by the
+    /// time the render has been applied (the scope's facts are written on the thread pool). No address is in it: an address moves no row.
+    /// </summary>
+    private readonly System.Text.StringBuilder drawing = new();
+
+    private void BeginDrawing()
+    {
+        drawing.Clear();
+        drawing.Append(currentRelativePath);
+    }
+
+    private void DrewSection(string title) => drawing.Append("\n#").Append(title);
+
+    private void DrewEntry(string label) => drawing.Append("\n\t").Append(label);
 
     /// <summary>What the rail marks as active (<see cref="NavClass" />), and what is brought into view.</summary>
     internal const string ActiveItemSelector = ".ms-nav-active";
@@ -211,19 +232,18 @@
     /// comes after a long one, or the shell's Activity page under the last of them, was otherwise out of view, with nothing marked.
     /// The helper scrolls the rail alone and only as far as needed (<c>block: 'nearest'</c>), does nothing for a rail that fits its box, and
     /// leaves an entry already in view where it is, so a visitor who has scrolled the rail and then clicks an entry in view finds it still.
-    /// Once more whenever the entries drawn change after that (an entry or a section appears or goes, or the module's links differ): the database's
-    /// Tenants entry is drawn only once its scope is known, which can be after the first reveal, and pushes the entries below it down a row. A
-    /// badge never counts: it changes no row.
+    /// Once more whenever the entries drawn change after that (an entry or a section appears or goes): the database's Tenants entry is drawn only
+    /// once its scope is known, which can be after the first reveal, and pushes the entries below it down a row. A badge never counts: it changes
+    /// no row, and neither does an address.
     /// </summary>
     private async Task RevealActiveAsync()
     {
-        string? page = currentRelativePath;
-        if (disposed || page is null)
+        if (disposed || currentRelativePath is null)
         {
             return;
         }
 
-        string drawn = page + "\n" + DrawnEntries();
+        string drawn = drawing.ToString();
         if (string.Equals(revealedFor, drawn, StringComparison.Ordinal))
         {
             return;
@@ -239,25 +259,6 @@
         {
             // A closed circuit, or a browser that refused: the rail is still the rail, only not scrolled.
         }
-    }
-
-    /// <summary>
-    /// The sections and entries the rail draws now, with the link each carries (the module's decoration included): one line for each, in order. Two
-    /// renders that draw the same list draw the same rows, whatever their badges say.
-    /// </summary>
-    private string DrawnEntries()
-    {
-        System.Text.StringBuilder drawn = new();
-        foreach (StudioNavSection section in Shell.Navigation)
-        {
-            drawn.Append(section.Title).Append('\n');
-            foreach (StudioNavItem item in section.Items.Where(entry => Shown(section, entry)))
-            {
-                drawn.Append(item.Label).Append('\t').Append(item.Route is null ? string.Empty : Link(section, item.Route)).Append('\n');
-            }
-        }
-
-        return drawn.ToString();
     }
 
     private async Task TickAsync(CancellationToken cancellationToken)

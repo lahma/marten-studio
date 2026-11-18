@@ -125,6 +125,12 @@ list when it is longer, and never over it. It is three `.ms-rail-credit-line` bl
 On the 56 px rail (at 1024 px and below) it is clipped out of sight the way the entries' names are, and stays in the
 accessibility tree.
 
+**The rail brings its active entry into view once for what it draws.** `NavMenu` keeps a key of the page and the section titles
+and entry labels the markup drew, built by the markup itself while it renders (never read from state afterwards, which the
+scope's facts, written on the thread pool, can have moved), and calls `martenStudio.scroll.revealWithin` only when the key
+differs from the last one revealed for. An address is not in the key (a scope switch changes every address and moves no row,
+so a visitor who has scrolled the rail away is not scrolled back), and a badge never is.
+
 ## Navigation inside the studio
 
 **The studio intercepts its own navigation.** `StudioRoutes` matches routes itself (D11), so nothing called
