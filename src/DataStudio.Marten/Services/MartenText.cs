@@ -47,6 +47,7 @@ internal static class MartenText
         MartenStoreNotice = null,
         OwnerFilterMartenTitle = "Only what Marten owns: document tables, the event store, projections and its own bookkeeping",
         OwnerFilterOtherTitle = "Only what Marten does not own: this application's own objects, and other libraries'",
+        RunSqlUnavailable = "Running SQL is not available here.",
         StudioCostCovers =
             "health checks, the SQL console, the database browser, the Query page, and the schema, relationship, document, event and "
             + "projection reads; a Marten session the studio opens to write or to steer the daemon is not counted",

@@ -195,6 +195,9 @@ public class LinqSavedQueriesTests
         var linq = new FakeLinqQueryService().WithType("order");
         using StudioComponentContext context = CreateContext(linq);
 
+        // The SQL mode's lists are the console's, drawn only while it can run (issue #88).
+        context.Options.Capabilities.RunSql = true;
+
         context.JSInterop.Setup<string?>("martenStudio.prefs.get", RecentKey(QueryMode.Linq)).SetResult(SavedQueryStore.Serialize(
             [new SavedQuery("Total > 5", QueryMode.Linq, "order", "Total > 5", null)]));
         context.JSInterop.Setup<string?>("martenStudio.prefs.get", SavedKey(QueryMode.Linq)).SetResult(SavedQueryStore.Serialize(

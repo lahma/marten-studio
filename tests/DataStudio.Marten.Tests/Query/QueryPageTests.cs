@@ -176,21 +176,69 @@ public class QueryPageTests
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// D4 and D13: the console is off by default, and a disabled control names the exact property a host
-    /// would have to set rather than saying "not permitted".
+    /// D13, and issue #88 as #74 settled it for the Kafka module: the console is off by default, and the SQL tab reached by address says in
+    /// one sentence that running SQL is not available here - no option, capability or call, no advice about whom to grant it to - and its
+    /// Saved/Recent/Export/Import lists are not drawn. The capability chip names the option, and the service refuses regardless.
     /// </summary>
     [Fact]
-    public void With_RunSql_off_the_console_is_replaced_by_a_panel_naming_the_option()
+    public void With_RunSql_off_the_console_is_replaced_by_one_sentence_and_no_queries_panel()
     {
         using StudioComponentContext context = CreateContext(WithPerson());
 
         var page = context.Render<QueryPage>();
         page.Find("#ms-query-mode-sql").Click();
 
-        page.Find(".ms-capability-disabled").TextContent.Should()
-            .Contain("MartenOptions.Capabilities.RunSql");
-        page.Find(".ms-query-sql-warning").TextContent.Should().Contain("psql");
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Running SQL is not available here.");
+        page.FindAll(".ms-query-sql-warning").Should().BeEmpty("the one sentence is all the page says");
         page.FindAll("#ms-query-sql").Should().BeEmpty("there is no editor to type into when the console is off");
+        page.FindAll(".ms-query-side").Should().BeEmpty("the console's Saved and Recent lists are left out while it cannot run");
+        page.FindAll(".ms-query-drawer").Should().BeEmpty();
+
+        string markup = page.Find(".ms-query-mode-panel-sql, .ms-query-panel-sql").InnerHtml;
+        markup.Should().NotContain("RunSql").And.NotContain("Capabilities").And.NotContain("MartenOptions").And.NotContain("psql");
+    }
+
+    /// <summary>The Marten module's other query modes keep their lists while the console is off: only the SQL mode's are the console's.</summary>
+    [Fact]
+    public void With_RunSql_off_the_other_modes_keep_their_queries_panel()
+    {
+        using StudioComponentContext context = CreateContext(WithPerson());
+
+        var page = context.Render<QueryPage>();
+
+        page.FindAll(".ms-query-side .ms-query-drawer").Should().ContainSingle("the where-clause mode's own lists");
+    }
+
+    /// <summary>With RunSql on the SQL tab is the console and its lists, as before.</summary>
+    [Fact]
+    public void With_RunSql_on_the_console_and_its_queries_panel_are_drawn()
+    {
+        using StudioComponentContext context = CreateContext(WithPerson(), runSql: true);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+
+        page.FindAll("#ms-query-sql").Should().ContainSingle();
+        page.FindAll(".ms-capability-disabled").Should().BeEmpty();
+        page.FindAll(".ms-query-side .ms-query-drawer").Should().ContainSingle();
+    }
+
+    /// <summary>Each read-only switch - the shell's and this module's - turns the capability off, so the page says what it says with RunSql off.</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void Under_either_read_only_switch_a_console_that_is_configured_on_is_one_sentence_too(bool moduleReadOnly, bool shellReadOnly)
+    {
+        using StudioComponentContext context = CreateContext(WithPerson(), runSql: true);
+        context.Options.ReadOnly = moduleReadOnly;
+        context.ShellOptions.ReadOnly = shellReadOnly;
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Running SQL is not available here.");
+        page.FindAll("#ms-query-sql").Should().BeEmpty();
+        page.FindAll(".ms-query-side").Should().BeEmpty();
     }
 
     /// <summary>

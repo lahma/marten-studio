@@ -59,15 +59,16 @@ public class SqlConsolePanelTests
     }
 
     [Fact]
-    public void The_panel_alone_names_the_option_when_the_console_is_off()
+    public void The_panel_alone_says_one_sentence_and_names_no_option_when_the_console_is_off()
     {
         using StudioComponentContext context = CreateContext(new FakeQueryService(), runSql: false);
 
         var panel = context.Render<SqlConsolePanel>();
 
-        panel.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.RunSql");
-        panel.Find(".ms-query-sql-warning").TextContent.Should().Be(SqlConsolePanel.RunSqlWarning);
+        panel.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Running SQL is not available here.");
+        panel.FindAll(".ms-query-sql-warning").Should().BeEmpty();
         panel.FindAll("#ms-query-sql").Should().BeEmpty();
+        panel.Markup.Should().NotContain("RunSql").And.NotContain("MartenOptions").And.NotContain("Capabilities");
     }
 
     /// <summary>

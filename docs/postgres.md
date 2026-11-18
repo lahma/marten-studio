@@ -196,8 +196,10 @@ read that is authorized like a write, because each reads beyond structure:
   together as "Other databases".
 - **`RunSql`** - the Query page's read-only SQL console.
 
-Every disabled control names the property that would enable it (`PostgresOptions.Capabilities.RunSql`), and the
-refusal itself lives in the service layer and is audited.
+Most disabled controls name the property that would enable it (`PostgresOptions.Capabilities.RunSql`). The Query page
+reached by address while `RunSql` is off does not: it says in one sentence that running SQL is not available here, and
+draws no Saved, Recent, Export or Import panel - the person who arrives there is not the one who sets an option, and the
+capability chip lists what is off for the host's developer. The refusal itself lives in the service layer and is audited.
 
 ## The database browser and its gate
 

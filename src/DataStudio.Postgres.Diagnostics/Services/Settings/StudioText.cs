@@ -202,6 +202,15 @@ internal sealed class StudioText
     public required string OwnerFilterOtherTitle { get; init; }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // The SQL console.
+
+    /// <summary>
+    /// What the SQL console's page says, by address, while <c>RunSql</c> is off (issue #88): one sentence, with no option, capability or
+    /// call in it - the visitor is not the one who can set an option, and the capability chip and the audit name it for the host.
+    /// </summary>
+    public required string RunSqlUnavailable { get; init; }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // Database › Sessions.
 
     /// <summary>What a <c>ViewDatabaseActivity</c> that is off says.</summary>

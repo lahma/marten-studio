@@ -286,6 +286,9 @@ It points at a table no document type of this store maps.
 [RetriedFailures]
 optimistic concurrency on documents, an expected version on an event stream, unique violations
 
+[RunSqlUnavailable]
+Running SQL is not available here.
+
 [ScopeDeniedEntry]
 Not authorized for this store, database or tenant.
 

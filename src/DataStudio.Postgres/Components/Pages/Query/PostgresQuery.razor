@@ -4,6 +4,7 @@
 @using DataStudio.Postgres.Services.Settings
 @inject NavigationManager Navigation
 @inject StudioState State
+@inject StudioCapabilityGuard Capabilities
 @inject StudioDescriptor Descriptor
 
 @*
@@ -31,12 +32,16 @@
                              OnRan="OnRanAsync" />
         </div>
 
-        <aside class="ms-query-side" aria-label="Saved and recent queries">
-            <SavedQueryDrawer @ref="drawer"
-                              StoreKey="@State.ActiveScope?.StoreKey"
-                              Mode="Sql"
-                              OnPick="OnPickedAsync" />
-        </aside>
+        @if (Capabilities.IsEnabled(StudioCapability.RunSql))
+        {
+            @* Issue #88: saved and recent queries are the console's, so they are left out while the console cannot run. *@
+            <aside class="ms-query-side" aria-label="Saved and recent queries">
+                <SavedQueryDrawer @ref="drawer"
+                                  StoreKey="@State.ActiveScope?.StoreKey"
+                                  Mode="Sql"
+                                  OnPick="OnPickedAsync" />
+            </aside>
+        }
     </div>
 </div>
 
