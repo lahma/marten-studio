@@ -50,6 +50,22 @@ public class KafkaFixtureTests
         KafkaFixture.ReuseLabelValue(KafkaFixture.Image4).Should().Be("DataStudio.Kafka.Integration.Tests.4.4.0");
     }
 
+    /// <summary>
+    /// The live tests stamp their records from a fixed instant, and a broker deletes by a record's own timestamp: under Kafka's default of
+    /// seven days every such record was expired when produced from 2026-11-15 on, and the retention check removed whole topics under the
+    /// tests that happened to be running (tasks kh77 and hpjq). The broker's retention must outlast that instant by decades.
+    /// </summary>
+    [KafkaFact]
+    public async Task The_brokers_retention_outlasts_the_fixed_instant_the_live_records_are_stamped_from()
+    {
+        await using KafkaContainer container = KafkaFixture.CreateContainer(KafkaFixture.Image4, reuse: false, packet: null);
+
+        string hours = ContainerReuse.ConfigurationOf(container).Environments.Should().ContainKey("KAFKA_LOG_RETENTION_HOURS").WhoseValue;
+        DateTimeOffset kept = LiveScanEngine.T0.AddHours(int.Parse(hours, System.Globalization.CultureInfo.InvariantCulture));
+
+        kept.Should().BeAfter(DateTimeOffset.UtcNow.AddYears(50), "a record stamped at T0 must still be inside retention whenever the suite runs");
+    }
+
     /// <summary>A <c>[KafkaFact]</c> only because Testcontainers' builder needs a Docker endpoint to build at all.</summary>
     [KafkaFact]
     public async Task The_two_images_and_the_packets_hash_differently_and_the_reuse_flag_is_not_part_of_the_identity()

@@ -117,6 +117,13 @@ public abstract class KafkaFixture : IAsyncLifetime
             .WithEnvironment("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "true")
             .WithEnvironment("KAFKA_HEAP_OPTS", "-Xmx512m -Xms256m")
 
+            // The live tests stamp their records from a fixed instant (LiveScanEngine.T0, 2026-11-08), because they assert times as text.
+            // Kafka's default retention is seven days by a record's own timestamp, so from 2026-11-15 on every such record was already
+            // expired when produced, and the broker's retention check (first 30 s after start, then every 5 minutes) deleted whatever
+            // topics existed at that moment: a scan then found its range gone and said so ("offsets were deleted", log start at the end).
+            // A hundred years keeps the fixed instant inside retention; the tests that need records gone delete them (DeleteRecords).
+            .WithEnvironment("KAFKA_LOG_RETENTION_HOURS", "876000")
+
             // Testcontainers 4.15.0's startup script ends KAFKA_ADVERTISED_LISTENERS with a comma when the container has no additional
             // advertised listener, and Kafka 4.4 refuses an empty entry ("advertised.listeners values must not be empty"; 3.9 tolerates it).
             // One more listener fixes it. It is bound to the container's own loopback, so nothing outside the container can reach it.
