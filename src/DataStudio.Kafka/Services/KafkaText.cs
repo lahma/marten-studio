@@ -114,11 +114,11 @@ internal static class KafkaText
     public const string SearchNamesRefusedTopic = "This search names a topic that is not available to you.";
 
     /// <summary>
-    /// The count beside the topic filter (#77): how many topics are ticked, out of the most one search reads. "1 of 20" alone read as a count of the
-    /// topics shown, or as a cap nobody explained.
+    /// The count beside the topic filter (#77, #80): how many topics are ticked, and the most one search reads. "1 of 20" alone read as a count of the
+    /// topics shown, and "of 20" as a total.
     /// </summary>
     /// <param name="selected">How many topics are ticked.</param>
-    public static string TopicsSelected(int selected) => $"{selected} of {MaxSearchTopics} topics selected (the most one search reads)";
+    public static string TopicsSelected(int selected) => string.Create(CultureInfo.InvariantCulture, $"{selected} selected (a search reads at most {MaxSearchTopics})");
 
     /// <summary>A search with no topic, or more than <see cref="MaxSearchTopics" />.</summary>
     public const string SearchTopicCount = "A search reads 1 to 20 topics.";
@@ -135,8 +135,13 @@ internal static class KafkaText
     /// <summary>A search whose name is not a topic name.</summary>
     public const string SearchTopicInvalid = "A topic name in this search is not valid.";
 
-    /// <summary>The line under a plan with errors.</summary>
-    public const string PredicateInvalid = "The search text has errors; see above.";
+    /// <summary>The engine's refusal of a start whose search text has errors, where there is no list of them on the page to count.</summary>
+    public const string PredicateInvalid = "The search text has errors.";
+
+    /// <summary>The line under a plan with errors (#80): how many there are, the errors themselves being listed above it.</summary>
+    /// <param name="errors">How many errors the plan has.</param>
+    public static string PredicateErrors(int errors) =>
+        errors == 1 ? "1 error in the search text" : string.Create(CultureInfo.InvariantCulture, $"{errors:N0} errors in the search text");
 
     /// <summary>A start that needed the confirmation and did not get it.</summary>
     public const string NeedsConfirmation = "This search needs your confirmation first.";

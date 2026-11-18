@@ -110,7 +110,7 @@ not confirmed
 Open in
 
 [PredicateInvalid]
-The search text has errors; see above.
+The search text has errors.
 
 [PredicateTooLong]
 The search text is longer than 4,096 characters.
@@ -385,6 +385,9 @@ An open transaction holds offsets back: the last stable offset is below the high
 [PredicateDidNotRun([PredicateError { Start = 0, Length = 3, Message = an error message, Kind = Invalid, Shown = Position 1: an error message, AuditPhrase = invalid search text }])]
 position 1, invalid search text
 
+[PredicateErrors(3)]
+3 errors in the search text
+
 [ProfileChipTitle(Development)]
 This cluster's profile is Development: it caps nothing; the limits are the ones the host set (Settings shows them).
 
@@ -422,7 +425,7 @@ You have read your hourly allowance. It frees up as the hour rolls on.
 This search needs your confirmation first.
 
 [Refusal(PredicateInvalid, DataStudio.Kafka.KafkaScanLimits)]
-The search text has errors; see above.
+The search text has errors.
 
 [Refusal(ShuttingDown, DataStudio.Kafka.KafkaScanLimits)]
 The application is shutting down.
@@ -467,13 +470,13 @@ This search needs your confirmation first.
 This search needs your confirmation first.
 
 [Refusal(PredicateInvalid, null)]
-The search text has errors; see above.
+The search text has errors.
 
 [Refusal(PredicateInvalid, KafkaSpentBudget { Scope = Process, BytesPerHour = 10485760 })]
-The search text has errors; see above.
+The search text has errors.
 
 [Refusal(PredicateInvalid, KafkaSpentBudget { Scope = Cluster, BytesPerHour = 1048576 })]
-The search text has errors; see above.
+The search text has errors.
 
 [Refusal(ShuttingDown, null)]
 The application is shutting down.
@@ -527,7 +530,7 @@ live tail of alpha, beta
 Topic sample was not found, or is not available to you.
 
 [TopicsSelected(3)]
-3 of 20 topics selected (the most one search reads)
+3 selected (a search reads at most 20)
 
 [UndecodableReason(InvalidJson)]
 it is not valid JSON

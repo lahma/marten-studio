@@ -3,6 +3,7 @@ using System.Globalization;
 using DataStudio.Kafka.Core.Index;
 using DataStudio.Kafka.Core.Scanning;
 using DataStudio.Kafka.Core.Windows;
+using DataStudio.Services;
 
 namespace DataStudio.Kafka.Services;
 
@@ -99,19 +100,26 @@ internal static class KafkaSearchText
     /// </summary>
     /// <param name="zone">The zone.</param>
     /// <param name="at">The time the offset is read at.</param>
-    public static string ZoneLabel(TimeZoneInfo zone, DateTimeOffset at)
+    public static string ZoneLabel(TimeZoneInfo zone, DateTimeOffset at) => ZoneLabel(zone, at, StudioTimeZones.CurrentRegion);
+
+    /// <summary>
+    /// <see cref="ZoneLabel(TimeZoneInfo, DateTimeOffset)" /> with the region a Windows id is converted for named: a Windows host's <c>FLE Standard Time</c> in Finland
+    /// reads <c>Europe/Helsinki (UTC+02:00)</c> (#80), and one that has no IANA id here reads as its offset alone.
+    /// </summary>
+    /// <param name="zone">The zone.</param>
+    /// <param name="at">The time the offset is read at.</param>
+    /// <param name="region">The two-letter region the conversion asks for first, or <see langword="null" />.</param>
+    public static string ZoneLabel(TimeZoneInfo zone, DateTimeOffset at, string? region)
     {
         ArgumentNullException.ThrowIfNull(zone);
 
-        TimeSpan offset = zone.GetUtcOffset(at);
-        string shown = offset == TimeSpan.Zero
-            ? "UTC"
-            : "UTC" + (offset < TimeSpan.Zero ? "-" : "+") + offset.Duration().ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+        string shown = StudioTimeZones.Offset(zone, at);
+        string id = StudioTimeZones.IanaId(zone.Id, region);
 
-        return zone.Id.Contains('/', StringComparison.Ordinal) ? zone.Id + " (" + shown + ")" : shown;
+        return id.Contains('/', StringComparison.Ordinal) ? id + " (" + shown + ")" : shown;
     }
 
-    /// <summary>The page's line for a local time the zone's clocks skip, naming the zone as <see cref="ZoneLabel" /> does, never by a Windows id.</summary>
+    /// <summary>The page's line for a local time the zone's clocks skip, naming the zone as <see cref="ZoneLabel(TimeZoneInfo, DateTimeOffset)" /> does, never by a Windows id.</summary>
     /// <param name="shown">The time as the visitor typed it.</param>
     /// <param name="local">The time, kind unspecified.</param>
     /// <param name="zone">The zone it was typed in.</param>

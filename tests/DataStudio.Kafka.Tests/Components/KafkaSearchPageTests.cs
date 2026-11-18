@@ -116,7 +116,7 @@ public class KafkaSearchPageTests
 
         page.WaitForAssertion(() => page.Markup.Should().Contain("This link named 1 topic(s) you cannot search here; the search below leaves them out."));
         page.FindAll("label.ms-k-topic-option").Select(static x => x.TextContent.Trim()).Should().Equal("orders");
-        page.Find(".ms-k-topic-count").TextContent.Should().Contain("1 of 20");
+        page.Find(".ms-k-topic-count").TextContent.Should().Be("1 selected (a search reads at most 20)");
     }
 
     [Fact]
@@ -135,6 +135,7 @@ public class KafkaSearchPageTests
         page.Find(".ms-k-predicate-marks").GetAttribute("aria-hidden").Should().Be("true");
         page.Find(".ms-k-predicate-marks mark").Should().NotBeNull();
         page.FindAll("table.ms-k-matches").Should().BeEmpty();
+        page.Find(".ms-k-note-warning[role=alert]").TextContent.Should().Be("1 error in the search text", "the errors are listed above the line, and the line counts them");
         page.Find(".ms-k-predicate-errors").TextContent.Should().MatchRegex(@"^Position \d+: ").And.NotMatchRegex("(?i)position.*position");
         rig.Ring.Should().ContainSingle().Which.Message.Should().Be("position 1, redacted field operator", "the page says 'see above'; the audit says the cause");
     }
@@ -222,6 +223,24 @@ public class KafkaSearchPageTests
         Regex.IsMatch(uri, @"[?&]from=\d{4}-\d{2}-\d{2}T\d{2}%3A\d{2}%3A\d{2}Z", RegexOptions.None, TimeSpan.FromSeconds(5)).Should().BeTrue(uri);
         Regex.IsMatch(uri, @"[&]to=\d{4}-\d{2}-\d{2}T\d{2}%3A\d{2}%3A\d{2}Z", RegexOptions.None, TimeSpan.FromSeconds(5)).Should().BeTrue(uri);
         uri.Should().Contain("cluster=test").And.Contain("topic=orders").And.NotContain("#q=", "no predicate, no fragment");
+    }
+
+    [Theory]
+    [InlineData("Europe/Helsinki")]
+    [InlineData("FLE Standard Time")]
+    public async Task The_absolute_windows_zone_select_offers_the_visitors_zone_by_its_IANA_id_and_offset(string stored)
+    {
+        await using KafkaSearchRig rig = new();
+        Seed(rig);
+        rig.Studio.Context.Services.GetRequiredService<DataStudio.Services.StudioPreferences>().SelectedTimeZoneId = stored;
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+
+        page.WaitForAssertion(() => page.FindAll(".ms-k-absolute select option").Should().HaveCount(2));
+        string[] labels = [.. page.FindAll(".ms-k-absolute select option").Select(static x => x.TextContent.Trim())];
+        labels[0].Should().Be("UTC");
+        labels[1].Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+0[23]:00\)$", "an IANA id and the offset, never FLE Standard Time or the offset alone");
+        labels[1].Should().NotContain("Standard Time");
     }
 
     [Fact]
@@ -619,7 +638,7 @@ public class KafkaSearchPageTests
             await page.FindAll("label.ms-k-topic-option input")[i].ChangeAsync(new ChangeEventArgs { Value = true });
         }
 
-        page.Find(".ms-k-topic-count").TextContent.Should().Be("20 of 20 topics selected (the most one search reads)", "#77: not a bare '1 of 20'");
+        page.Find(".ms-k-topic-count").TextContent.Should().Be("20 selected (a search reads at most 20)", "#80: the 20 is the cap, not the number of topics listed");
         page.FindAll("label.ms-k-topic-option input[disabled]").Should().HaveCount(2);
     }
 

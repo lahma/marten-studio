@@ -625,7 +625,7 @@ public class KafkaTailPageTests
         // The text no longer parses: the new Start is refused before it reads anything, and the tail on screen is as it was.
         await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "key ^^ 'n'" });
         await ClickAsync(page, "Start");
-        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaText.PredicateInvalid), Wait);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().MatchRegex(@"^\d+ errors? in the search text$"), Wait);
 
         page.Find(".ms-k-tail-paused").TextContent.Should().Contain("Paused: you paused it. 1 record shown.").And.Contain("Resume");
         Rows(page).Should().Equal("0 / 3");
