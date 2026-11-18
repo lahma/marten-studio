@@ -81,7 +81,7 @@ and authorization is never widened, but a module's own `ReadOnly` no longer turn
 - A host with only Kafka runs: `AddDataStudio().AddKafka(...)` needs no database module, and its output folder holds no
   Postgres, Marten, JasperFx, Weasel or Npgsql assembly.
 - What did not change: finding codes and `docs/health/codes.md`; the gates (the database browser's, the health advisor's
-  three, the Connection page's); the audit and its event ids; the Kafka engine's behaviour; the floors (Marten
+  three, the Connection page's); the audit and its event ids; the Kafka engine's reads; the floors (Marten
   9.57.0, Npgsql 9.0.4, Confluent.Kafka 2.14.0, WolverineFx.Kafka 6.61.0); `net10.0` only; the build and the package
   budget (`Microsoft.AspNetCore.App.Internal.Assets` moved from the Postgres module to the shell).
 - Debug lines that logged an address's scope (a store, database or tenant a link named) did so without a cap, so a long
