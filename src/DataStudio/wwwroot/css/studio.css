@@ -17942,6 +17942,7 @@ dialog.ms-modal::backdrop {
     .ms-health-finding {
         padding-inline: var(--ms-space-sm);
     }
+}
 
 /* ===== V2-B2-A: the Health page's Critical list (#87) ===== */
 /* One compact region above the areas: each Critical finding the visitor may see, its code and title, linking to its card. */
