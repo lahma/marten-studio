@@ -276,7 +276,7 @@ public class WorkflowGenerationTests
 
     /// <summary>
     /// The latest leg also runs the Postgres module's projects at the latest-tested Npgsql. Without the env line the
-    /// second pass over <c>data-studio-postgres.slnf</c> never runs, and nothing would say so: The Postgres module would be
+    /// second pass over <c>data-studio-postgres.slnf</c> never runs, and nothing would say so: DataStudio.Postgres would be
     /// tested only at its floor while a host without Marten is on Npgsql 10.
     /// </summary>
     [Fact]

@@ -47,7 +47,7 @@ public class PostgresSampleHostTests
         using (HttpClient anonymous = Client(host))
         {
             using HttpResponseMessage refused = await anonymous.GetAsync(new Uri("/studio", UriKind.Relative), Token);
-            refused.StatusCode.Should().Be(HttpStatusCode.Redirect, "the mapping requires the the Postgres module policy");
+            refused.StatusCode.Should().Be(HttpStatusCode.Redirect, "the mapping requires the shell's authorization policy");
             refused.Headers.Location!.OriginalString.Should().Contain("/login");
         }
 

@@ -4,7 +4,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
 /// The fence between the shared studio and the Marten module, after the move: no C# or Razor file under
-/// <c>src/DataStudio.Postgres/</c> names a Marten, JasperFx or Weasel type or namespace, a <c>The Marten module</c> namespace, or
+/// <c>src/DataStudio.Postgres/</c> names a Marten, JasperFx or Weasel type or namespace, a <c>DataStudio.Marten</c> namespace, or
 /// any type, component or global alias the Marten module declares - in code, in a <c>cref</c>, in Razor markup text or in an
 /// attribute value.
 /// </summary>
@@ -23,7 +23,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </para>
 /// <para>
 /// <b>How each file is read.</b> As code, with comments and strings blanked by <see cref="SourceScanner" />, for a
-/// <c>using</c> of a Marten-family or <c>The Marten module</c> namespace, a qualified name in one, and any identifier from the
+/// <c>using</c> of a Marten-family or <c>DataStudio.Marten</c> namespace, a qualified name in one, and any identifier from the
 /// stay-behind list; as documentation, for every <c>cref</c>; and, for a Razor file, its markup text (an
 /// <c>@Expression</c> sits in it, and a prose word that collides with a Marten module type name fails loudly and is
 /// reworded) and every tag's attribute values (<c>href="@Links.To(…)"</c>, <c>Capability="@nameof(…)"</c>, a component
@@ -184,9 +184,9 @@ public class CoreFenceTests
 
     /// <summary>
     /// Each studio declares namespaces under its own root and nowhere else: every C# file of the shared studio declares,
-    /// file-scoped, exactly the namespace its folder gives under <c>The Postgres module</c>, no Razor file there overrides its
-    /// folder's with <c>@namespace</c>, and no Marten module file declares a namespace under <c>The Postgres module</c>. So every
-    /// shared type is a <c>The Postgres module.*</c> type, which is what its log category, its public name and the "no type on
+    /// file-scoped, exactly the namespace its folder gives under <c>DataStudio.Postgres</c>, no Razor file there overrides its
+    /// folder's with <c>@namespace</c>, and no Marten module file declares a namespace under <c>DataStudio.Postgres</c>. So every
+    /// shared type is a <c>DataStudio.Postgres.*</c> type, which is what its log category, its public name and the "no type on
     /// both sides" rule below are read from.
     /// </summary>
     [Fact]
@@ -226,7 +226,7 @@ public class CoreFenceTests
 
                 problems.AddRange(declared
                     .Where(static x => x == "DataStudio.Postgres" || x.StartsWith("DataStudio.Postgres.", StringComparison.Ordinal))
-                    .Select(x => file + ": The Marten module declares " + x + ", the shared studio's namespace"));
+                    .Select(x => file + ": DataStudio.Marten declares " + x + ", the shared studio's namespace"));
             }
         }
 
@@ -245,7 +245,7 @@ public class CoreFenceTests
     /// <summary>
     /// The namespace a file's folder gives under <paramref name="root" /> - except the diagnostics read model's folder, whose
     /// public types live in the root namespace beside the registration types (API design API8, D31): a host writes
-    /// <c>using the Postgres module;</c> and nothing more.
+    /// <c>using DataStudio.Postgres;</c> and nothing more.
     /// </summary>
     private static string FolderNamespace(string root, string pathBelowRoot)
     {
@@ -259,14 +259,14 @@ public class CoreFenceTests
         return slash < 0 ? root : root + "." + pathBelowRoot[..slash].Replace('/', '.');
     }
 
-    /// <summary>The root namespace of the shell (A3): <c>src/DataStudio/</c> declares <c>DataStudio.*</c> by its folders, as the rest of the shared studio declares <c>The Postgres module.*</c>.</summary>
+    /// <summary>The root namespace of the shell (A3): <c>src/DataStudio/</c> declares <c>DataStudio.*</c> by its folders, as the rest of the shared studio declares <c>DataStudio.Postgres.*</c>.</summary>
     private const string ShellRootNamespace = "DataStudio";
 
     private const string ShellFolder = ShellRoot;
 
     private static bool IsShell(string file) => file.StartsWith(ShellFolder, StringComparison.Ordinal);
 
-    /// <summary>The namespace a file of the shared studio declares by its folder: <c>DataStudio.*</c> below <c>Shell/</c>, <c>The Postgres module.*</c> elsewhere.</summary>
+    /// <summary>The namespace a file of the shared studio declares by its folder: <c>DataStudio.*</c> below <c>Shell/</c>, <c>DataStudio.Postgres.*</c> elsewhere.</summary>
     private static string SharedNamespace(string file) =>
         IsShell(file) ? FolderNamespace(ShellRootNamespace, file[ShellFolder.Length..]) : FolderNamespace("DataStudio.Postgres", BelowShared(file));
 
@@ -358,7 +358,7 @@ public class CoreFenceTests
     /// <summary>
     /// No type the shared studio declares is named for the Marten module. The move renamed the five shared types that were
     /// (design Appendix D) - the endpoint guard, marker and tracker, the convention builder and the health check - and a
-    /// <c>The Marten module*</c> name in <c>DataStudio.Postgres.dll</c> would be one a host of the shared studio meets in a stack
+    /// <c>MartenStudio*</c> name (the 1.x product's) in <c>DataStudio.Postgres.dll</c> would be one a host of the shared studio meets in a stack
     /// trace and a log category. Types about Marten's own objects (<c>MartenDeclaredObject</c>) are a seam's vocabulary and
     /// keep their names.
     /// </summary>
@@ -471,7 +471,8 @@ public class CoreFenceTests
     [InlineData("@* MartenOptions.ReadOnly *@\n<p>x</p>", null)]
     [InlineData("using DataStudio.Postgres.Services;\nnamespace DataStudio.Postgres.Components;\nclass C { DataStudio.Postgres.Services.StudioScope? s; }", null)]
     [InlineData("<p>registered with Marten.</p>", null)]
-    [InlineData("<p>The Marten module's Query page renders it.</p>", null)]
+    [InlineData("<p>DataStudio.Marten's Query page renders it.</p>", null)]
+    [InlineData("<p>MartenDocs renders it.</p>", null)]
     [InlineData("/// <see cref=\"StudioScope\" />\nclass C { }", null)]
     [InlineData("internal enum Owner { MartenDocument, MartenEventStore }", null)]
     public void The_scanner_finds_each_kind_of_lean_and_ignores_prose(string source, string? expected)
@@ -524,7 +525,7 @@ public class CoreFenceTests
     /// <summary>
     /// An import that reaches every file at once is invisible to a per-file scan, so it is refused on its own: no
     /// <c>global using</c> and no <c>_Imports.razor</c> line under <c>src/DataStudio.Postgres/</c>, and no <c>&lt;Using&gt;</c>
-    /// item in its project file or in a <c>Directory.Build.*</c> file, names a Marten, JasperFx, Weasel or the Marten module
+    /// item in its project file or in a <c>Directory.Build.*</c> file, names a Marten, JasperFx, Weasel or <c>DataStudio.Marten</c>
     /// namespace. The Marten module's own imports are its business since the move: they reach only its own files.
     /// </summary>
     [Fact]
@@ -571,7 +572,7 @@ public class CoreFenceTests
         }
 
         problems.Should().BeEmpty(
-            "an import that reaches every file would put a Marten or the Marten module namespace in every shared file without a "
+            "an import that reaches every file would put a Marten or DataStudio.Marten namespace in every shared file without a "
             + "line of it saying so: " + string.Join(", ", problems));
     }
 
@@ -594,7 +595,7 @@ public class CoreFenceTests
     /// <summary>The repository-wide MSBuild files every <c>src/</c> project imports.</summary>
     private static readonly string[] RepositoryProjectFiles = ["Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"];
 
-    /// <summary>A csproj or props <c>&lt;Using Include="…"&gt;</c> of a Marten-family or the Marten module namespace.</summary>
+    /// <summary>A csproj or props <c>&lt;Using Include="…"&gt;</c> of a Marten-family or <c>DataStudio.Marten</c> namespace.</summary>
     private static readonly Regex ProjectUsing = new(
         @"<Using\s+Include\s*=\s*[""'](?:DataStudio\.Marten|Marten|JasperFx|Weasel)(?:\.[\w.]*)?[""'][^>]*>",
         RegexOptions.CultureInvariant,

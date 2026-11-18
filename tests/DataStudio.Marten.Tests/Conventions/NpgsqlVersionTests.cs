@@ -77,7 +77,7 @@ public class NpgsqlVersionTests
         declared.Should().NotBeEmpty("the Marten module reaches Npgsql through Marten's packages");
 
         Version.Parse(Floor).Should().BeLessThanOrEqualTo(declared.Values.Max()!,
-            "DataStudioNpgsqlFloor reaches every Marten module host through its exact the Postgres module dependency, and " +
+            "DataStudioNpgsqlFloor reaches every Marten module host through its exact DataStudio.Postgres dependency, and " +
             $"Marten's packages ask for no more than {declared.Values.Max()} ({string.Join(", ", declared.Select(static x => $"{x.Key} >= {x.Value}"))})");
     }
 

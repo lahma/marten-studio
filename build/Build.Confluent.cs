@@ -20,8 +20,8 @@ using Serilog;
 /// </para>
 /// <para>
 /// Unlike Npgsql's, the property may go to the whole solution and there is no second pass: the central
-/// <c>Confluent.Kafka</c> row is unconditional, and only the Kafka projects reference the package, so a Marten module
-/// or the Postgres module project never reads it. It is passed to Restore, Compile and Test <em>always</em>, the floor
+/// <c>Confluent.Kafka</c> row is unconditional, and only the Kafka projects reference the package, so the Marten, Postgres and
+/// engine projects never read it. It is passed to Restore, Compile and Test <em>always</em>, the floor
 /// included, so that an environment variable of that name (MSBuild reads every environment variable as a property)
 /// cannot quietly change what a Fallout run tests; Restore needs it as much as Compile does, because Compile runs
 /// <c>--no-restore</c>.

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The Kafka module's fast suite (AGENTS.md D36): no Docker. The engine against the hand-written fake broker, the conventions
-       and the public API baseline. M2 adds bUnit and the Kafka module project. -->
+       and the public API baseline. M2 adds bUnit and the DataStudio.Kafka project. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
