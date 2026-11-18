@@ -90,6 +90,47 @@ internal static class StudioTimeZones
         return string.Equals(name, offset, StringComparison.Ordinal) ? name : name + " (" + offset + ")";
     }
 
+    /// <summary>One entry of the Preferences time-zone select: the id it holds, its zone, and whether it is the zone this browser reported.</summary>
+    /// <param name="Id">The id the option holds and a choice stores.</param>
+    /// <param name="Zone">The zone.</param>
+    /// <param name="IsBrowser">Whether this is the browser's own zone, which the option says so beside its name.</param>
+    public readonly record struct ZoneOption(string Id, TimeZoneInfo Zone, bool IsBrowser);
+
+    /// <summary>
+    /// The options the Preferences select draws: the host's listed zones, and in front of them (the selected one first) the circuit's zone and the browser's
+    /// when the list does not hold them under their own ids. A browser says <c>Europe/Helsinki</c> where a Windows host in another region lists the same
+    /// zone as <c>Europe/Kiev</c>, and a stored id may be one the list lacks, so the select never shows an option that is not the zone in use, and the
+    /// browser's zone is always there to go back to.
+    /// </summary>
+    /// <param name="listed">The host's zones (<see cref="Listed" />).</param>
+    /// <param name="selected">The circuit's zone: the id <see cref="IanaId(string, string?)" /> gives it and the zone, or <see langword="null" /> for none.</param>
+    /// <param name="browser">The browser's zone under the id it reported, or <see langword="null" /> when it reported none.</param>
+    public static IReadOnlyList<ZoneOption> Options(IReadOnlyList<(string Id, TimeZoneInfo Zone)> listed, (string Id, TimeZoneInfo Zone)? selected, (string Id, TimeZoneInfo Zone)? browser)
+    {
+        ArgumentNullException.ThrowIfNull(listed);
+
+        HashSet<string> known = new(listed.Select(static x => x.Id), StringComparer.Ordinal);
+        List<ZoneOption> options = [];
+
+        foreach ((string Id, TimeZoneInfo Zone)? extra in new (string Id, TimeZoneInfo Zone)?[] { selected, browser })
+        {
+            if (extra is { } zone && known.Add(zone.Id))
+            {
+                options.Add(new ZoneOption(zone.Id, zone.Zone, browser is { } b && string.Equals(b.Id, zone.Id, StringComparison.Ordinal)));
+            }
+        }
+
+        foreach ((string id, TimeZoneInfo zone) in listed)
+        {
+            options.Add(new ZoneOption(id, zone, browser is { } b && string.Equals(b.Id, id, StringComparison.Ordinal)));
+        }
+
+        return options;
+    }
+
+    /// <summary>The words that mark the browser's own zone in the Preferences select.</summary>
+    public const string BrowserMark = ", this browser";
+
     /// <summary>
     /// The zones the host knows, each under the id a visitor sees and stores (<see cref="IanaId(string, string?)" />) and with no id twice, in the order of those ids.
     /// </summary>

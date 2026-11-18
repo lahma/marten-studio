@@ -90,6 +90,54 @@ internal sealed class StudioPreferences
     }
 
     /// <summary>
+    /// The IANA id of the time zone this circuit's browser reported (<c>Europe/Helsinki</c>), or <see langword="null" /> until it has and where the
+    /// visitor had chosen a zone of their own, which the browser is then not asked about. Never stored: only a choice in Preferences is.
+    /// </summary>
+    public string? BrowserTimeZoneId { get; private set; }
+
+    /// <summary>
+    /// Makes the browser's own time zone the circuit's, for a visitor who has stored none: the id the browser reported
+    /// (<c>Intl.DateTimeFormat().resolvedOptions().timeZone</c>), when this server knows it. Nothing is stored and no preference is counted as the
+    /// visitor's (<see cref="PreferenceVersion" /> does not move): it is a default, replaced by any choice they make.
+    /// </summary>
+    /// <param name="ianaId">What the browser said, or <see langword="null" /> where it said nothing or the call failed.</param>
+    /// <returns>Whether the circuit's zone is now the browser's. An id of an unexpected shape, or one this server does not know, is not used.</returns>
+    public bool TryUseBrowserTimeZone(string? ianaId)
+    {
+        if (!LooksLikeZoneId(ianaId) || !TimeZoneInfo.TryFindSystemTimeZoneById(ianaId, out _))
+        {
+            return false;
+        }
+
+        BrowserTimeZoneId = ianaId;
+        selectedTimeZoneId = ianaId;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a text from the browser has the shape of a zone id (<c>Europe/Helsinki</c>, <c>America/Argentina/Buenos_Aires</c>, <c>Etc/GMT+5</c>,
+    /// <c>UTC</c>) before the host's zone database is asked about it: bounded, and letters, digits, <c>/ _ - +</c> and nothing else, with no path
+    /// segment that climbs. The id is the visitor's own browser's and is used only to find a zone.
+    /// </summary>
+    private static bool LooksLikeZoneId([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? id)
+    {
+        if (string.IsNullOrEmpty(id) || id.Length > 64 || id.Contains("..", StringComparison.Ordinal) || id[0] == '/' || id[^1] == '/')
+        {
+            return false;
+        }
+
+        foreach (char c in id)
+        {
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('/' or '_' or '-' or '+'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// How many times <see cref="SelectedTheme" /> or <see cref="SelectedTimeZoneId" /> has actually
     /// moved on this circuit.
     /// </summary>

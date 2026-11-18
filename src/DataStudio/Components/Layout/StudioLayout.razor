@@ -79,6 +79,7 @@
                        and their `aria-label`s inside it; see PreferencesMenu. *@
                     <PreferencesMenu SelectedTheme="@Preferences.SelectedTheme"
                                      SelectedTimeZoneId="@Preferences.SelectedTimeZoneId"
+                                     BrowserTimeZoneId="@Preferences.BrowserTimeZoneId"
                                      ThemeChanged="OnThemeChangedAsync"
                                      TimeZoneChanged="OnTimeZoneChangedAsync" />
                 </div>
@@ -267,6 +268,10 @@
             string? storedTheme = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioPreferences.ThemePreferenceKey });
             string? storedTimeZoneId = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioPreferences.TimeZonePreferenceKey });
 
+            // A visitor who has chosen no zone reads times in their browser's own, not the server's (which is a Windows server's region's, or the
+            // zone of a host elsewhere): asked once, here, and used only if this server knows the id. Never stored.
+            string? browserTimeZoneId = string.IsNullOrWhiteSpace(storedTimeZoneId) ? await ReadBrowserTimeZoneAsync() : null;
+
             if (Preferences.PreferenceVersion != version)
             {
                 // The visitor picked something while the browser was being asked. Theirs is the newer
@@ -285,6 +290,10 @@
             {
                 Preferences.SelectedTimeZoneId = storedTimeZoneId;
             }
+            else
+            {
+                Preferences.TryUseBrowserTimeZone(browserTimeZoneId);
+            }
 
             if (!string.Equals(previousTimeZoneId, Preferences.SelectedTimeZoneId, StringComparison.Ordinal))
             {
@@ -296,6 +305,19 @@
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // JS interop is unavailable during prerendering, and a browser can refuse storage outright.
+        }
+    }
+
+    /// <summary>The browser's IANA time zone id, or <see langword="null" /> when it cannot be asked (a closed circuit, a script that failed): the server's zone stays, as it was.</summary>
+    private async Task<string?> ReadBrowserTimeZoneAsync()
+    {
+        try
+        {
+            return await JsRuntime.InvokeAsync<string?>("martenStudio.timeZone.get");
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            return null;
         }
     }
 

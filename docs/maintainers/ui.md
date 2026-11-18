@@ -131,6 +131,22 @@ scope's facts, written on the thread pool, can have moved), and calls `martenStu
 differs from the last one revealed for. An address is not in the key (a scope switch changes every address and moves no row,
 so a visitor who has scrolled the rail away is not scrolled back), and a badge never is.
 
+## Time zone
+
+**A visitor's default time zone is their browser's, not the server's.** The prerendered document is drawn in the server's zone
+(the zone of the host, or of its cookie when the visitor chose one). When the circuit starts and the visitor has **no stored
+zone** (no `ms_tz` in `localStorage` or the cookie), `StudioLayout` asks the browser once for its IANA id through
+`martenStudio.timeZone.get` (`Intl.DateTimeFormat().resolvedOptions().timeZone`, in `studio.js`) and, when
+`TimeZoneInfo.TryFindSystemTimeZoneById` knows it and it has the shape of a zone id, `StudioPreferences.TryUseBrowserTimeZone`
+makes it the circuit's zone and tells every page (`NotifyChangedAsync`), so the page redraws in it. Nothing is stored (only a choice in
+Preferences is), no preference is counted as the visitor's (`PreferenceVersion` does not move, so a choice made while the
+browser was being asked still wins), and an id the server does not know, a call that failed (interop loss is caught with
+`StudioLiveUpdates.IsInteropUnavailable`) or a prerender leaves the server's zone. A visitor with a stored zone is never asked. The
+Preferences select always holds the circuit's zone under its own id, even where the host's list names the same zone otherwise (a
+Windows host names a zone by its region: "Europe/Kiev" for the Helsinki visitor's "Europe/Helsinki"), adds the browser's under its
+own id as well, and says "this browser" beside it ("Europe/Helsinki (UTC+02:00), this browser"). Every page formats through
+`StudioPreferences`, and the Kafka search's absolute window reads the same zone and the same label.
+
 ## Navigation inside the studio
 
 **The studio intercepts its own navigation.** `StudioRoutes` matches routes itself (D11), so nothing called

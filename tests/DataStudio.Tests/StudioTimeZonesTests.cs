@@ -47,6 +47,60 @@ public class StudioTimeZonesTests
         StudioTimeZones.Label("UTC", TimeZoneInfo.Utc, At).Should().Be("UTC");
     }
 
+    private static (string Id, TimeZoneInfo Zone) Zone(string id, int hours) =>
+        (id, TimeZoneInfo.CreateCustomTimeZone(id, TimeSpan.FromHours(hours), id, id));
+
+    [Fact]
+    public void The_options_hold_the_circuits_zone_and_the_browsers_under_their_own_ids_when_the_list_lacks_them()
+    {
+        // A Windows host in another region lists FLE as Europe/Kiev; a browser says Europe/Helsinki.
+        (string Id, TimeZoneInfo Zone)[] listed = [Zone("Africa/Abidjan", 0), Zone("Europe/Kiev", 2), Zone("Pacific/Niue", -11)];
+        (string Id, TimeZoneInfo Zone) helsinki = Zone("Europe/Helsinki", 2);
+
+        IReadOnlyList<StudioTimeZones.ZoneOption> options = StudioTimeZones.Options(listed, helsinki, helsinki);
+
+        options.Select(static x => x.Id).Should().Equal("Europe/Helsinki", "Africa/Abidjan", "Europe/Kiev", "Pacific/Niue");
+        options.Single(static x => x.IsBrowser).Id.Should().Be("Europe/Helsinki");
+        options.Select(static x => x.Id).Should().OnlyHaveUniqueItems("the circuit's zone and the browser's are one entry when they are one zone");
+    }
+
+    [Fact]
+    public void The_options_put_the_selected_zone_first_then_the_browsers_and_mark_only_the_browsers()
+    {
+        (string Id, TimeZoneInfo Zone)[] listed = [Zone("Africa/Abidjan", 0), Zone("Pacific/Niue", -11)];
+        (string Id, TimeZoneInfo Zone) selected = Zone("Asia/Calcutta", 5);
+        (string Id, TimeZoneInfo Zone) browser = Zone("Europe/Helsinki", 2);
+
+        IReadOnlyList<StudioTimeZones.ZoneOption> options = StudioTimeZones.Options(listed, selected, browser);
+
+        options.Select(static x => x.Id).Should().Equal("Asia/Calcutta", "Europe/Helsinki", "Africa/Abidjan", "Pacific/Niue");
+        options.Where(static x => x.IsBrowser).Select(static x => x.Id).Should().Equal("Europe/Helsinki");
+    }
+
+    [Fact]
+    public void The_options_add_nothing_for_a_zone_the_list_holds_and_mark_the_listed_one_the_browser_reported()
+    {
+        (string Id, TimeZoneInfo Zone)[] listed = [Zone("Africa/Abidjan", 0), Zone("Europe/Helsinki", 2), Zone("Pacific/Niue", -11)];
+
+        IReadOnlyList<StudioTimeZones.ZoneOption> options = StudioTimeZones.Options(listed, listed[2], listed[1]);
+
+        options.Select(static x => x.Id).Should().Equal("Africa/Abidjan", "Europe/Helsinki", "Pacific/Niue");
+        options.Where(static x => x.IsBrowser).Select(static x => x.Id).Should().Equal("Europe/Helsinki");
+        StudioTimeZones.Options(listed, listed[2], null).Should().NotContain(static x => x.IsBrowser);
+        StudioTimeZones.Options(listed, null, null).Select(static x => x.Id).Should().Equal(listed.Select(static x => x.Id));
+    }
+
+    [Fact]
+    public void The_list_the_options_are_made_from_is_the_host_list_and_is_never_changed()
+    {
+        IReadOnlyList<(string Id, TimeZoneInfo Zone)> listed = StudioTimeZones.Listed("FI");
+        int before = listed.Count;
+
+        _ = StudioTimeZones.Options(listed, Zone("Nowhere/Land", 3), Zone("Elsewhere/Land", 4));
+
+        listed.Count.Should().Be(before);
+    }
+
     [Fact]
     public void The_listed_zones_are_distinct_found_by_the_id_they_are_listed_under_and_in_the_order_of_those_ids()
     {

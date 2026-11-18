@@ -65,6 +65,19 @@
         }
     };
 
+    // The browser's own time zone, as the IANA id it reports ("Europe/Helsinki"), for a visitor who has chosen none: the circuit asks once when it
+    // starts and uses the id if the server knows it. Read from the browser's own settings; nothing is stored and nothing is sent anywhere else.
+    window.martenStudio.timeZone = window.martenStudio.timeZone || {
+        get: function () {
+            try {
+                return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+            }
+            catch {
+                return null;
+            }
+        }
+    };
+
     // The theme, applied before anything else this module does.
     //
     // StudioState is scoped and the circuit's scope is not the request's: it has no HttpContext, so the
