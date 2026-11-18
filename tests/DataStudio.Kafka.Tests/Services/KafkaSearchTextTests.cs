@@ -143,16 +143,26 @@ public class KafkaSearchTextTests
         DateTimeOffset at = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
         TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "(UTC+02:00) Helsinki", "FLE Standard Time");
 
-        if (!TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        // What a host can convert depends on its globalization data, and the two forms are independent: a GitHub Ubuntu runner converts a Windows
+        // id for a region it is given and none without a region. Where a form is missing the label is the offset alone, never the Windows id.
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", "FI", out string? _))
         {
-            // A host whose globalization data cannot convert a Windows id at all (a GitHub Ubuntu runner is one): the offset alone, never the Windows id.
+            KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "the region picks Helsinki among the zones FLE Standard Time stands for");
+        }
+        else
+        {
             KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("UTC+02:00");
-            return;
         }
 
-        KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "the region picks Helsinki among the zones FLE Standard Time stands for");
-        KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+02:00\)$", "with no region the id's default IANA zone, still never the Windows id");
-        KafkaSearchText.ZoneLabel(windowsStyle, at, "XX").Should().Contain("/", "a region the conversion does not know falls back to the id's default");
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? _))
+        {
+            KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+02:00\)$", "with no region the id's default IANA zone, still never the Windows id");
+            KafkaSearchText.ZoneLabel(windowsStyle, at, "XX").Should().Contain("/", "a region the conversion does not know falls back to the id's default");
+        }
+        else
+        {
+            KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().Be("UTC+02:00");
+        }
     }
 
     [Fact]
