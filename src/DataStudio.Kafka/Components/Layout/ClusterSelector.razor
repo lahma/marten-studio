@@ -16,16 +16,20 @@
     {
         <div class="ms-header-control">
             <label class="ms-header-control-label" for="ms-cluster-select">Cluster</label>
+            @* The closed control and every option read the cluster's own name and nothing more; two clusters on the same servers (#72) say so in
+               the option's title and the closed select's, built from configuration alone and naming only clusters the visitor may see. *@
             <select id="ms-cluster-select"
                     class="ms-select ms-header-select"
                     aria-label="Cluster"
+                    title="@SameServersTitle(State.ActiveCluster)"
                     value="@State.ActiveCluster?.Key"
                     @onchange="OnClusterPickedAsync">
                 @foreach (KafkaClusterEntry cluster in State.AvailableClusters)
                 {
                     @* `selected` as well as the select's `value`: during static server-side rendering `value` on a <select> is ignored. *@
                     <option value="@cluster.Key"
-                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@KafkaText.ClusterOptionText(cluster.Label, cluster.SameServersNames(State.AvailableClusters))</option>
+                            title="@SameServersTitle(cluster)"
+                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@cluster.Label</option>
                 }
             </select>
         </div>
@@ -50,6 +54,10 @@
     private bool interactive;
     private bool subscribed;
     private bool addressApplied;
+
+    /// <summary>The note of a cluster that shares its servers with others the visitor may see, or null (the attribute is then left out).</summary>
+    private string? SameServersTitle(KafkaClusterEntry? cluster) =>
+        cluster?.SameServersNames(State.AvailableClusters) is { Count: > 0 } names ? KafkaText.ClusterSameServersTitle(names) : null;
 
     protected override async Task OnInitializedAsync()
     {
