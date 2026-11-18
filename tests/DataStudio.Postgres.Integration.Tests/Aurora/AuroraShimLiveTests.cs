@@ -535,6 +535,8 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
 
         HealthCheckResult r03 = sweep.Results.Single(static x => x.Check.Code == "R03");
         r03.Statements.Should().NotContain(static x => x.Sql.Contains("aurora_replica_status", StringComparison.Ordinal), "nothing of Aurora's is called");
+        r03.Outcome.Should().Be(HealthCheckOutcome.Unavailable, "a state of the host's making, not a failure: a sentence, logged at Debug");
+        r03.Problem!.Reason.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
 
         await using AsyncServiceScope circuit = host.Services.CreateAsyncScope();
         AuroraView view = await circuit.ServiceProvider.GetRequiredService<IAuroraService>().GetAsync(new StudioScope("default", "default", null), Token);
