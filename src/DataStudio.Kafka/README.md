@@ -1,9 +1,10 @@
 # Data Studio for Apache Kafka®
 
+For a Wolverine application's clusters and topics, run the second line as well.
+
 <!-- beta: remove at 2.0.0 -->
 ```shell
 dotnet add package DataStudio.Kafka --prerelease
-# for a Wolverine application's clusters and topics, also:
 dotnet add package DataStudio.Kafka.Wolverine --prerelease
 ```
 
