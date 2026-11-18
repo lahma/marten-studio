@@ -48,6 +48,40 @@ public class KafkaRecordDetailTests
         detail.Markup.Should().Contain("Reading values is not available here.").And.NotContain("KafkaOptions");
     }
 
+    private static string ValueRow(IRenderedComponent<DataStudio.Kafka.Components.Shared.KafkaRecordDetail> detail) =>
+        string.Join(' ', detail.Find("dt:contains('Value') + dd").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries));
+
+    [Fact]
+    public async Task The_value_row_names_the_format_once_when_the_kind_says_the_same_thing()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", """{"a":1}""");
+        rig.Produce("orders", 0, 2, "k2", "plain words");
+
+        KafkaMatch json = await ReadAsync(rig, "orders", 0);
+        KafkaMatch text = await ReadAsync(rig, "orders", 1);
+
+        ValueRow(Render(rig, json)).Should().Be("JSON, 7 B", "the kind is Json and the format is JSON: one word, said once");
+        ValueRow(Render(rig, text)).Should().Be("Text, 11 B");
+        KafkaMatchView.ValueSummary(json).Should().Be("JSON, 7 B");
+    }
+
+    [Fact]
+    public async Task The_value_row_names_the_kind_and_the_format_when_they_differ()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+        rig.Produce(
+            "orders", 0, 1, "k1", """{"a":1}""",
+            ("ce_specversion", "1.0"), ("ce_type", "order.placed"), ("ce_source", "/orders"), ("ce_id", "e-1"));
+
+        KafkaMatch match = await ReadAsync(rig, "orders", 0);
+
+        match.ValueFormat.Should().NotBe(match.ValueKind.ToString(), "a CloudEvents value's format says more than its kind");
+        ValueRow(Render(rig, match)).Should().Be(match.ValueKind + ", " + match.ValueFormat + ", 7 B");
+    }
+
     [Fact]
     public async Task A_null_key_reads_null_and_a_tombstone_reads_tombstone()
     {

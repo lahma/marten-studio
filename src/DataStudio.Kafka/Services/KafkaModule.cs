@@ -73,7 +73,7 @@ internal sealed class KafkaModule(IOptions<KafkaOptions> options) : IStudioModul
     public string HomeRoute => "kafka";
 
     /// <inheritdoc />
-    public string Summary => "Topics, record search and live tail of the application's clusters.";
+    public string Summary => "Topics and records of the application's clusters.";
 
     /// <inheritdoc />
     public string ExposedSentence => KafkaText.ExposedSentence;

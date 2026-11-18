@@ -156,7 +156,7 @@ public class ShellFrontEndpointTests
             body.Should().Contain("ms-front-tiles");
             body.Split("ms-front-tile-name").Length.Should().Be(3, "two modules, two tiles");
             TileOrder(body).Should().Equal([FakeHostModule.PageAddress, "kafka"], "the tiles follow the order the host registered the modules in");
-            body.Should().Contain("Topics, record search and live tail of the application&#x27;s clusters.");
+            body.Should().Contain("Topics and records of the application&#x27;s clusters.");
             body.Should().Contain("A module the tests define.");
             body.Should().NotContain("Marten", "the host registered no Marten module");
             body.Should().NotContain("Documents, event streams");
