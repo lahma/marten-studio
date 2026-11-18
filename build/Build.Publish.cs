@@ -156,14 +156,14 @@ partial class Build
                 AssertNuspecDependsOnNoneOf(package, PostgresPackageId, DiagnosticsPackageId, MartenPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
             }
 
-            // The Marten module depends on exactly its own Postgres module and on the Marten floor. The exact range comes
+            // DataStudio.Marten depends on exactly its own DataStudio.Postgres and on the Marten floor. The exact range comes
             // from DataStudioMartenPinsPostgresExactly in DataStudio.Marten.csproj, which works through two NuGet-private
             // names; this is what turns a NuGet that renamed them into a failed build rather than a shipped `>=`.
-            // The assets pack is there too without the Marten module referencing it: under transitive pinning NuGet writes
+            // The assets pack is there too without DataStudio.Marten referencing it: under transitive pinning NuGet writes
             // a centrally pinned transitive package (project.assets.json's centralTransitiveDependencyGroups) into the
-            // nuspec - the same line the Marten module 0.4.0 carried when it referenced the pack directly. Npgsql is not,
+            // nuspec - the same line MartenStudio 0.4.0 carried when it referenced the pack directly. Npgsql is not,
             // because its central row applies only to projects that set DataStudioPostgresPinsNpgsql, and neither is
-            // DataStudio.Postgres.Diagnostics: it reaches a Marten module host through the Postgres module's own exact pin.
+            // DataStudio.Postgres.Diagnostics: it reaches a Marten host through DataStudio.Postgres's own exact pin.
             var assetsPack = CentralPackageVersion("Microsoft.AspNetCore.App.Internal.Assets");
 
             AssertNuspecDependencies(PackagesDirectory / $"{MartenPackageId}.{Version}.nupkg",
@@ -183,13 +183,13 @@ partial class Build
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
 
-            // The Postgres module depends on exactly its own DataStudio.Postgres.Diagnostics and exactly its own DataStudio (the exact ranges come from
+            // DataStudio.Postgres depends on exactly its own DataStudio.Postgres.Diagnostics and exactly its own DataStudio (the exact ranges come from
             // DataStudioPostgresPinsDiagnosticsExactly and DataStudioPostgresPinsShellExactly in DataStudio.Postgres.csproj, through the same
             // two NuGet-private names), on the assets pack that carries blazor.web.js (D22), which reaches it through the shell and is a
-            // centrally pinned transitive line, and on Npgsql at its floor: The Postgres module no longer
+            // centrally pinned transitive line, and on Npgsql at its floor: DataStudio.Postgres no longer
             // references Npgsql itself, but it still sets DataStudioPostgresPinsNpgsql, so the central row pins the Npgsql
             // that arrives through the engine and NuGet writes that pinned transitive package into the nuspec, the same
-            // way it writes the assets pack into the Marten module's. It names no part of the Marten family: a host without
+            // way it writes the assets pack into DataStudio.Marten's. It names no part of the Marten family: a host without
             // Marten must not get it through this package.
             AssertNuspecDependencies(PackagesDirectory / $"{PostgresPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
@@ -229,8 +229,8 @@ partial class Build
             // DataStudio.Kafka depends on exactly its own DataStudio and exactly its own DataStudio.Kafka.Core
             // (both the family version): DataStudioKafkaPinsFamilyExactly in DataStudio.Kafka.csproj, which takes each range from the referenced
             // project's PackageVersion. It depends on no database module and no Npgsql. Two more lines are CPM's transitive pinning, as
-            // The Marten module's assets line is (measured by K8): the assets pack that carries blazor.web.js (D22), which reaches it through the shell, and
-            // Confluent.Kafka at its floor, which reaches it through DataStudio.Kafka.Core. The Kafka module references neither, and its built
+            // DataStudio.Marten's assets line is (measured by K8): the assets pack that carries blazor.web.js (D22), which reaches it through the shell, and
+            // Confluent.Kafka at its floor, which reaches it through DataStudio.Kafka.Core. DataStudio.Kafka references neither, and its built
             // assembly references no Confluent assembly (KafkaFenceTests); the lines only keep a host from lowering them.
             AssertNuspecDependencies(PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
@@ -288,8 +288,8 @@ partial class Build
 
             // One push per package, in order, and the first failure ends the run: a single DotNetNuGetPush throws
             // on a non-zero exit, so a push that fails never reaches the packages after it: a DataStudio.Postgres.Diagnostics
-            // failure never uploads the Postgres module, a Postgres module failure never uploads the Marten module, and a DataStudio.Kafka.Core
-            // failure never uploads the Kafka module or DataStudio.Kafka.Wolverine - each of which would be on nuget.org and nobody could
+            // failure never uploads DataStudio.Postgres, a DataStudio.Postgres failure never uploads DataStudio.Marten, and a DataStudio.Kafka.Core
+            // failure never uploads DataStudio.Kafka or DataStudio.Kafka.Wolverine - each of which would be on nuget.org and nobody could
             // restore it, because it depends on exactly the one before.
             // Deliberately not the combinatorial overload: it runs its items through PLINQ, which promises no order
             // even at a degree of parallelism of 1, and with completeOnFailure it pushes the rest after a failure.

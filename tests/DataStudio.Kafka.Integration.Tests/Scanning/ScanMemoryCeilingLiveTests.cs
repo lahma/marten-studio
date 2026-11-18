@@ -115,7 +115,7 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         double allowed = ceiling * 1.25;
 
         // Printed either way, so the number is on record next to the formula.
-        TestContext.Current.SendDiagnosticMessage($"the Kafka module memory ceiling ({fixture.Image}, {RuntimeInformation.OSDescription}): peak growth {grown / (double) MiB:F1} MiB of {ProcessMemory.PrivateName}, ceiling {ceiling / MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, 2*m*c={2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %). Highest of each over the scans, baseline to peak: {highest.Describe(start)}.");
+        TestContext.Current.SendDiagnosticMessage($"Kafka scan memory ceiling ({fixture.Image}, {RuntimeInformation.OSDescription}): peak growth {grown / (double) MiB:F1} MiB of {ProcessMemory.PrivateName}, ceiling {ceiling / MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, 2*m*c={2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %). Highest of each over the scans, baseline to peak: {highest.Describe(start)}.");
 
         grown.Should().BeLessThan((long) allowed);
     }

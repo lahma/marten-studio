@@ -8,8 +8,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <!-- CS1591 (missing XML doc comment) is deliberately NOT silenced here: The Marten module is a documented
-         public library, so a missing doc comment must fail the build in src/. .editorconfig turns it off
+    <!-- CS1591 (missing XML doc comment) is deliberately NOT silenced here: every assembly under src/ is a
+         documented public library, so a missing doc comment must fail the build in src/. .editorconfig turns it off
          again for build/, tests/, samples/ and *.razor, where it is noise. GenerateDocumentationFile is
          also what lets IDE0005 (unnecessary usings) run under EnforceCodeStyleInBuild. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

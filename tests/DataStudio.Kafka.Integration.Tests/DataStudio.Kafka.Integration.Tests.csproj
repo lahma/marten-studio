@@ -34,7 +34,7 @@
     <ProjectReference Include="../../src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
     <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
     <ProjectReference Include="../../src/DataStudio.Kafka.Wolverine/DataStudio.Kafka.Wolverine.csproj" />
-    <!-- Only for KafkaFirstNavigationLiveTests' the Marten module host case (D-SHELL 12.1): The Kafka module is a module of either studio. Marten arrives through it. -->
+    <!-- Only for KafkaFirstNavigationLiveTests' Marten host case (D-SHELL 12.1): the Kafka module sits beside the Marten module in one host. Marten arrives through DataStudio.Marten. -->
     <ProjectReference Include="../../src/DataStudio.Marten/DataStudio.Marten.csproj" />
     <!-- Only for SampleSeedTests, SampleHostLiveTests and the sample's live search (SAMPLE): the demo's seed, judge and policies are internal to it
          (InternalsVisibleTo), and the host is started from its own build output as a child process, as DataStudio.Marten.Integration.Tests starts its sample. -->

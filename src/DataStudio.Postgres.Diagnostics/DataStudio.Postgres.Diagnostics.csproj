@@ -50,8 +50,8 @@
   <!--
     The package is packed at the Npgsql floor and nowhere else - the same refusal, for the same reason, as
     MartenPackOnlyAtTheMartenFloor in src/DataStudio.Marten/DataStudio.Marten.csproj. A nupkg packed after a
-    restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, every Postgres module and the Marten module
-    host's included, since the Postgres module depends on exactly this package. The build's Pack target refuses
+    restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, those of every Postgres module and Marten
+    module host included, since DataStudio.Postgres depends on exactly this package. The build's Pack target refuses
     first and names the Fallout parameter; this is the refusal for a bare `dotnet pack`.
 
     Two checks, because the property is not what NuGet packs from: the dependency range comes from
