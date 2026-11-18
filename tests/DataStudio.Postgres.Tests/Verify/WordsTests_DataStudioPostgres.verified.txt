@@ -282,6 +282,9 @@ It points at a table this studio does not draw.
 [RetriedFailures]
 serialization failures, optimistic-concurrency conflicts, unique violations
 
+[RunSqlUnavailable]
+Running SQL is not available here.
+
 [ScopeDeniedEntry]
 Not authorized for this data source or database.
 

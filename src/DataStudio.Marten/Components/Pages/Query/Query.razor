@@ -19,6 +19,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject IStudioSettings Settings
+@inject StudioCapabilityGuard Capabilities
 @inject StudioDescriptor Descriptor
 
 @*
@@ -272,12 +273,16 @@
         </div>
 
         @* All three modes (LINQ's since 1.2), each with lists of its own: the drawer keys them by mode. *@
-        <aside class="ms-query-side" aria-label="Saved and recent queries">
-            <SavedQueryDrawer @ref="drawer"
-                              StoreKey="@State.ActiveScope?.StoreKey"
-                              Mode="@mode.ToString()"
-                              OnPickDetailed="OnPickedDetailedAsync" />
-        </aside>
+        @if (mode != QueryMode.Sql || Capabilities.IsEnabled(StudioCapability.RunSql))
+        {
+            @* Issue #88: the SQL mode's lists are the console's, so they are left out while it cannot run; the other modes keep theirs. *@
+            <aside class="ms-query-side" aria-label="Saved and recent queries">
+                <SavedQueryDrawer @ref="drawer"
+                                  StoreKey="@State.ActiveScope?.StoreKey"
+                                  Mode="@mode.ToString()"
+                                  OnPickDetailed="OnPickedDetailedAsync" />
+            </aside>
+        }
     </div>
 </div>
 

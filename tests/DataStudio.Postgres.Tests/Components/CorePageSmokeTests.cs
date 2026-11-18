@@ -127,14 +127,53 @@ public class CorePageSmokeTests
         database.Should().Be(context.State.ActiveScope!.DatabaseId);
     }
 
+    /// <summary>
+    /// Issue #88, as #74 settled it for the Kafka module: Query reached by address with <c>RunSql</c> off says in one sentence that running SQL
+    /// is not available here - no option, capability or call - and draws no Saved/Recent/Export/Import panel. The service refuses regardless.
+    /// </summary>
     [Fact]
-    public async Task Query_without_RunSql_names_Postgres_own_option()
+    public async Task Query_without_RunSql_says_one_sentence_names_no_option_and_has_no_queries_panel()
     {
         await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var page = context.Render<QueryPage>();
 
-        page.Markup.Should().Contain("PostgresOptions.Capabilities.RunSql").And.NotContain("MartenOptions");
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Running SQL is not available here.");
+        page.FindAll("#ms-query-sql").Should().BeEmpty();
+        page.FindAll(".ms-query-side").Should().BeEmpty();
+        page.FindAll(".ms-query-drawer").Should().BeEmpty();
+        page.Markup.Should().NotContain("RunSql").And.NotContain("PostgresOptions").And.NotContain("Capabilities").And.NotContain("psql")
+            .And.NotContain("MartenOptions");
+    }
+
+    [Fact]
+    public async Task Query_with_RunSql_on_is_the_console_and_its_queries_panel()
+    {
+        await using PostgresComponentContext context = await new PostgresComponentContext().WithAllCapabilities().ReadyAsync();
+
+        var page = context.Render<QueryPage>();
+
+        page.WaitForAssertion(() => page.FindAll("#ms-query-sql").Should().ContainSingle());
+        page.FindAll(".ms-capability-disabled").Should().BeEmpty();
+        page.FindAll(".ms-query-side .ms-query-drawer").Should().ContainSingle();
+    }
+
+    /// <summary>Each read-only switch - the shell's and this module's - turns <c>RunSql</c> off, so a console configured on says the same sentence.</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Query_under_either_read_only_switch_says_the_same_sentence(bool moduleReadOnly, bool shellReadOnly)
+    {
+        await using PostgresComponentContext context = new PostgresComponentContext().WithAllCapabilities();
+        context.Options.ReadOnly = moduleReadOnly;
+        context.ShellOptions.ReadOnly = shellReadOnly;
+        await context.ReadyAsync();
+
+        var page = context.Render<QueryPage>();
+
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Running SQL is not available here.");
+        page.FindAll("#ms-query-sql").Should().BeEmpty();
+        page.FindAll(".ms-query-side").Should().BeEmpty();
     }
 
     [Fact]

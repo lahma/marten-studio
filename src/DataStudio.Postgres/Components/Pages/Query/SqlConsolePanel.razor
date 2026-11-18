@@ -33,8 +33,13 @@
 <div class="ms-query-mode-panel ms-query-panel-sql">
     @if (!SqlEnabled)
     {
-        <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Running SQL" />
-        <p class="ms-muted ms-query-sql-warning">@RunSqlWarning</p>
+        @* Issue #88: one sentence for whoever arrives by address, and no option name. The capability
+           chip lists what is off for the host's developer, and the service refuses regardless (hard rule 5). *@
+        <div class="ms-alert ms-alert-info ms-capability-disabled" role="note">
+            <div class="ms-alert-content">
+                <p>@Settings.Text.RunSqlUnavailable</p>
+            </div>
+        </div>
     }
     else if (!gateKnown)
     {
@@ -130,7 +135,7 @@
 </div>
 
 @code {
-    /// <summary>What the README says about the SQL console, repeated where the capability is refused.</summary>
+    /// <summary>What the README says about the SQL console, repeated where the capability is refused for a visitor who could use it (the Plan page).</summary>
     internal const string RunSqlWarning =
         "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
         "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
