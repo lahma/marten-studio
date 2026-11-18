@@ -17899,3 +17899,47 @@ dialog.ms-modal::backdrop {
     color: var(--ms-color-text-secondary);
     overflow-wrap: anywhere;
 }
+
+/* --------------------------------------------------------------------------
+   The Health page on a phone
+
+   At 390 px the rail, the content padding and the section and card padding
+   leave a finding card about 250 px, and the checks table (a `width: 100%`
+   table of four columns, 79 rows with the Marten sample) was squeezed into
+   that: one or two words a line in every column, about 8 900 px for the
+   table alone and 16 800 px for the page. D25: fix the too-wide column first,
+   and the labelled scroll region is the floor. So below 640 px the checks
+   table keeps a width its columns can read in (the region scrolls sideways,
+   which `<TableScroll>` announces and a keyboard can reach), the code stays
+   on one line, and the section and the cards give back 16 px of padding each.
+   Measured with the Marten sample at 390 px: 16 808 px before, about 12 700 after.
+   CSS only: the page's markup is another change's.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    .ms-health-check-table {
+        min-width: 56rem;
+    }
+
+    .ms-health-check-table th:nth-child(1) {
+        width: 4rem;
+    }
+
+    .ms-health-check-table th:nth-child(2) {
+        width: 15rem;
+    }
+
+    .ms-health-check-table th:nth-child(3) {
+        width: 6.5rem;
+    }
+
+    .ms-health-check-table td:first-child {
+        white-space: nowrap;
+    }
+
+    .ms-health-area,
+    .ms-health-checks,
+    .ms-health-finding {
+        padding-inline: var(--ms-space-sm);
+    }
+}
