@@ -232,11 +232,11 @@ Each finding carries `StudioPath`, its card on the Health page, and `StudioLinks
 | `Server` | Server |
 | `Plan` | Query › Plan |
 | `Replication` | Replication |
-| `Overview` | the Overview, the studio's landing page |
+| `Overview` | the Overview, the home of the module that owns the database: `marten` in a host with the Marten module, `postgres` in a Postgres host and with the engine alone |
 | `Connection` | Database › Connection: how this application connects |
 
 Each path is relative to where you mapped the studio (`DataStudioOptions.Path`), starts with `postgres/` (the Postgres module's
-segment) and carries the database's scope in its query, so `$"{studioOptions.Path}/{finding.StudioPath}"` opens it (for example
+segment; `Overview` is the module's own home, `marten?store=…` in a Marten host, never an address that redirects) and carries the database's scope in its query, so `$"{studioOptions.Path}/{finding.StudioPath}"` opens it (for example
 `/studio/postgres/health?store=default&db=app`). Take them from here rather than building routes: the studio's routes
 and query parameters are its own and may change between releases. A link opens the page for whoever follows it, under
 that visitor's own gates; it carries nothing the page would not show them. A finding's `StudioPath` ends in its card's

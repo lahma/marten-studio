@@ -75,6 +75,14 @@ internal interface IDiagnosticsSettings
     string? SourceLabel => null;
 
     /// <summary>
+    /// Issue #84: the home page of the module that owns the databases, below the mount, with no leading slash - the page a
+    /// link to "the Overview" ends on. <c>postgres</c> is the engine's own answer, and the Postgres module's; the Marten module
+    /// supplies its own (<c>marten</c>), because its home is the one the Postgres module's address redirects to. The engine
+    /// names no module but its own.
+    /// </summary>
+    string DatabaseHomeRoute => PostgresRoutes.Root;
+
+    /// <summary>
     /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenOptions.ReadOnly</c>,
     /// <c>MartenOptions.Capabilities.RunSql</c>.
     /// </summary>

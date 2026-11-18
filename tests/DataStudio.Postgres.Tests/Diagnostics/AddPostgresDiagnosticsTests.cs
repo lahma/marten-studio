@@ -50,6 +50,10 @@ public class AddPostgresDiagnosticsTests
         // The studio's paths are relative, as they always were, and meaningless where no UI is mounted.
         diagnostics.GetStudioPath(new PostgresDatabaseRef("default", "app"), PostgresPage.Health)
             .Should().Be("postgres/health?store=default&db=app");
+
+        // Issue #84: the engine alone has the Postgres module's home, the one module it names.
+        diagnostics.GetStudioPath(new PostgresDatabaseRef("default", "app"), PostgresPage.Overview)
+            .Should().Be("postgres?store=default&db=app");
     }
 
     [Fact]

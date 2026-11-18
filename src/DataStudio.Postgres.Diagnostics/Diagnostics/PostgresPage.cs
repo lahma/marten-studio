@@ -35,7 +35,11 @@ public enum PostgresPage
     /// <summary>The Replication page.</summary>
     Replication = 9,
 
-    /// <summary>The Overview, the Postgres module's home (<c>postgres</c>). In a host that also has the Marten module the module's home is Marten's, and this address leads there.</summary>
+    /// <summary>
+    /// The Overview: the home of the module that owns the database, the page <see cref="IPostgresDiagnostics.GetStudioPath" /> answers
+    /// with - <c>marten</c> in a host with the Marten module, <c>postgres</c> in a Postgres host and for the engine alone - so the
+    /// address is the page itself and never one that redirects to it.
+    /// </summary>
     Overview = 10,
 
     /// <summary>Database › Connection: how this application connects (the page since 1.1).</summary>
