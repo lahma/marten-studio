@@ -29,7 +29,10 @@ internal sealed class FakeHostModule : IStudioModule
 
     private static readonly IReadOnlyList<StudioPageAssembly> Pages = [new(typeof(FakeHostModule).Assembly, PageRoot)];
 
-    private static readonly IReadOnlyList<StudioNavSection> Rail = [new("Host", [new StudioNavItem("Host page", PageAddress, "cog")])];
+    /// <summary>The badge key of the host page's entry: a rail's badges draw one on it.</summary>
+    public const string BadgeKey = "host-badge";
+
+    private static readonly IReadOnlyList<StudioNavSection> Rail = [new("Host", [new StudioNavItem("Host page", PageAddress, "cog", BadgeKey)])];
 
     /// <inheritdoc />
     public string Key => ModuleKey;
