@@ -167,8 +167,9 @@ Take the packages for the kind of host you have. Target framework: `net10.0`.
 For a Wolverine application's Kafka clusters and topics, add `dotnet add package DataStudio.Kafka.Wolverine --prerelease` <!-- beta: remove at 2.0.0 -->
 beside `DataStudio.Kafka`; `DataStudio.Kafka.Core`, the engine, comes with `DataStudio.Kafka`.
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Marten --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio.Marten --prerelease
 ```
 
 One package reference per module. `DataStudio.Marten` brings `Marten` (floor `9.57.0`: the floors follow the latest

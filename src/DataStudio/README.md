@@ -1,7 +1,8 @@
 # DataStudio
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio --prerelease
 ```
 
 The shell of [Data Studio](https://github.com/lahma/marten-studio#readme): an embeddable Blazor Server admin UI that a

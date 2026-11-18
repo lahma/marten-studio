@@ -1,8 +1,10 @@
 # Data Studio for Apache Kafka®
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Kafka --prerelease   # beta: remove at 2.0.0
-dotnet add package DataStudio.Kafka.Wolverine --prerelease   # for a Wolverine application's clusters and topics; beta: remove --prerelease at 2.0.0
+dotnet add package DataStudio.Kafka --prerelease
+# for a Wolverine application's clusters and topics, also:
+dotnet add package DataStudio.Kafka.Wolverine --prerelease
 ```
 
 The Kafka module of [Data Studio](https://github.com/lahma/marten-studio#readme): a Kafka section inside your own ASP.NET
