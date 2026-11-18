@@ -155,7 +155,7 @@ internal sealed class KafkaTailService(
         if (!plan.IsValid)
         {
             await NotRunAsync(input, session, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
-            return new KafkaTailStartResult.Refused(KafkaText.PredicateInvalid);
+            return new KafkaTailStartResult.Refused(KafkaText.PredicateErrors(plan.Errors.Count));
         }
 
         try

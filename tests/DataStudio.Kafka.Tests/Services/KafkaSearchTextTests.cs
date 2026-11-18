@@ -124,35 +124,57 @@ public class KafkaSearchTextTests
     public void A_zone_is_an_IANA_id_or_a_UTC_offset_and_never_a_Windows_id()
     {
         DateTimeOffset at = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+        TimeZoneInfo unknown = TimeZoneInfo.CreateCustomTimeZone("Studio Test Standard Time", TimeSpan.FromHours(2), "Test", "Studio Test Standard Time");
+        TimeZoneInfo negative = TimeZoneInfo.CreateCustomTimeZone("Studio Negative Standard Time", TimeSpan.FromHours(-8), "Negative", "Studio Negative Standard Time");
+        TimeZoneInfo half = TimeZoneInfo.CreateCustomTimeZone("Studio Half Standard Time", new TimeSpan(5, 30, 0), "Half", "Studio Half Standard Time");
+
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "an IANA id keeps its name and gains the offset");
+        KafkaSearchText.ZoneLabel(unknown, at, "FI").Should().Be("UTC+02:00", "a Windows-style id that cannot be converted is its offset, never the id");
+        KafkaSearchText.ZoneLabel(negative, at, "FI").Should().Be("UTC-08:00");
+        KafkaSearchText.ZoneLabel(half, at, "FI").Should().Be("UTC+05:30");
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.Utc, at, "FI").Should().Be("UTC");
+
+        KafkaSearchText.WindowLine(at, at.AddHours(1), unknown).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
+    }
+
+    [Fact]
+    public void A_Windows_id_reads_as_the_IANA_id_it_converts_to_whatever_the_operating_system()
+    {
+        DateTimeOffset at = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
         TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "(UTC+02:00) Helsinki", "FLE Standard Time");
-        TimeZoneInfo negative = TimeZoneInfo.CreateCustomTimeZone("Pacific Standard Time", TimeSpan.FromHours(-8), "Pacific", "Pacific Standard Time");
-        TimeZoneInfo half = TimeZoneInfo.CreateCustomTimeZone("India Standard Time", new TimeSpan(5, 30, 0), "India", "India Standard Time");
 
-        KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at).Should().Be("Europe/Helsinki (UTC+02:00)", "an IANA id keeps its name and gains the offset");
-        KafkaSearchText.ZoneLabel(windowsStyle, at).Should().Be("UTC+02:00");
-        KafkaSearchText.ZoneLabel(negative, at).Should().Be("UTC-08:00");
-        KafkaSearchText.ZoneLabel(half, at).Should().Be("UTC+05:30");
-        KafkaSearchText.ZoneLabel(TimeZoneInfo.Utc, at).Should().Be("UTC");
-
-        KafkaSearchText.WindowLine(at, at.AddHours(1), windowsStyle).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
+        KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "the region picks Helsinki among the zones FLE Standard Time stands for");
+        KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().MatchRegex(@"^[A-Za-z_]+/[A-Za-z_]+ \(UTC\+02:00\)$", "with no region the id's default IANA zone, still never the Windows id");
+        KafkaSearchText.ZoneLabel(windowsStyle, at, "XX").Should().Contain("/", "a region the conversion does not know falls back to the id's default");
     }
 
     [Fact]
     public void A_skipped_local_time_names_the_zone_as_the_label_does_never_by_a_Windows_id()
     {
         TimeZoneInfo helsinki = TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki");
-        TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "(UTC+02:00) Helsinki", "FLE Standard Time");
+        TimeZoneInfo unknown = TimeZoneInfo.CreateCustomTimeZone("Studio Test Standard Time", TimeSpan.FromHours(2), "Test", "Studio Test Standard Time");
         DateTime gap = new(2026, 3, 29, 3, 30, 0, DateTimeKind.Unspecified);
 
         helsinki.IsInvalidTime(gap).Should().BeTrue();
         KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, helsinki).Should().Be("2026-03-29T03:30 does not exist in Europe/Helsinki (UTC+02:00) (the clocks skip it).");
-        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, windowsStyle).Should().Be("2026-03-29T03:30 does not exist in UTC+02:00 (the clocks skip it).");
+        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, unknown).Should().Be("2026-03-29T03:30 does not exist in UTC+02:00 (the clocks skip it).");
     }
 
     [Fact]
     public void The_topic_count_says_what_it_counts()
     {
-        KafkaText.TopicsSelected(1).Should().Be("1 of 20 topics selected (the most one search reads)");
+        KafkaText.TopicsSelected(1).Should().Be("1 selected (a search reads at most 20)", "the 20 is the most one search reads, not how many topics there are");
+        KafkaText.TopicsSelected(0).Should().Be("0 selected (a search reads at most 20)");
+        KafkaText.TopicsSelected(20).Should().Be("20 selected (a search reads at most 20)");
+    }
+
+    [Fact]
+    public void The_error_footer_counts_the_errors()
+    {
+        KafkaText.PredicateErrors(1).Should().Be("1 error in the search text");
+        KafkaText.PredicateErrors(2).Should().Be("2 errors in the search text");
+        KafkaText.PredicateErrors(1_200).Should().Be("1,200 errors in the search text");
+        KafkaText.PredicateInvalid.Should().Be("The search text has errors.", "the engine's refusal, which has no list above it to see");
     }
 
     [Fact]

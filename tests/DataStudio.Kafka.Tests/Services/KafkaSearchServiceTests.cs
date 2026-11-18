@@ -121,6 +121,20 @@ public class KafkaSearchServiceTests
     }
 
     [Fact]
+    public async Task The_audited_first_error_is_the_earliest_in_the_text_when_the_lexer_and_the_parser_both_report()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+
+        // The lexer stops at the '&' (position 10), the parser finds the second '=' (position 6): the earliest is the first, and so the one recorded.
+        KafkaSearchPlanResult.Planned planned = (KafkaSearchPlanResult.Planned) await rig.Search().PlanAsync(rig.Input(["orders"], "key == 5 &&"), Ct);
+
+        planned.Value.Plan.Errors.Select(static x => x.Shown).Should().Equal("Position 6: expected a value after '=', found '='.", "Position 10: unexpected character.");
+        rig.Ring.Should().ContainSingle().Which.Message.Should().Be("position 6, expected a value", "it was 'position 10, unexpected character' before the errors were ordered by position");
+        rig.Logs.Entries.Single(static x => x.EventId.Id == 9601).Message.Should().EndWith("did not run: position 6, expected a value. Predicate: (a predicate that did not parse, 11 characters)");
+    }
+
+    [Fact]
     public async Task A_window_that_ends_before_it_starts_is_refused_with_the_engines_sentence()
     {
         await using KafkaSearchRig rig = new();

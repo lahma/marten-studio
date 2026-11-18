@@ -1093,7 +1093,7 @@
 
             if (!planned.Plan.IsValid)
             {
-                refusal = KafkaText.PredicateInvalid;
+                refusal = KafkaText.PredicateErrors(planned.Plan.Errors.Count);
                 return;
             }
 

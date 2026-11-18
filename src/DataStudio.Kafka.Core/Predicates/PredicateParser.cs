@@ -46,16 +46,51 @@ internal static class PredicateParser
             return Failure(0, text.Length, PredicateErrorKind.TextTooLong, string.Create(CultureInfo.InvariantCulture, $"the search text is {text.Length:N0} characters long; the most is 2,000."));
         }
 
+        List<Token> tokens = [];
+
         try
         {
-            List<Token> tokens = Lexer.Lex(text);
+            Lexer.Lex(text, tokens);
             return new Parser(tokens).Run();
         }
-        catch (ParseFailure failure)
+        catch (ParseFailure failure) when (tokens.Count == 0 || tokens[^1].Kind == TokenKind.End)
         {
             return new PredicateParseResult(null, [failure.Error]);
         }
+        catch (ParseFailure lexFailure)
+        {
+            // The lexer stopped at a character it cannot read, before the parser had anything to say. What it had read still parses, and a problem
+            // earlier in the text than the character is reported first (#80): `key == 5 &&` says what is wrong at `==` before the `&`.
+            return new PredicateParseResult(null, ByPosition(EarlierProblem(tokens, lexFailure.Error), lexFailure.Error));
+        }
     }
+
+    /// <summary>
+    /// What the parser finds wrong in the tokens the lexer read before it stopped at <paramref name="lexical" />, when that is earlier in the text. The tokens end
+    /// at the stop, so the parser's complaint that the text ends there, or that a parenthesis is still open, is the stop's doing and not reported.
+    /// </summary>
+    private static PredicateError? EarlierProblem(List<Token> read, PredicateError lexical)
+    {
+        List<Token> upToStop = [.. read, new Token(TokenKind.End, string.Empty, lexical.Start, 0)];
+
+        try
+        {
+            _ = new Parser(upToStop).Run();
+            return null;
+        }
+        catch (ParseFailure failure) when (failure.Error.Start < lexical.Start && failure.Error.Kind != PredicateErrorKind.UnclosedParenthesis)
+        {
+            return failure.Error;
+        }
+        catch (ParseFailure)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The errors by where they are in the text, earliest first, and in the order given for the same position.</summary>
+    private static List<PredicateError> ByPosition(PredicateError? earlier, PredicateError lexical) =>
+        [.. new[] { earlier, lexical }.OfType<PredicateError>().OrderBy(static x => x.Start)];
 
     private static PredicateParseResult Failure(int start, int length, PredicateErrorKind kind, string message) =>
         new(null, [new PredicateError(start, length, message, kind)]);
@@ -111,9 +146,9 @@ internal static class PredicateParser
 
     private static class Lexer
     {
-        public static List<Token> Lex(string text)
+        /// <summary>Fills <paramref name="tokens" /> with what <paramref name="text" /> says, ending with the end token; throws at the first character it cannot read, with the tokens before it left in the list.</summary>
+        public static void Lex(string text, List<Token> tokens)
         {
-            List<Token> tokens = [];
             int i = 0;
 
             while (i < text.Length)
@@ -211,7 +246,6 @@ internal static class PredicateParser
             }
 
             tokens.Add(new Token(TokenKind.End, string.Empty, text.Length, 0));
-            return tokens;
         }
 
         private static Token LexString(string text, ref int i)

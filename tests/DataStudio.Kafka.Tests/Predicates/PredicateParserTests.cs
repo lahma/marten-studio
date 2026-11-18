@@ -128,7 +128,6 @@ public class PredicateParserTests
     }
 
     [Theory]
-    [InlineData("key == 5 &&", "Position 10: unexpected character.")]
     [InlineData("value ~", "Position 8: expected a value after '~', found the end.")]
     [InlineData("foo = 'x'", "Position 1: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
     [InlineData("key ==", "Position 6: expected a value after '=', found '='.")]
@@ -142,13 +141,31 @@ public class PredicateParserTests
         shown.Split("osition", StringSplitOptions.None).Should().HaveCount(2, "the position is said once, by the page's prefix");
     }
 
+    [Theory]
+    [InlineData("key == 5 &&", new[] { "Position 6: expected a value after '=', found '='.", "Position 10: unexpected character." })]
+    [InlineData("key == 5 & key = 'a'", new[] { "Position 6: expected a value after '=', found '='.", "Position 10: unexpected character." })]
+    [InlineData("key = 'a' &&", new[] { "Position 11: unexpected character." })]
+    [InlineData("key = 'a' and foo = 'b' &", new[] { "Position 15: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.", "Position 25: unexpected character." })]
+    [InlineData("(key = 'a' &", new[] { "Position 12: unexpected character." })]
+    [InlineData("key = &", new[] { "Position 7: unexpected character." })]
+    public void When_the_lexer_and_the_parser_both_report_the_errors_are_listed_by_position_earliest_first(string text, string[] shown)
+    {
+        PredicateParseResult result = PredicateParser.Parse(text);
+
+        result.IsValid.Should().BeFalse();
+        result.Tree.Should().BeNull();
+        result.Errors.Select(static x => x.Shown).Should().Equal(shown);
+        result.Errors.Select(static x => x.Start).Should().BeInAscendingOrder();
+        result.Errors.SelectMany(static x => new[] { x.Message, x.AuditPhrase }).Should().NotContain(static x => x.Contains('5', StringComparison.Ordinal) || x.Contains("'a'", StringComparison.Ordinal), "an error names a position and never repeats a literal");
+    }
+
     [Fact]
     public void Every_error_of_every_input_above_has_the_one_shape_and_a_constant_audit_phrase()
     {
         string[] texts =
         [
             "key =", "key 'a'", "foo = 'a'", "key = 'abc", "(key = 'a'", "key = 'a' and", "key = 'a' )", "key in 'a'", "key is 'a'", "key = <redacted>",
-            "key = 'a' & key = 'b'", "key = 99999999999999999999999999999", "header[''] = 'a'", "header[a] = 'a'", "value ~", "key == 5 &&", "$.a. = 1",
+            "key = 'a' & key = 'b'", "key = 99999999999999999999999999999", "header[''] = 'a'", "header[a] = 'a'", "value ~", "$.a. = 1",
             "key = '" + new string('a', 1_001) + "'",
         ];
 

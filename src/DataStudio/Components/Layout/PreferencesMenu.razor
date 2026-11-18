@@ -2,7 +2,7 @@
 
    They are behind a gear rather than in the header row because at 390 px the header was four rows
    deep before the page title appeared: the tenant picker, the capability chip, a time-zone select
-   wide enough to hold "FLE Standard Time (local)", and a theme select. Only the first of those is
+   wide enough to hold "Europe/Helsinki (UTC+02:00)", and a theme select. Only the first of those is
    context somebody needs while they read the page - which store, which database, which tenant this
    screen is about - so that is the one that stays, and these two move.
 
@@ -61,11 +61,11 @@
         <select id="ms-timezone-select"
                 class="ms-select ms-header-select"
                 aria-label="Time zone"
-                value="@SelectedTimeZoneId"
+                value="@SelectedZoneName"
                 @onchange="TimeZoneChanged">
-            @foreach (TimeZoneInfo timeZone in timeZones)
+            @foreach ((string id, TimeZoneInfo timeZone) in ListedZones)
             {
-                <option value="@timeZone.Id" selected="@(timeZone.Id == SelectedTimeZoneId)">@TimeZoneLabel(timeZone)</option>
+                <option value="@id" selected="@(string.Equals(id, SelectedZoneName, StringComparison.Ordinal))">@StudioTimeZones.Label(timeZone, now, StudioTimeZones.CurrentRegion)</option>
             }
         </select>
     </div>
@@ -90,10 +90,15 @@
 </div>
 
 @code {
-    private readonly IReadOnlyList<TimeZoneInfo> timeZones = TimeZoneInfo
-        .GetSystemTimeZones()
-        .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
-        .ToList();
+    /// <summary>The zones the host knows, each under its IANA id where it has one (#80) - what is stored and what the select's values are.</summary>
+    private static readonly Lazy<IReadOnlyList<(string Id, TimeZoneInfo Zone)>> Listing = new(static () => StudioTimeZones.Listed(StudioTimeZones.CurrentRegion));
+
+    private static IReadOnlyList<(string Id, TimeZoneInfo Zone)> ListedZones => Listing.Value;
+
+    private readonly DateTimeOffset now = DateTimeOffset.UtcNow;
+
+    /// <summary>The selected zone under the id the select lists it by: a stored Windows id is the IANA id it converts to (#80).</summary>
+    private string SelectedZoneName => StudioTimeZones.IanaId(SelectedTimeZoneId, StudioTimeZones.CurrentRegion);
 
     /// <summary><c>system</c>, <c>light</c> or <c>dark</c>, as the shell currently has it.</summary>
     [Parameter]
@@ -117,11 +122,4 @@
     /// <summary>Raised with the picked time zone id.</summary>
     [Parameter]
     public EventCallback<ChangeEventArgs> TimeZoneChanged { get; set; }
-
-    private static string TimeZoneLabel(TimeZoneInfo timeZone)
-    {
-        return string.Equals(timeZone.Id, TimeZoneInfo.Local.Id, StringComparison.Ordinal)
-            ? timeZone.Id + " (local)"
-            : timeZone.Id;
-    }
 }

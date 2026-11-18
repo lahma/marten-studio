@@ -209,7 +209,7 @@ internal sealed class KafkaSearchService(
         if (!plan.IsValid)
         {
             await NotRunAsync(input, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
-            return new KafkaSearchStartResult.Refused(KafkaText.PredicateInvalid);
+            return new KafkaSearchStartResult.Refused(KafkaText.PredicateErrors(plan.Errors.Count));
         }
 
         try

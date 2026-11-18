@@ -189,6 +189,30 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
+    public async Task The_preferences_time_zone_select_lists_zones_by_IANA_id_with_their_offset()
+    {
+        using KafkaHarness harness = new();
+        await harness.Context.ReadyAsync();
+
+        IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "Europe/Helsinki"));
+
+        IElement helsinki = menu.FindAll("#ms-timezone-select option").Single(static x => x.GetAttribute("value") == "Europe/Helsinki");
+        helsinki.TextContent.Trim().Should().MatchRegex(@"^Europe/Helsinki \(UTC\+0[23]:00\)$");
+        helsinki.HasAttribute("selected").Should().BeTrue();
+
+        string[] values = [.. menu.FindAll("#ms-timezone-select option").Select(static x => x.GetAttribute("value")!)];
+        values.Should().OnlyHaveUniqueItems().And.Contain("UTC");
+        values.Where(static x => x.EndsWith("Standard Time", StringComparison.Ordinal) && TimeZoneInfo.TryConvertWindowsIdToIanaId(x, out string? _)).Should().BeEmpty(
+            "a zone whose Windows id converts is listed by the IANA id it converts to");
+        menu.FindAll("#ms-timezone-select option").Should().NotContain(static x => x.TextContent.Contains("(local)", StringComparison.Ordinal));
+
+        // A Windows id the circuit holds (the host's own zone, or one stored before) selects the IANA id it is listed under.
+        IRenderedComponent<PreferencesMenu> stored = harness.Context.Render<PreferencesMenu>(p => p.Add(x => x.SelectedTimeZoneId, "FLE Standard Time"));
+        stored.FindAll("#ms-timezone-select option").Where(static x => x.HasAttribute("selected")).Select(static x => x.GetAttribute("value"))
+            .Should().ContainSingle().Which.Should().Be(DataStudio.Services.StudioTimeZones.IanaId("FLE Standard Time", DataStudio.Services.StudioTimeZones.CurrentRegion));
+    }
+
+    [Fact]
     public async Task The_rail_credit_names_the_module()
     {
         using KafkaHarness harness = new();
