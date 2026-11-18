@@ -11,7 +11,6 @@ using DataStudio.Postgres.Services.ConnectionHistory;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Maintenance;
-using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Replication;
 using DataStudio.Postgres.Services.Server;
 using DataStudio.Postgres.Services.Settings;
@@ -125,7 +124,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             PostgresPage.Server => ServerLinks.Route,
             PostgresPage.Plan => StudioPageRoutes.Plan,
             PostgresPage.Replication => ReplicationLinks.Route,
-            PostgresPage.Overview => OverviewLinks.Route,
+            PostgresPage.Overview => services.GetRequiredService<IDiagnosticsSettings>().DatabaseHomeRoute,
             PostgresPage.Connection => StudioPageRoutes.Connection,
             _ => throw new ArgumentOutOfRangeException(nameof(page)),
         };

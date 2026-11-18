@@ -205,7 +205,10 @@ as host code is not a visitor: a call is event 9250, at Debug, codes and counts 
 
 *Page paths.* A finding's `StudioPath`, `GetStudioPath` and `PostgresPageLink.Path` are relative to the mount, have no leading slash and start
 with the Postgres module's segment (`postgres/health`), so `$"{studioOptions.Path}/{link.Path}"` opens the page whichever
-module list the host composed; the route and the scope query are the studio's own and may change between releases.
+module list the host composed; the route and the scope query are the studio's own and may change between releases. The one exception is
+`PostgresPage.Overview`, which is the home of the module that owns the database (issue #84): the engine reads it from
+`IDiagnosticsSettings.DatabaseHomeRoute` (`postgres`, its own answer; the Marten module answers `marten`), so the path is the page a visitor
+ends on and not the Postgres module's address, which a Marten host redirects.
 
 *Stable codes.* A code is a letter and two digits, a string, never an enum, never reused, renamed or moved to another
 area (hard rule 7). A finding's variant (`deadlocks`, `temp-files`) is frozen the same way within its code, and a check

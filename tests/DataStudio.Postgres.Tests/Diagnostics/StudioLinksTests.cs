@@ -1,9 +1,11 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Diagnostics;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Postgres;
+using DataStudio.Postgres.Services.Settings;
 
 using static DataStudio.Postgres.Tests.Diagnostics.DiagnosticsTestFacts;
 
@@ -16,8 +18,13 @@ public class StudioLinksTests
 
     private static readonly StudioScope Scope = new("main", "db1", null);
 
-    private static PostgresDiagnosticsService Service() =>
-        new(null!, null!, null!, null!, null!, null!, NullLogger<PostgresDiagnosticsService>.Instance, PostgresDescriptor.Instance);
+    private static PostgresDiagnosticsService Service() => Service(PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())));
+
+    /// <summary>The service over a container that holds only <paramref name="settings" />, which is all a page's path asks of it.</summary>
+    private static PostgresDiagnosticsService Service(IDiagnosticsSettings settings) =>
+        new(
+            new ServiceCollection().AddSingleton(settings).BuildServiceProvider(),
+            null!, null!, null!, null!, null!, NullLogger<PostgresDiagnosticsService>.Instance, PostgresDescriptor.Instance);
 
     [Fact]
     public void A_mapped_finding_names_its_card_on_the_health_page()
@@ -88,6 +95,42 @@ public class StudioLinksTests
         string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresPage.Overview);
 
         path.Should().StartWith("postgres?").And.Contain("store=main").And.Contain("db=db1");
+    }
+
+    /// <summary>
+    /// Issue #84: the Overview is the home of the module that owns the database, which the settings name - so a module whose home
+    /// is another address is handed out as that address, and every other page keeps its own path.
+    /// </summary>
+    [Fact]
+    public void The_overview_is_the_home_the_settings_name_and_no_other_page_moves()
+    {
+        PostgresDiagnosticsService service = Service(new OtherHome());
+        PostgresDatabaseRef database = new("main", "db1");
+
+        service.GetStudioPath(database, PostgresPage.Overview).Should().Be("elsewhere?store=main&db=db1");
+        service.GetStudioPath(database, PostgresPage.Health).Should().Be("postgres/health?store=main&db=db1");
+        service.GetStudioPath(database, PostgresPage.Connection).Should().Be("postgres/database/connection?store=main&db=db1");
+    }
+
+    private sealed class OtherHome : IDiagnosticsSettings
+    {
+        private readonly PostgresSettings inner =PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()));
+
+        public string DatabaseHomeRoute => "elsewhere";
+
+        public string OptionsTypeName => inner.OptionsTypeName;
+
+        public StudioText Text => inner.Text;
+
+        public TimeSpan QueryTimeout => inner.QueryTimeout;
+
+        public TimeSpan EffectiveHealthInterval => inner.EffectiveHealthInterval;
+
+        public string? SqlConsoleRole => inner.SqlConsoleRole;
+
+        public IReadOnlyList<string> BrowsableSchemas => inner.BrowsableSchemas;
+
+        public Func<Type, bool>? IsDocumentTypeVisible => inner.IsDocumentTypeVisible;
     }
 
     [Fact]

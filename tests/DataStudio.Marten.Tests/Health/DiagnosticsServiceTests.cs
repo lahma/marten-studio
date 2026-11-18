@@ -4,8 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using DataStudio.Postgres;
+using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Diagnostics;
 using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Settings;
+using DataStudio.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Health;
 
@@ -41,6 +44,38 @@ public class DiagnosticsServiceTests
         path.Should().StartWith("postgres/database/connection?store=default&db=");
         DataStudio.Marten.Services.MartenDescriptor.Instance.Navigation(DataStudio.Marten.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)
             .Should().Contain(x => x.Route == "postgres/database/connection");
+    }
+
+    /// <summary>
+    /// Issue #84: in a Marten host the Overview's path is the Marten module's home, the page itself - not the Postgres module's
+    /// address, which the studio answers with a redirect - and the composed route table says it is a page of the module that
+    /// draws something.
+    /// </summary>
+    [Fact]
+    public async Task The_overview_path_is_the_Marten_modules_home_and_a_page_of_the_composed_route_table_not_the_redirecting_one()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+
+        string path = Diagnostics(harness).GetStudioPath(Database(harness), PostgresPage.Overview);
+
+        path.Should().StartWith("marten?store=default&db=").And.NotStartWith("postgres");
+
+        DatabaseStudioModule module = new(
+            DataStudio.Marten.Services.MartenDescriptor.Instance,
+            DataStudio.Marten.Tests.Support.MartenSpine.Settings(),
+            new StudioCapabilityGuard(DataStudio.Marten.Tests.Support.MartenSpine.Settings()));
+        StudioShellDescriptor shell = StudioModuleComposition.Compose([module]);
+
+        string address = path[..path.IndexOf('?', StringComparison.Ordinal)];
+        address.Should().Be(shell.Modules.Single().HomeRoute, "the studio's own home for the module that owns the database");
+
+        Microsoft.AspNetCore.Components.RouteData? matched = shell.Routes.Match(address);
+        matched.Should().NotBeNull();
+        matched!.PageType.Name.Should().Be("Overview");
+        matched.PageType.Assembly.Should().BeSameAs(typeof(DataStudio.Marten.MartenOptions).Assembly, "the Marten module's page, not the Postgres module's StudioHome");
+        shell.ModuleOf(matched.PageType)!.HomeRoute.Should().Be(address);
+
+        shell.Routes.Match("postgres")!.PageType.Name.Should().Be("StudioHome", "the address the old path named is the one that redirects");
     }
 
     [Fact]

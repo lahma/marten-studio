@@ -43,6 +43,10 @@ internal sealed class MartenSettings : IStudioSettings
     public string CapabilitiesTypeName => nameof(MartenCapabilities);
 
     /// <inheritdoc />
+    /// <remarks>The Marten module's own home, which the Postgres module's address redirects to in this host (issue #84).</remarks>
+    public string DatabaseHomeRoute => MartenRoutes.Root;
+
+    /// <inheritdoc />
     public StudioText Text => MartenText.Instance;
 
     /// <inheritdoc />
