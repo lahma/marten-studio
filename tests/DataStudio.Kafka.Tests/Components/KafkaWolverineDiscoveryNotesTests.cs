@@ -296,7 +296,7 @@ public class KafkaWolverineDiscoveryNotesTests
         settings.WaitForAssertion(() => settings.Markup.Should().Contain("Cluster settings"));
         settings.Markup.Should().NotContain("besteffort").And.NotContain("Same bootstrap servers");
 
-        // Allowed, both are named: in the title of the selector's option (the option's text stays the cluster's own name) and on the Settings page.
+        // Allowed, both are named: in the title of the selector's option (whose text says only that the servers are shared) and on the Settings page.
         await using KafkaCatalogRig both = new(
             engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }),
             studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
@@ -308,8 +308,8 @@ public class KafkaWolverineDiscoveryNotesTests
 
         IRenderedComponent<ClusterSelector> open = both.Studio.Context.Render<ClusterSelector>();
         open.WaitForAssertion(() => open.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal(
-            "Wolverine",
-            "Wolverine · besteffort"));
+            "Wolverine (shared servers)",
+            "Wolverine · besteffort (shared servers)"));
         open.FindAll("option").Select(static x => x.GetAttribute("title")).Should().Equal(
             "Same servers as Wolverine · besteffort",
             "Same servers as Wolverine");
@@ -317,7 +317,8 @@ public class KafkaWolverineDiscoveryNotesTests
 
     /// <summary>
     /// The closed selector reads the cluster's own name only: with two clusters on the same servers it used to read "Sample Kafka (same servers
-    /// as Sample Kafka (Wol…" and was cut. The note is the title of the option and of the closed control, never part of a label.
+    /// as Sample Kafka (Wol…" and was cut. The sentence naming the others is the title of the option and of the closed control, never part of a
+    /// label; an option's text says only "(shared servers)", which a keyboard or touch visitor reads and a tooltip never reaches them.
     /// </summary>
     [Fact]
     public async Task The_closed_selector_reads_the_cluster_name_alone_whether_the_servers_are_shared_or_not()
@@ -349,7 +350,8 @@ public class KafkaWolverineDiscoveryNotesTests
         different.FindAll("option").Should().OnlyContain(static x => !x.HasAttribute("title"));
         different.Find("option[selected]").TextContent.Trim().Should().Be("Sample Kafka");
 
-        // Two clusters on the same servers: still label-only options and a label-only closed control, with the note as a title.
+        // Two clusters on the same servers: each option says "shared servers" in its text, and the sentence naming the other is its title (and the
+        // closed control's).
         await using KafkaCatalogRig same = new(engine: o => o.AddCluster("sample", new ClientConfig { BootstrapServers = "x:1" }), cluster: "sample");
         same.Studio.Entries.Entries =
         [
@@ -360,14 +362,63 @@ public class KafkaWolverineDiscoveryNotesTests
         await same.Studio.State.EnsureInitializedAsync(Token);
 
         IRenderedComponent<ClusterSelector> shared = same.Studio.Context.Render<ClusterSelector>();
-        shared.WaitForAssertion(() => shared.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Sample Kafka", "Sample Kafka (Wolverine)"));
-        shared.Find("option[selected]").TextContent.Trim().Should().Be("Sample Kafka");
+        shared.WaitForAssertion(() => shared.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Sample Kafka (shared servers)", "Sample Kafka (Wolverine) (shared servers)"));
+        shared.Find("option[selected]").TextContent.Trim().Should().Be("Sample Kafka (shared servers)");
         shared.Find("select").GetAttribute("aria-label").Should().Be("Cluster");
         shared.Find("select").GetAttribute("title").Should().Be("Same servers as Sample Kafka (Wolverine)");
         shared.FindAll("option").Select(static x => x.GetAttribute("title")).Should().Equal(
             "Same servers as Sample Kafka (Wolverine)",
             "Same servers as Sample Kafka");
         shared.Markup.Should().NotContain("(same servers");
+    }
+
+    /// <summary>
+    /// #72's rule holds for the option text as it does for the title: configuration alone, and only clusters the visitor may see. A cluster the visitor is
+    /// refused is never named, and does not by itself make another "shared" - only a cluster they may see does.
+    /// </summary>
+    [Fact]
+    public async Task The_shared_servers_mark_counts_only_the_clusters_the_visitor_may_see()
+    {
+        // Three on the same servers, one refused: the two the visitor may see share with each other, and the title names only the other of them.
+        await using KafkaCatalogRig three = new(
+            engine: o => o.AddCluster("a", new ClientConfig { BootstrapServers = "x:1" }),
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            cluster: "a");
+        three.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("a", null, "Alpha", null) { SameServersAs = ["b", "c"] },
+            new KafkaClusterEntry("b", null, "Beta", null) { SameServersAs = ["a", "c"] },
+            new KafkaClusterEntry("c", null, "Hidden", null) { SameServersAs = ["a", "b"] },
+        ];
+        three.Studio.Authorization.AllowKafka(static resource => resource.Cluster != "c");
+        await three.Studio.Context.ReadyAsync();
+        await three.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> shared = three.Studio.Context.Render<ClusterSelector>();
+        shared.WaitForAssertion(() => shared.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Alpha (shared servers)", "Beta (shared servers)"));
+        shared.FindAll("option").Select(static x => x.GetAttribute("title")).Should().Equal("Same servers as Beta", "Same servers as Alpha");
+        shared.Markup.Should().NotContain("Hidden");
+
+        // Two the visitor may see on different servers, and a third on the servers of one of them that they are refused: neither is shared, with a
+        // visible cluster, and the refused one is not named.
+        await using KafkaCatalogRig apart = new(
+            engine: o => o.AddCluster("a", new ClientConfig { BootstrapServers = "x:1" }),
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            cluster: "a");
+        apart.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("a", null, "Alpha", null) { SameServersAs = ["c"] },
+            new KafkaClusterEntry("b", null, "Beta", null),
+            new KafkaClusterEntry("c", null, "Hidden", null) { SameServersAs = ["a"] },
+        ];
+        apart.Studio.Authorization.AllowKafka(static resource => resource.Cluster != "c");
+        await apart.Studio.Context.ReadyAsync();
+        await apart.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> unshared = apart.Studio.Context.Render<ClusterSelector>();
+        unshared.WaitForAssertion(() => unshared.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Alpha", "Beta"));
+        unshared.FindAll("option").Should().OnlyContain(static x => !x.HasAttribute("title"));
+        unshared.Markup.Should().NotContain("Hidden").And.NotContain("shared servers");
     }
 
     [Fact]

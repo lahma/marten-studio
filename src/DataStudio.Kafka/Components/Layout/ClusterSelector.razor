@@ -16,8 +16,9 @@
     {
         <div class="ms-header-control">
             <label class="ms-header-control-label" for="ms-cluster-select">Cluster</label>
-            @* The closed control and every option read the cluster's own name and nothing more; two clusters on the same servers (#72) say so in
-               the option's title and the closed select's, built from configuration alone and naming only clusters the visitor may see. *@
+            @* The closed control reads the cluster's own name and nothing more. Two clusters on the same servers (#72) say so in an option's text
+               ("shared servers", which a keyboard or touch visitor reads, as a tooltip is not) and, naming the others, in its title and the closed
+               select's: all built from configuration alone and naming only clusters the visitor may see. *@
             <select id="ms-cluster-select"
                     class="ms-select ms-header-select"
                     aria-label="Cluster"
@@ -29,7 +30,7 @@
                     @* `selected` as well as the select's `value`: during static server-side rendering `value` on a <select> is ignored. *@
                     <option value="@cluster.Key"
                             title="@SameServersTitle(cluster)"
-                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@cluster.Label</option>
+                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@(cluster.Label + (SharesServers(cluster) ? KafkaText.ClusterSharedServersMark : string.Empty))</option>
                 }
             </select>
         </div>
@@ -58,6 +59,9 @@
     /// <summary>The note of a cluster that shares its servers with others the visitor may see, or null (the attribute is then left out).</summary>
     private string? SameServersTitle(KafkaClusterEntry? cluster) =>
         cluster?.SameServersNames(State.AvailableClusters) is { Count: > 0 } names ? KafkaText.ClusterSameServersTitle(names) : null;
+
+    /// <summary>Whether the cluster shares its servers with another the visitor may see: a refused cluster is never counted.</summary>
+    private bool SharesServers(KafkaClusterEntry cluster) => cluster.SameServersNames(State.AvailableClusters) is { Count: > 0 };
 
     protected override async Task OnInitializedAsync()
     {

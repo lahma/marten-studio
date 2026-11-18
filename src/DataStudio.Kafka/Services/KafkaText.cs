@@ -77,6 +77,12 @@ internal static class KafkaText
     public static string ClusterSameServersTitle(IReadOnlyList<string> sameServersAs) =>
         "Same servers as " + string.Join(", ", sameServersAs);
 
+    /// <summary>
+    /// What follows the name of a cluster in the cluster selector's option when it shares its bootstrap servers with another the visitor may see (#72): in
+    /// the option's text, so that a keyboard or touch visitor, who never sees a tooltip, reads it too. The sentence naming the other clusters stays the title.
+    /// </summary>
+    public const string ClusterSharedServersMark = " (shared servers)";
+
     /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72); the servers themselves are in the Your settings table.</summary>
     /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
     /// <param name="canBeLeftOut">Whether one of the clusters is a named Wolverine broker, which <c>ExcludeBroker</c> can leave out; the default transport and a host's own cluster cannot be.</param>

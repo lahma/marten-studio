@@ -10,6 +10,9 @@ forbidden by the profile
 [ClusterNotAuthorized]
 You are not authorized to view this cluster. Pick another one from the cluster list above.
 
+[ClusterSharedServersMark]
+ (shared servers)
+
 [CompareHeading]
 Compare
 
