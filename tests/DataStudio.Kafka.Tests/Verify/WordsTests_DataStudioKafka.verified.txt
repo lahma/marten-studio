@@ -265,8 +265,8 @@ Data Studio has sample enabled and no policy decides who may use them: every vis
 [ClusterAllowance(1234, 1234, Production)]
 1.2 KiB of this cluster's 1.2 KiB an hour left (Production profile)
 
-[ClusterOptionText("sample", ["alpha", "beta"])]
-sample (same servers as alpha, beta)
+[ClusterSameServersTitle(["alpha", "beta"])]
+Same servers as alpha, beta
 
 [ContinuedAfter(1234)]
 Continued after offsets read by the previous search (1,234 records).

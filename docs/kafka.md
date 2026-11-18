@@ -354,8 +354,8 @@ durable broker and a buffered twin, for example), and each is listed as a cluste
 cluster key is `wolverine` unless you changed it): the slug is the broker's name lower-cased, with every character outside
 letters, digits and hyphens replaced by a hyphen, runs of hyphens collapsed to one and the ends trimmed. It is shown as
 `Wolverine · {broker}`. The Kafka module never connects to merge them. Where two listed clusters have the same bootstrap servers
-(compared as a set, from configuration, so order and spaces do not matter), the selector adds *(same servers as …)* to
-their names and the Settings page says so, naming only the clusters you may see (it names `ExcludeBroker` only when one of
+(compared as a set, from configuration, so order and spaces do not matter), the selector keeps each name as it is and puts
+*Same servers as …* in the tooltip of each option and of the closed selector, and the Settings page says so, naming only the clusters you may see (it names `ExcludeBroker` only when one of
 them is a named broker, which is the only kind it can leave out; otherwise it says to declare the cluster once). Leave a broker out of discovery by its
 name, and nothing of it is listed (no cluster, topics, groups or tenants):
 

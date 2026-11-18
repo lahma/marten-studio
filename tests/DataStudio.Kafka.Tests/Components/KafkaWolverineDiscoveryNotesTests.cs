@@ -205,8 +205,7 @@ public class KafkaWolverineDiscoveryNotesTests
 
         first.SameServersNames([first, second]).Should().Equal("Wolverine · besteffort");
         first.SameServersNames([first]).Should().BeEmpty();
-        KafkaText.ClusterOptionText(first.Label, first.SameServersNames([first, second])).Should().Be("Wolverine (same servers as Wolverine · besteffort)");
-        KafkaText.ClusterOptionText("Wolverine", []).Should().Be("Wolverine");
+        KafkaText.ClusterSameServersTitle(first.SameServersNames([first, second])).Should().Be("Same servers as Wolverine · besteffort");
         first.Equals(new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort", "wolverine-hidden"] }).Should().BeTrue("entries are rebuilt on every read");
     }
 
@@ -290,14 +289,14 @@ public class KafkaWolverineDiscoveryNotesTests
 
         IRenderedComponent<ClusterSelector> selector = rig.Studio.Context.Render<ClusterSelector>();
         selector.WaitForAssertion(() => selector.Find(".ms-k-cluster-name").TextContent.Should().Be("Wolverine"));
-        selector.Markup.Should().NotContain("besteffort").And.NotContain("same servers");
+        selector.Markup.Should().NotContain("besteffort").And.NotContainEquivalentOf("same servers");
 
         rig.Studio.Navigation.Simulate("kafka/settings?cluster=wolverine", intercepted: false);
         IRenderedComponent<KafkaSettingsPage> settings = rig.Studio.Context.Render<KafkaSettingsPage>();
         settings.WaitForAssertion(() => settings.Markup.Should().Contain("Cluster settings"));
         settings.Markup.Should().NotContain("besteffort").And.NotContain("Same bootstrap servers");
 
-        // Allowed, both are named: in the selector's option and on the Settings page.
+        // Allowed, both are named: in the title of the selector's option (the option's text stays the cluster's own name) and on the Settings page.
         await using KafkaCatalogRig both = new(
             engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }),
             studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
@@ -309,8 +308,66 @@ public class KafkaWolverineDiscoveryNotesTests
 
         IRenderedComponent<ClusterSelector> open = both.Studio.Context.Render<ClusterSelector>();
         open.WaitForAssertion(() => open.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal(
-            "Wolverine (same servers as Wolverine · besteffort)",
-            "Wolverine · besteffort (same servers as Wolverine)"));
+            "Wolverine",
+            "Wolverine · besteffort"));
+        open.FindAll("option").Select(static x => x.GetAttribute("title")).Should().Equal(
+            "Same servers as Wolverine · besteffort",
+            "Same servers as Wolverine");
+    }
+
+    /// <summary>
+    /// The closed selector reads the cluster's own name only: with two clusters on the same servers it used to read "Sample Kafka (same servers
+    /// as Sample Kafka (Wol…" and was cut. The note is the title of the option and of the closed control, never part of a label.
+    /// </summary>
+    [Fact]
+    public async Task The_closed_selector_reads_the_cluster_name_alone_whether_the_servers_are_shared_or_not()
+    {
+        // One cluster: a name, no picker.
+        await using KafkaCatalogRig one = new(engine: o => o.AddCluster("sample", new ClientConfig { BootstrapServers = "x:1" }), cluster: "sample");
+        one.Studio.Entries.Entries = [new KafkaClusterEntry("sample", null, "Sample Kafka", null)];
+        await one.Studio.Context.ReadyAsync();
+        await one.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> single = one.Studio.Context.Render<ClusterSelector>();
+        single.WaitForAssertion(() => single.Find(".ms-k-cluster-name").TextContent.Should().Be("Sample Kafka"));
+        single.FindAll("select").Should().BeEmpty();
+
+        // Two clusters on different servers: label-only options, no note anywhere.
+        await using KafkaCatalogRig apart = new(engine: o => o.AddCluster("sample", new ClientConfig { BootstrapServers = "x:1" }), cluster: "sample");
+        apart.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("sample", null, "Sample Kafka", null),
+            new KafkaClusterEntry("other", null, "Other Kafka", null),
+        ];
+        await apart.Studio.Context.ReadyAsync();
+        await apart.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> different = apart.Studio.Context.Render<ClusterSelector>();
+        different.WaitForAssertion(() => different.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Sample Kafka", "Other Kafka"));
+        different.Find("select").GetAttribute("aria-label").Should().Be("Cluster");
+        different.Find("select").HasAttribute("title").Should().BeFalse();
+        different.FindAll("option").Should().OnlyContain(static x => !x.HasAttribute("title"));
+        different.Find("option[selected]").TextContent.Trim().Should().Be("Sample Kafka");
+
+        // Two clusters on the same servers: still label-only options and a label-only closed control, with the note as a title.
+        await using KafkaCatalogRig same = new(engine: o => o.AddCluster("sample", new ClientConfig { BootstrapServers = "x:1" }), cluster: "sample");
+        same.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("sample", null, "Sample Kafka", null) { SameServersAs = ["sample-wolverine"] },
+            new KafkaClusterEntry("sample-wolverine", null, "Sample Kafka (Wolverine)", null) { SameServersAs = ["sample"] },
+        ];
+        await same.Studio.Context.ReadyAsync();
+        await same.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> shared = same.Studio.Context.Render<ClusterSelector>();
+        shared.WaitForAssertion(() => shared.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal("Sample Kafka", "Sample Kafka (Wolverine)"));
+        shared.Find("option[selected]").TextContent.Trim().Should().Be("Sample Kafka");
+        shared.Find("select").GetAttribute("aria-label").Should().Be("Cluster");
+        shared.Find("select").GetAttribute("title").Should().Be("Same servers as Sample Kafka (Wolverine)");
+        shared.FindAll("option").Select(static x => x.GetAttribute("title")).Should().Equal(
+            "Same servers as Sample Kafka (Wolverine)",
+            "Same servers as Sample Kafka");
+        shared.Markup.Should().NotContain("(same servers");
     }
 
     [Fact]

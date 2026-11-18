@@ -69,11 +69,13 @@ internal static class KafkaText
     public const string ConsumerGroupsHint =
         "Consumer groups are declared for this cluster with KafkaClusterBuilder.ConsumerGroup(\"…\"), in AddCluster or in the cluster callback of UseWolverineKafka; a topic's page shows their lag.";
 
-    /// <summary>The cluster selector's option text: the label, and - where another cluster the visitor may see has the same bootstrap servers - which (#72).</summary>
-    /// <param name="label">The cluster's label.</param>
+    /// <summary>
+    /// The cluster selector's note on a cluster that shares its bootstrap servers with others the visitor may see (#72), shown as the title of its
+    /// option and of the closed selector, never in the label: a closed control shows the cluster's own name only, and a long note would cut it.
+    /// </summary>
     /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
-    public static string ClusterOptionText(string label, IReadOnlyList<string> sameServersAs) =>
-        sameServersAs.Count == 0 ? label : label + " (same servers as " + string.Join(", ", sameServersAs) + ")";
+    public static string ClusterSameServersTitle(IReadOnlyList<string> sameServersAs) =>
+        "Same servers as " + string.Join(", ", sameServersAs);
 
     /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72); the servers themselves are in the Your settings table.</summary>
     /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
