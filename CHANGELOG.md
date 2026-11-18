@@ -1,3 +1,43 @@
+# 2.0.0-beta.2
+
+2.0.0-beta.2 is the second beta of 2.0: it fixes what the first days of use found in beta.1 (#83 to #88) and two reports
+left from 1.3.1 (#80, #81). All seven packages are at 2.0.0-beta.2. Nothing a host writes changes; two things a host
+may read do, the address `GetStudioPath(..., PostgresPage.Overview)` returns in a Marten host and a few sentences.
+
+- The rail shows the page you are on. On a page late in the rail (a Kafka page beside the Marten module, the shell's
+  Activity) the rail scrolls its active entry into view inside its own scroll box, on load, after each navigation and
+  again when an entry appears later (Tenants), and leaves an entry that is already in view where it is (#83).
+- `IPostgresDiagnostics.GetStudioPath(database, PostgresPage.Overview)` returns the home of the module that owns the
+  database: `marten?store=...&db=...` in a Marten host, where beta.1 returned the Postgres module's home, which answers
+  with a redirect. A Postgres host and the engine alone still get `postgres?...` (#84).
+- The front page's tiles name nothing a host can switch off: the Kafka tile reads "Topics and records of the
+  application's clusters." and the Postgres tile "The health, storage and structure of the application's PostgreSQL
+  databases." A record's Value row names its format once (`JSON, 1.2 KiB`), an empty value reads "Empty, 0 B", and a
+  schema-registry value "Confluent wire format, schema id 7" (#85).
+- Database > Sessions and Database > Connection find the pool of a data source that was given a name
+  (`NpgsqlDataSourceBuilder.Name`): Sessions says "n of max in use" and Connection shows the pool's usage, as check C01
+  now does too. An unnamed data source is still matched by its connection string (#86).
+- The Health page lists each Critical finding you may see at its top, by code and title, with a link that scrolls to the
+  finding's card and moves focus to it. The areas keep their order; a finding withheld from you, an accepted check's and
+  a muted one are not listed (#87).
+- Query reached by its address while `RunSql` is off says "Running SQL is not available here." and shows no Queries
+  panel, in a Postgres host and for the SQL console of a Marten host, as the Kafka module's pages do since 1.3.1. The
+  capability chip still names the option (#88).
+- An Amazon Aurora cluster is recognised as Aurora when it has a function named `aurora_version` owned by a superuser,
+  in any schema, or a setting named `aurora_*` or `apg_*`; beta.1 looked for the function in `pg_catalog` only, called
+  such a cluster Amazon RDS and raised S02 as Critical for `full_page_writes = off`, which is Aurora's normal value. A
+  function a database owner creates does not count (#81).
+- In the Kafka module a time zone is named by its IANA id on Windows too ("Europe/Helsinki (UTC+02:00)"), in the
+  Preferences menu and in a search's absolute window. The topic count reads "1 selected (a search reads at most 20)",
+  the line under a search text with errors says how many there are, and when a search text has several errors the
+  earliest in the text is reported first, which is also the one the audit records (#80).
+- The cluster selector shows the cluster's own name; "Same servers as ..." is its tooltip, and Cluster settings still
+  says it in text. At a phone's width the Health page's checks table scrolls inside its own region.
+- The Kafka sample keeps the user-secrets id it had in 1.3.x (`kstudio-sample`), so stored secrets are found again.
+- For maintainers: the Kafka live suite's brokers keep records for a hundred years. The tests stamp records from a
+  fixed instant, and under Kafka's default of seven days the broker had been deleting them under the running tests
+  since 2026-11-15.
+
 # 2.0.0-beta.1
 
 2.0.0-beta.1 is a beta of 2.0, published for trial: names, addresses and options may still move before 2.0.0.
