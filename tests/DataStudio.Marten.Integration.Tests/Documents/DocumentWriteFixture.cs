@@ -9,7 +9,6 @@ using DataStudio.Marten.Services.Documents;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -126,7 +125,7 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
 
         var catalog = new StudioScopeCatalog(sources, authorization, NullLogger<StudioScopeCatalog>.Instance);
 
-        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        var state = new StudioState(catalog, NullLogger<StudioState>.Instance);
         var audit = new StudioActionLog(new StudioActivity(Ring, Users, []), Logs.CreateLogger<StudioActionLog>(), Users, state, MartenDescriptor.Instance, settings);
 
         return new DocumentWriteService(

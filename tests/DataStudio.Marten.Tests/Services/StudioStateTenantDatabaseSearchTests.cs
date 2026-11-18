@@ -1,7 +1,5 @@
-using DataStudio.Services;
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -114,7 +112,7 @@ public class StudioStateTenantDatabaseSearchTests
         FakeStudioScopeCatalog catalog = new FakeStudioScopeCatalog()
             .WithStore("s", "Store S", databaseIdentities: ["db_a"])
             .WithDatabaseTenants("s", "db_a", new TenantList(["acme"], IsTruncated: true, TenantListSource.Queried));
-        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance);
         await state.EnsureInitializedAsync(Token);
 
         await state.SetScopeAsync("s", null, "tenant-250", Token);
@@ -151,7 +149,7 @@ public class StudioStateTenantDatabaseSearchTests
             .WithStore("s", "Store S", databaseIdentities: ["db_a", "db_b"])
             .WithDatabaseTenants("s", "db_a", new TenantList(["acme"], IsTruncated: true, TenantListSource.Descriptor))
             .WithDatabaseTenants("s", "db_b", new TenantList(["globex"], IsTruncated: true, TenantListSource.Descriptor));
-        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance);
         await state.EnsureInitializedAsync(Token);
 
         await state.SetScopeAsync("s", null, "globex", Token);
@@ -304,7 +302,7 @@ public class StudioStateTenantDatabaseSearchTests
             catalog.WithDatabaseTenants("s", database, database == $"db_{needleAt:00}" ? Lists("needle") : Lists("acme"));
         }
 
-        StudioState state = new(catalog, logs.CreateFactory().CreateLogger<StudioState>(), new StudioPreferences(new HttpContextAccessor()));
+        StudioState state = new(catalog, logs.CreateFactory().CreateLogger<StudioState>());
         await state.EnsureInitializedAsync(Token);
         catalog.DescribeCalls.Clear();
         return (state, catalog);
@@ -322,7 +320,7 @@ public class StudioStateTenantDatabaseSearchTests
             .WithDatabaseTenants("t", "db_t1", Lists("initech"))
             .WithDatabaseTenants("t", "db_t2", Lists("umbrella"));
 
-        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance);
         await state.EnsureInitializedAsync(Token);
         state.ActiveScope.Should().Be(new StudioScope("s", "db_a", null), "the premise: the circuit is on the first database, all tenants");
         catalog.DescribeCalls.Clear();

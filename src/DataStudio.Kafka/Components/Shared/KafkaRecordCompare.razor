@@ -2,6 +2,7 @@
 @using DataStudio.Kafka.Core.Decoding
 @using DataStudio.Kafka.Core.Scanning
 @using DataStudio.Components.Json
+@inherits DataStudio.Components.StudioDisplayComponent
 @inject StudioPreferences Preferences
 
 @* Two records side by side (D-PAYLOAD decision 5), from the two in-memory matches: it reads nothing. Each match was read by a scan or a record read that

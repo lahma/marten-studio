@@ -1,4 +1,5 @@
 @implements IAsyncDisposable
+@inherits DataStudio.Components.StudioDisplayComponent
 @inject NavigationManager Navigation
 @inject IShellSettings Settings
 @inject StudioShellDescriptor Shell
@@ -59,7 +60,7 @@
                                     @* A sibling of the label, never part of it: the link's text is what a
                                        screen reader announces and what every navigation test matches on, and
                                        a count folded into it would change the name of the page. *@
-                                    <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
+                                    <span class="ms-nav-badge @badge.CssClass" title="@badge.TitleNow" aria-label="@badge.TitleNow">
                                         @badge.Text
                                     </span>
                                 }

@@ -1,9 +1,7 @@
-using DataStudio.Services;
 using JasperFx.Descriptors;
 
 using DataStudio.Marten.Tests.Support;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using DataStudio.Postgres.Services;
@@ -60,7 +58,7 @@ public class StudioStateTenantFallbackTests
             .WithStore("b", "Store B", DatabaseCardinality.Single, "db_b")
             .WithTenants("b", storeB);
 
-        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance);
         await state.EnsureInitializedAsync(Token);
         await state.SetScopeAsync("a", null, "acme", Token);
 

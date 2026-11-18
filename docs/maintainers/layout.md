@@ -30,7 +30,8 @@ src/DataStudio/                          The shell: the chrome of the studio as 
                                          namespaces. It references ASP.NET Core and nothing else - no store, database, tenant, SQL, health, Npgsql,
                                          Marten or Kafka client (ShellFenceTests holds the reference graph) - and every module references it with an
                                          exact pin. Its _Imports.razor names only DataStudio, Microsoft and System
-src/DataStudio/Components/               The shared document every root renders, the routes component, the route table and the links
+src/DataStudio/Components/               The shared document every root renders, the routes component, the route table and the links, and
+                                         StudioDisplayComponent, the base of every component that spells a time (ui.md, Time zone)
 src/DataStudio/Components/Json/          The JSON toolkit: viewer, raw view, editor, copy menu, diffs
 src/DataStudio/Components/Layout/        The layout, the rail, the capability chip, the preferences popover, the copy-link button, the
                                          back-to-application link and the environment badge

@@ -84,9 +84,13 @@ public static class AuroraShim
     /// <see langword="null" /> for a schema only the superuser can create in (the default ACL); <c>PUBLIC</c> to grant <c>CREATE</c> on it to every role; or a
     /// role's name to make that role the schema's owner (the superuser still owns the functions).
     /// </param>
+    /// <param name="grantCreateTo">
+    /// A role to grant <c>CREATE</c> on the schema to by name, the superuser still owning it: an ordinary role, or <c>pg_database_owner</c>, which is no superuser
+    /// either. <see langword="null" /> grants none.
+    /// </param>
     /// <param name="cancellationToken">Cancels the setup.</param>
     /// <returns>The shimmed database's name.</returns>
-    public static async Task<string> ApplyInSchemaAsync(MatrixServer server, string database, string schema, string? schemaAuthorization = null, CancellationToken cancellationToken = default)
+    public static async Task<string> ApplyInSchemaAsync(MatrixServer server, string database, string schema, string? schemaAuthorization = null, string? grantCreateTo = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(server);
 
@@ -97,7 +101,8 @@ public static class AuroraShim
         string functions = ShimSql.Replace("pg_catalog.", schema + ".", StringComparison.Ordinal);
         // USAGE for every role, as pg_catalog has it; CREATE too only where the caller asks for a schema anybody can write to.
         string grant = "grant usage on schema " + schema + " to public;\n"
-            + (string.Equals(schemaAuthorization, "PUBLIC", StringComparison.Ordinal) ? "grant create on schema " + schema + " to public;\n" : string.Empty);
+            + (string.Equals(schemaAuthorization, "PUBLIC", StringComparison.Ordinal) ? "grant create on schema " + schema + " to public;\n" : string.Empty)
+            + (grantCreateTo is null ? string.Empty : "grant create on schema " + schema + " to " + grantCreateTo + ";\n");
         string handOver = schemaAuthorization is not null && !string.Equals(schemaAuthorization, "PUBLIC", StringComparison.Ordinal) ? "alter schema " + schema + " owner to " + schemaAuthorization + ";\n" : string.Empty;
 
         await server.ExecuteAsync("create schema " + schema + ";\n" + functions + grant + handOver, database, cancellationToken);

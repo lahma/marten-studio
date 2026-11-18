@@ -509,12 +509,15 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
     /// why in a sentence instead of a SQLSTATE. A function the owner planted is never called.
     /// </summary>
     [PostgresTheory]
-    [InlineData("PUBLIC", "a schema every role may create in")]
-    [InlineData("app", "a schema the database owner owns")]
-    public async Task A_schema_a_role_short_of_a_superuser_can_create_in_is_never_called(string authorization, string what)
+    [InlineData("PUBLIC", null, "a schema every role may create in")]
+    [InlineData("app", null, "a schema the database owner owns")]
+    [InlineData(null, "app", "a superuser's schema on which an ordinary role was granted CREATE")]
+    [InlineData(null, "pg_database_owner", "a superuser's schema on which pg_database_owner, which is no superuser, was granted CREATE")]
+    public async Task A_schema_a_role_short_of_a_superuser_can_create_in_is_never_called(string? authorization, string? grantedTo, string what)
     {
         MatrixServer server = await ServerAsync();
-        string database = await AuroraShim.ApplyInSchemaAsync(server, "aur_open_" + authorization.ToLowerInvariant(), "aurora_open", authorization, Token);
+        string database = await AuroraShim.ApplyInSchemaAsync(
+            server, "aur_open_" + (authorization ?? ("granted_" + grantedTo)).ToLowerInvariant(), "aurora_open", authorization, grantedTo, Token);
 
         // The database owner can create a function in this schema (that is what makes it unsafe to call Aurora's in it): the plant is accepted.
         await using (NpgsqlConnection owner = await server.OpenAsync(MatrixRole.App, database, Token))

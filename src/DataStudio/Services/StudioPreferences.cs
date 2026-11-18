@@ -1,7 +1,6 @@
 using System.Globalization;
 
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 
 namespace DataStudio.Services;
 
@@ -25,25 +24,22 @@ internal sealed class StudioPreferences
     /// <summary>The cookie and <c>localStorage</c> key the time zone is remembered under.</summary>
     public const string TimeZonePreferenceKey = "ms_tz";
 
-    private readonly ILogger<StudioPreferences> logger;
     private readonly TimeProvider clock;
 
     private string selectedTheme = "system";
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
     private long preferenceVersion;
+    private long displayVersion;
 
     /// <param name="httpContextAccessor">The request that opened the circuit, for the remembered preferences.</param>
     /// <param name="timeProvider">
     /// The clock "today" is taken from when a moment is spelt (<see cref="Clock" />): the host's own <see cref="TimeProvider" /> when
     /// it registered one, the system's otherwise.
     /// </param>
-    /// <param name="logger">Where a page's failed preference-change handler goes; optional so that a test can build the preferences by hand.</param>
     public StudioPreferences(
         IHttpContextAccessor httpContextAccessor,
-        TimeProvider? timeProvider = null,
-        ILogger<StudioPreferences>? logger = null)
+        TimeProvider? timeProvider = null)
     {
-        this.logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StudioPreferences>.Instance;
         clock = timeProvider ?? TimeProvider.System;
 
         HttpContext? httpContext = httpContextAccessor.HttpContext;
@@ -66,14 +62,9 @@ internal sealed class StudioPreferences
     }
 
     /// <summary>
-    /// Raised by <see cref="NotifyChangedAsync" /> after a preference moved, so every subscribed page draws again.
+    /// The name the layout cascades <see cref="DisplayVersion" /> under, and the one <c>StudioDisplayComponent</c> takes it by.
     /// </summary>
-    /// <remarks>
-    /// A <see cref="Func{TResult}" /> returning a <see cref="Task" /> rather than an <see cref="EventHandler" />: a handler that has to
-    /// re-query cannot be synchronous, and the <c>async void</c> handler an <c>EventHandler</c> forces is the one shape whose exception
-    /// kills a Blazor circuit silently (AGENTS.md hard rule 6).
-    /// </remarks>
-    public event Func<Task>? Changed;
+    public const string DisplayVersionName = "DataStudio.DisplayVersion";
 
     /// <summary><c>system</c>, <c>light</c> or <c>dark</c>.</summary>
     public string SelectedTheme
@@ -86,8 +77,35 @@ internal sealed class StudioPreferences
     public string SelectedTimeZoneId
     {
         get => selectedTimeZoneId;
-        set => Set(ref selectedTimeZoneId, NormalizeTimeZoneId(value));
+        set
+        {
+            string before = selectedTimeZoneId;
+            Set(ref selectedTimeZoneId, NormalizeTimeZoneId(value));
+            if (!string.Equals(before, selectedTimeZoneId, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref displayVersion);
+            }
+        }
     }
+
+    /// <summary>
+    /// How many times the zone every time is spelt in has moved on this circuit, however it moved: a choice in Preferences, a stored
+    /// zone read after the circuit started, or the browser's own (<see cref="TryUseBrowserTimeZone" />).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The layout cascades it (<see cref="DisplayVersionName" />) and a component that draws a time takes it
+    /// (<c>StudioDisplayComponent</c>), so a zone change reaches every one of them in the one render pass it causes: they draw again from
+    /// what they already hold. It is <em>not</em> <see cref="PreferenceVersion" />, which a browser default does not move and which
+    /// settles a race over what the visitor chose.
+    /// </para>
+    /// <para>
+    /// A zone change is a change of display and nothing else: it is not a change of scope, and nothing reads, invalidates, audits or
+    /// rewrites an address because of it. There is no event for it on purpose - an event is something a page has to remember to
+    /// subscribe to, and a page that took the notice as a reason to load again was the cost this replaced.
+    /// </para>
+    /// </remarks>
+    public long DisplayVersion => Volatile.Read(ref displayVersion);
 
     /// <summary>
     /// The IANA id of the time zone this circuit's browser reported (<c>Europe/Helsinki</c>), or <see langword="null" /> until it has and where the
@@ -110,7 +128,12 @@ internal sealed class StudioPreferences
         }
 
         BrowserTimeZoneId = ianaId;
-        selectedTimeZoneId = ianaId;
+        if (!string.Equals(selectedTimeZoneId, ianaId, StringComparison.Ordinal))
+        {
+            selectedTimeZoneId = ianaId;
+            Interlocked.Increment(ref displayVersion);
+        }
+
         return true;
     }
 
@@ -159,29 +182,6 @@ internal sealed class StudioPreferences
 
     /// <summary>The clock a page takes "now" and "today" from: the host's <see cref="TimeProvider" /> if one is registered, else the system's.</summary>
     public TimeProvider Clock => clock;
-
-    /// <summary>
-    /// Tells every subscriber a preference moved.
-    /// </summary>
-    /// <remarks>
-    /// The invocation list is walked by hand so that one page throwing does not stop the next page from being told: a page that never
-    /// hears of a time-zone change keeps spelling its moments in the old one.
-    /// </remarks>
-    public async Task NotifyChangedAsync()
-    {
-        Delegate[] handlers = Changed?.GetInvocationList() ?? [];
-        foreach (Delegate handler in handlers)
-        {
-            try
-            {
-                await ((Func<Task>) handler)().ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                logger.LogError(exception, "A studio page failed to handle a preference change");
-            }
-        }
-    }
 
     /// <summary><paramref name="value" /> in the selected time zone.</summary>
     public DateTimeOffset ConvertToSelectedTimeZone(DateTimeOffset value) =>

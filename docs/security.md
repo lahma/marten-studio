@@ -346,8 +346,10 @@ for a visitor through that gate, are shown as counts and shares, never as a time
 ("Read Aurora session waits").
 Aurora's functions are called only once the platform read has found an Aurora marker - an `aurora_version()` function a
 superuser owns, or an `aurora_*` or `apg_*` setting - and each is called in the schema that `aurora_version()` is in, `pg_catalog`
-or another schema only a superuser can create in, and in no schema a database owner or `PUBLIC` can create in, where a function of
-the same name would run as the studio's own role ([aurora.md](aurora.md)).
+or another schema a superuser owns whose access list gives `CREATE` to no one but superusers, and in no schema whose list gives it
+to `PUBLIC` or to any role short of a superuser (a database owner's schema, `public`, a superuser's schema with a grant to an
+ordinary role), where a function of the same name would run as the studio's own role. The check reads the list's own entries: a role
+that has `CREATE` only through membership of a role that holds it is not seen ([aurora.md](aurora.md)).
 
 ### Storage
 
