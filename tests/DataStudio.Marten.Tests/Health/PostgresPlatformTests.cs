@@ -50,6 +50,34 @@ public class PostgresPlatformTests
         platform.WhereSettingsChange.Should().Contain("DB cluster parameter group");
     }
 
+    /// <summary>Issue #81: an Aurora cluster whose function is not where the studio looked is still Aurora, by its settings.</summary>
+    [Fact]
+    public void Aurora_s_settings_name_Aurora_beside_the_rds_settings_when_the_function_is_not_seen()
+    {
+        PostgresPlatform platform = PostgresPlatform.Detect(None with { RdsSettings = true, AuroraSettings = true }, ["db.cluster-abc.eu-west-1.rds.amazonaws.com"]);
+
+        platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        platform.Marker.Should().Contain("aurora_").And.Contain("apg_");
+        platform.WhereSettingsChange.Should().Contain("DB cluster parameter group");
+    }
+
+    [Fact]
+    public void Each_Aurora_marker_alone_names_Aurora_and_both_together_do_too()
+    {
+        PostgresPlatform.Detect(None with { RdsSettings = true, AuroraVersionFunction = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        PostgresPlatform.Detect(None with { RdsSettings = true, AuroraSettings = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        PostgresPlatform.Detect(None with { AuroraVersionFunction = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        PostgresPlatform.Detect(None with { AuroraSettings = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+        PostgresPlatform.Detect(None with { RdsSettings = true, AuroraVersionFunction = true, AuroraSettings = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
+    }
+
+    [Fact]
+    public void The_rds_marker_alone_is_Amazon_RDS_and_neither_is_not_RDS()
+    {
+        PostgresPlatform.Detect(None with { RdsSettings = true }, []).Kind.Should().Be(PostgresPlatformKind.AmazonRds);
+        PostgresPlatform.Detect(None, []).Kind.Should().Be(PostgresPlatformKind.SelfHosted);
+    }
+
     [Fact]
     public void The_azure_extensions_setting_names_Azure()
     {

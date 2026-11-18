@@ -6,7 +6,8 @@ namespace DataStudio.Postgres.Internal.Sql;
 /// <param name="VersionNumber"><c>server_version_num</c>.</param>
 /// <param name="Version"><c>server_version</c>.</param>
 /// <param name="RdsSettings">An <c>rds.extensions</c> or <c>rds.allowed_extensions</c> setting exists.</param>
-/// <param name="AuroraVersionFunction">An <c>aurora_version()</c> function exists.</param>
+/// <param name="AuroraVersionFunction">An <c>aurora_version()</c> function a superuser owns exists, in any schema.</param>
+/// <param name="AuroraSettings">A setting whose name starts with <c>aurora_</c> or <c>apg_</c> exists.</param>
 /// <param name="AzureExtensions">An <c>azure.extensions</c> setting exists.</param>
 /// <param name="CloudSqlSettings">A <c>cloudsql.*</c> setting exists.</param>
 /// <param name="NeonSuperuserRole">A <c>neon_superuser</c> role exists.</param>
@@ -17,6 +18,7 @@ internal sealed record ServerPlatformRow(
     string Version,
     bool RdsSettings,
     bool AuroraVersionFunction,
+    bool AuroraSettings,
     bool AzureExtensions,
     bool CloudSqlSettings,
     bool NeonSuperuserRole,
@@ -59,6 +61,7 @@ internal static class OverviewServerQueries
             reader.GetString(1),
             reader.GetBoolean(2),
             reader.GetBoolean(3),
+            reader.GetBoolean(10),
             reader.GetBoolean(4),
             reader.GetBoolean(5),
             reader.GetBoolean(6),

@@ -19,7 +19,7 @@ somebody's to change.
 
 | Platform | Marker | Documented in |
 |---|---|---|
-| Amazon Aurora | an `aurora_version()` function in `pg_catalog` (looked up in `pg_proc`, never called) | Aurora User Guide, *aurora_version* |
+| Amazon Aurora | an `aurora_version()` function a superuser owns, in any schema (looked up in `pg_proc`, never called), or a setting named `aurora_*` or `apg_*` from the server's configuration | Aurora User Guide, *aurora_version* |
 | Amazon RDS | an `rds.extensions` or `rds.allowed_extensions` setting from the server's configuration | RDS User Guide, *Supported PostgreSQL extension versions*; Aurora User Guide, *Working with extensions* |
 | Azure Database for PostgreSQL | an `azure.extensions` setting from the server's configuration | Microsoft Learn, *PostgreSQL extensions in Azure Database for PostgreSQL* |
 | Google Cloud SQL | a `cloudsql.*` setting (a database flag) from the server's configuration | Cloud SQL for PostgreSQL, *Configure database flags* |
@@ -27,8 +27,8 @@ somebody's to change.
 | Supabase | a host under `.supabase.co` or `.supabase.com` | Supabase, *Connect to your database* |
 
 The markers are read in that order, and the first that matches wins. Aurora comes first because an Aurora
-cluster has the `rds.*` settings too. The server markers - the Aurora function, the RDS, Azure and Cloud SQL
-settings and Neon's role - are existence tests against the catalog that need no privilege. The host markers
+cluster has the `rds.*` settings too, and either Aurora marker is enough. The server markers - the Aurora function and
+settings, the RDS, Azure and Cloud SQL settings and Neon's role - are existence tests against the catalog that need no privilege. The host markers
 (Neon's `.neon.tech`, Supabase's domains) are read from the host names in the store database's connection
 string, without a query. Supabase has no server-side marker here: the `supautils.*` settings come from an extension Supabase
 publishes and other distributions also install, and no Supabase page documents a setting only its servers have.
@@ -41,8 +41,8 @@ from `pg_settings`, and on a server without the provider's module a name such as
 placeholder, which `pg_settings` never lists - whether a session's `SET` or `SET LOCAL` or a client's startup options
 made it - while a database owner's `ALTER DATABASE ... SET` or a role's `ALTER ROLE ... SET` of one is refused to
 anybody but a superuser. As defence in depth, a setting also counts only when it comes from the server's own
-configuration. The Aurora function counts only in `pg_catalog`, where only a superuser may create one - a
-`public.aurora_version()` does not.
+configuration. The Aurora function counts only when a superuser owns it, in whatever schema - a
+`public.aurora_version()` a database owner made does not.
 Neon's role counts only with `REPLICATION` and `BYPASSRLS`, which only a superuser may grant before PostgreSQL 16,
 and from 16 only a `CREATEROLE` role holding both.
 

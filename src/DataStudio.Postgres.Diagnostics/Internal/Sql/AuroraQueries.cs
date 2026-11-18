@@ -8,8 +8,9 @@ namespace DataStudio.Postgres.Internal.Sql;
 /// The statements of Aurora's own diagnostic functions (issue #8 A1, A3, A4; W5-AUR): which instance answered, the replica
 /// status of every instance, the instance's cumulative waits, this database's commit latency and DML activity, and - behind
 /// the activity gate only - the waits of this database's sessions. Run only once the platform read
-/// (<see cref="HealthServerQueries.Platform" />) has found <c>aurora_version()</c> in <c>pg_catalog</c>: no other server has
-/// these functions, and naming one that does not exist is <c>42883</c>.
+/// (<see cref="HealthServerQueries.Platform" />) has found an Aurora marker: no other server has these functions, and naming
+/// one that does not exist is <c>42883</c> - which a server marked only by its <c>aurora_*</c> settings, or by an
+/// <c>aurora_version()</c> outside <c>pg_catalog</c>, answers, and the reader takes as "not read".
 /// </summary>
 /// <remarks>
 /// <para>

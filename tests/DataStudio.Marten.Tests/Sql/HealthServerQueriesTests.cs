@@ -198,6 +198,8 @@ public class HealthServerQueriesTests
         sql.Should().Contain("s.name in ('rds.extensions', 'rds.allowed_extensions')");
         sql.Should().Contain("p.proname = 'aurora_version'");
         sql.Should().NotContain("aurora_version()", "Aurora's function is looked up in pg_proc, never called - it does not exist anywhere else");
+        sql.Should().NotContain("p.proname = 'aurora_version' and p.pronamespace", "issue #81: the function counts in any schema, not only pg_catalog");
+        sql.Should().Contain("pg_catalog.left(s.name, 7) = 'aurora_'").And.Contain("pg_catalog.left(s.name, 4) = 'apg_'");
         sql.Should().Contain("s.name = 'azure.extensions'");
         sql.Should().Contain("s.name like 'cloudsql.%'");
         sql.Should().Contain("r.rolname = 'neon_superuser'");

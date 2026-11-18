@@ -344,8 +344,8 @@ page's Aurora replicas, the "Answered by" line, the Server page's Aurora section
 `ViewDatabaseActivity`. Each session's waits (`aurora_stat_backend_waits`) need `ViewDatabaseActivity`, are read only
 for a visitor through that gate, are shown as counts and shares, never as a time, and are audited on first view
 ("Read Aurora session waits").
-Aurora's functions are called only once the platform read has found `aurora_version()` in `pg_catalog`, where nobody
-short of a superuser may create one, and each is called by its `pg_catalog` name ([aurora.md](aurora.md)).
+Aurora's functions are called only once the platform read has found an Aurora marker - an `aurora_version()` function a
+superuser owns, or an `aurora_*` or `apg_*` setting - and each is called by its `pg_catalog` name ([aurora.md](aurora.md)).
 
 ### Storage
 

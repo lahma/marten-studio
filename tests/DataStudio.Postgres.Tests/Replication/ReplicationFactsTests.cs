@@ -87,10 +87,10 @@ public class ReplicationFactsTests
     {
         string sql = HealthServerQueries.Platform().Sql;
 
-        sql.Should().Contain("p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace",
-            "a public.aurora_version() a database owner made is not Aurora");
+        sql.Should().Contain("p.proname = 'aurora_version' and o.rolsuper",
+            "a public.aurora_version() a database owner made is not Aurora: the function counts in any schema, owned by a superuser");
         Regex.Matches(sql, @"s\.source in \('default', 'environment variable', 'configuration file', 'command line', 'override'\)")
-            .Should().HaveCount(3, "the RDS, Azure and Cloud SQL settings count only from the server's own configuration, never a SET");
+            .Should().HaveCount(4, "the RDS, Aurora, Azure and Cloud SQL settings count only from the server's own configuration, never a SET");
         sql.Should().Contain("r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin",
             "Neon's role carries two attributes only a superuser grants before 16");
     }

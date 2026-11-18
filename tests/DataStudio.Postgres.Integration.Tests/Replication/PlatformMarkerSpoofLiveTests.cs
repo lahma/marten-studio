@@ -28,10 +28,10 @@ public class PlatformMarkerSpoofLiveTests
 
     /// <summary>Every provider setting <c>pg_settings</c> lists, with where it came from.</summary>
     private const string ProviderSettingsSql =
-        "select s.name || ' (' || s.source || ')' from pg_catalog.pg_settings s where s.name like 'rds.%' or s.name like 'azure.%' or s.name like 'cloudsql.%' order by 1";
+        "select s.name || ' (' || s.source || ')' from pg_catalog.pg_settings s where s.name like 'rds.%' or s.name like 'azure.%' or s.name like 'cloudsql.%' or s.name like 'apg\\_%' or s.name like 'aurora\\_%' order by 1";
 
     /// <summary>The detector statement's marker columns.</summary>
-    private static readonly string[] MarkerColumns = ["rds", "aurora", "azure", "cloud_sql", "neon"];
+    private static readonly string[] MarkerColumns = ["rds", "aurora", "aurora_settings", "azure", "cloud_sql", "neon"];
 
     public static TheoryData<string> Images => ["postgres:15.19-alpine", "postgres:17.11-alpine", "postgres:18.6-alpine"];
 
@@ -55,6 +55,8 @@ public class PlatformMarkerSpoofLiveTests
             ("ALTER DATABASE SET cloudsql.iam_authentication", "the database owner", "alter database " + Database + " set \"cloudsql.iam_authentication\" = 'on'"),
             ("ALTER ROLE app SET azure.extensions", "the role itself", "alter role app set \"azure.extensions\" = 'pg_stat_statements'"),
             ("ALTER ROLE app IN DATABASE SET rds.allowed_extensions", "the role itself", "alter role app in database " + Database + " set \"rds.allowed_extensions\" = '*'"),
+            ("ALTER DATABASE SET apg_plan_mgmt.capture_plan_baselines", "the database owner", "alter database " + Database + " set \"apg_plan_mgmt.capture_plan_baselines\" = 'on'"),
+            ("ALTER ROLE app SET aurora_compute.plan", "the role itself", "alter role app set \"aurora_compute.plan\" = 'on'"),
             ("CREATE ROLE neon_superuser NOLOGIN", "a CREATEROLE role", "create role neon_superuser nologin"),
             ("CREATE ROLE neon_superuser_r REPLICATION BYPASSRLS", "a CREATEROLE role", "create role neon_superuser_r nologin replication bypassrls"),
         ];
@@ -122,6 +124,8 @@ public class PlatformMarkerSpoofLiveTests
             "ALTER DATABASE SET cloudsql.iam_authentication (by the database owner): 42501",
             "ALTER ROLE app SET azure.extensions (by the role itself): 42501",
             "ALTER ROLE app IN DATABASE SET rds.allowed_extensions (by the role itself): 42501",
+            "ALTER DATABASE SET apg_plan_mgmt.capture_plan_baselines (by the database owner): 42501",
+            "ALTER ROLE app SET aurora_compute.plan (by the role itself): 42501",
             "CREATE ROLE neon_superuser_r REPLICATION BYPASSRLS (by a CREATEROLE role): 42501",
         ]);
 
@@ -150,7 +154,7 @@ public class PlatformMarkerSpoofLiveTests
         await using NpgsqlConnection connection = new(builder.ConnectionString);
         await connection.OpenAsync(Token);
 
-        await using (NpgsqlCommand set = new("set \"rds.extensions\" = 'pg_stat_statements'; set \"azure.extensions\" = 'pg_stat_statements'", connection))
+        await using (NpgsqlCommand set = new("set \"rds.extensions\" = 'pg_stat_statements'; set \"azure.extensions\" = 'pg_stat_statements'; set \"apg_plan_mgmt.capture_plan_baselines\" = 'on'", connection))
         {
             await set.ExecuteNonQueryAsync(Token);
         }
@@ -164,7 +168,8 @@ public class PlatformMarkerSpoofLiveTests
 
         await using (NpgsqlCommand seen = new(
             "select pg_catalog.current_setting('cloudsql.iam_authentication', true), pg_catalog.current_setting('rds.extensions', true), "
-            + "pg_catalog.current_setting('azure.extensions', true), pg_catalog.current_setting('rds.allowed_extensions', true)",
+            + "pg_catalog.current_setting('azure.extensions', true), pg_catalog.current_setting('rds.allowed_extensions', true), "
+            + "pg_catalog.current_setting('apg_plan_mgmt.capture_plan_baselines', true)",
             connection,
             transaction))
         await using (NpgsqlDataReader reader = await seen.ExecuteReaderAsync(Token))
@@ -174,6 +179,7 @@ public class PlatformMarkerSpoofLiveTests
             reader.GetString(1).Should().Be("pg_stat_statements", "the SET took");
             reader.GetString(2).Should().Be("pg_stat_statements", "the SET took");
             reader.GetString(3).Should().Be("*", "the SET LOCAL took");
+            reader.GetString(4).Should().Be("on", "the SET of an apg_ placeholder took");
         }
 
         List<string> listed = [];

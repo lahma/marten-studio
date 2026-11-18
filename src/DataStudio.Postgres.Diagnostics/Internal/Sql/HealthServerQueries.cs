@@ -78,13 +78,14 @@ internal static class HealthServerQueries
         "select pg_catalog.current_setting('server_version_num')::int4 as server_version_num,\n" +
         "       pg_catalog.current_setting('server_version') as server_version,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name in ('rds.extensions', 'rds.allowed_extensions') and " + ServerConfigured + ") as rds,\n" +
-        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p join pg_catalog.pg_roles o on o.oid = p.proowner where p.proname = 'aurora_version' and o.rolsuper) as aurora,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions' and " + ServerConfigured + ") as azure,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%' and " + ServerConfigured + ") as cloud_sql,\n" +
         "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon,\n" +
         "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
         "       pg_catalog.pg_postmaster_start_time() as started_at,\n" +
-        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance");
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where (pg_catalog.left(s.name, 7) = 'aurora_' or pg_catalog.left(s.name, 4) = 'apg_') and " + ServerConfigured + ") as aurora_settings");
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -103,7 +104,7 @@ internal static class HealthServerQueries
     /// <summary>
     /// The server's version and the markers the managed-platform detector reads (<c>PostgresPlatform</c>): the
     /// <c>rds.extensions</c> / <c>rds.allowed_extensions</c> settings of Amazon RDS and Aurora, Aurora's
-    /// <c>aurora_version()</c> function, Azure's <c>azure.extensions</c> setting, Cloud SQL's <c>cloudsql.*</c> flags
+    /// <c>aurora_version()</c> function and its <c>aurora_*</c> / <c>apg_*</c> settings, Azure's <c>azure.extensions</c> setting, Cloud SQL's <c>cloudsql.*</c> flags
     /// and Neon's <c>neon_superuser</c> role. Each one is an existence test against the catalog, so a marker that is
     /// absent - every one of them on a server of somebody's own - costs nothing and errs nowhere.
     /// </summary>
@@ -121,9 +122,14 @@ internal static class HealthServerQueries
     /// <c>PlatformMarkerSpoofLiveTests</c>. On top of that, as defence in depth, a setting counts only from the server's own
     /// configuration (<c>source</c> in <c>default</c>, <c>environment variable</c>, <c>configuration file</c>,
     /// <c>command line</c>, <c>override</c>).</item>
-    /// <item><c>aurora_version()</c> counts only in <c>pg_catalog</c>, where only a superuser may create a function. Not
-    /// also fenced to <c>oid &lt; 16384</c> (initdb's objects): a function an engine or a superuser adds after initdb -
-    /// the test shim among them - has a higher oid, and the namespace already keeps out every role but a superuser.</item>
+    /// <item><b>Aurora has two markers, either of which says so</b> (issue #81): a function named <c>aurora_version</c> in
+    /// <i>any</i> schema - an Aurora cluster does not always keep it in <c>pg_catalog</c>, which is what made a cluster look like
+    /// plain RDS - and a setting whose name starts with <c>aurora_</c> or <c>apg_</c> (<c>pg_settings</c>, the same fence as the
+    /// provider settings above). The function counts only when a <i>superuser</i> owns it: where it lives no longer keeps a role
+    /// out, because a database owner may create one in <c>public</c>, so who made it does (<c>PlatformMarkerSpoofLiveTests</c>).
+    /// Not also fenced to <c>oid &lt; 16384</c> (initdb's objects): a function an engine or a superuser adds after initdb - the
+    /// test shim among them - has a higher oid. The setting marker needs no owner: <c>pg_settings</c> never lists a placeholder.
+    /// Aurora wins over the RDS marker, because an Aurora cluster has the <c>rds.*</c> settings too.</item>
     /// <item><c>neon_superuser</c> counts only as Neon makes it - <c>NOLOGIN</c>, <c>REPLICATION</c> and <c>BYPASSRLS</c>
     /// (<i>Manage roles</i>, Neon docs, read 2026-10-26) - two attributes only a superuser may grant before PostgreSQL 16,
     /// and from 16 only a <c>CREATEROLE</c> role that holds both itself.</item>
@@ -131,8 +137,8 @@ internal static class HealthServerQueries
     /// </list>
     /// <para>
     /// <b>And which server answered</b> (issue #8 A1, W5-AUR): <c>pg_is_in_recovery()</c>, <c>pg_postmaster_start_time()</c>,
-    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c> exactly as
-    /// <c>aurora_version()</c> is, because the instance it names decides whether the statistics window looks reset, and a
+    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c>, where
+    /// only a superuser creates a function, because the instance it names decides whether the statistics window looks reset, and a
     /// window that looks reset holds back every verdict that needs a long one. Neither Aurora function is called here: an
     /// Aurora server's instance is read by <see cref="AuroraQueries.Instance" />, only once this read has said Aurora, and a
     /// release before 13.7, 12.11, 11.16 or 10.21 has no identifier function (<i>aurora_db_instance_identifier</i>, Aurora
