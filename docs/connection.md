@@ -85,7 +85,8 @@ The page is built so that a connection string never reaches it ([D33 in the main
   check, a hint card, the snapshot download, a log line or the audit log holds can contain them.
 
 A data source you gave a `Name` (`NpgsqlDataSourceBuilder.Name`, set directly or in the builder callback that
-`AddNpgsqlDataSource` and Aspire take) is reported to Npgsql's meter under that name, not its connection string. C18 identifies such
+`AddNpgsqlDataSource` and Aspire take) is reported to Npgsql's meter under that name, not its connection string. This page's pool line
+and Database › Sessions match the database's own pool by that name, so a named data source shows "n in use" like any other. C18 identifies such
 a pool in memory, from the data sources the studio already resolves - the one this page is about, the Postgres module's
 `AddDataSource` sources and the Marten module's stores' databases - and keeps only counts, as above. A named pool the studio does not
 resolve, several pools that share one name, and a pool the bounded walk did not reach are **not judged**: C18 says "Not judged for N
