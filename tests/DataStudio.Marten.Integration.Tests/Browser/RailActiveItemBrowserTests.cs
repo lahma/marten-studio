@@ -45,6 +45,40 @@ public class RailActiveItemBrowserTests(BrowserSuiteFixture fixture)
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
     /// <summary>
+    /// Waits for the rail's final shape on a page of this sample: the entries drawn only once the scope is known (the Tenants entry, which the sample's
+    /// tenanted store draws) are in, the active entry is in view, and the reveal count has not risen for <see cref="Settle" /> successive checks. The
+    /// scope's facts arrive after the first reveal; the one they cause shifts every row below Tenants and is a second reveal, which a hand scroll made
+    /// before it would otherwise be undone by.
+    /// </summary>
+    private static async Task WaitForRailToSettleAsync(IPage page)
+    {
+        await page.WaitForFunctionAsync(
+            "() => [...document.querySelectorAll('.ms-sidebar-inner .ms-nav-link-text')].some(x => x.textContent.trim() === 'Tenants')",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+        await WaitForActiveInViewAsync(page);
+
+        // The entries the rail draws are its own count; the reveals so far are what the page's draws caused. The condition holds only once both have
+        // stayed as they are for several successive checks, which the browser makes on its own clock (a wait on a condition, not a delay of the test's).
+        await page.WaitForFunctionAsync(
+            """
+            ({ settle }) => {
+                const entries = document.querySelectorAll('.ms-sidebar-inner .ms-nav-item').length;
+                const reveals = window.__railReveals;
+                const seen = window.__railSettled;
+                if (seen && seen.entries === entries && seen.reveals === reveals) { seen.frames++; } else { window.__railSettled = { entries, reveals, frames: 0 }; }
+                return window.__railSettled.frames >= settle;
+            }
+            """,
+            new { settle = Settle },
+            new PageWaitForFunctionOptions { Timeout = 30_000, PollingInterval = 50 });
+        await WaitForActiveInViewAsync(page);
+    }
+
+    /// <summary>How many successive 50 ms checks the rail must stay as it is, in the browser, for the test to take it as final.</summary>
+    private const int Settle = 6;
+
+    /// <summary>
     /// Runs before the page's own scripts, and counts each call the rail makes to the reveal helper (the rail's own scroll box is the container it is
     /// given), whatever the helper then does with it. Installed as a setter on the helper's name because the circuit caches the function it first
     /// finds, so a wrapper put in after the first call would never be called; the helper (<c>studio.js</c>) assigns itself and is wrapped as it does.
@@ -98,6 +132,10 @@ public class RailActiveItemBrowserTests(BrowserSuiteFixture fixture)
             await studio.WaitForInteractiveAsync();
             await page.Locator("a.ms-nav-link.ms-nav-active").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await WaitForActiveInViewAsync(page);
+
+            // The scope's facts (and the Tenants entry they draw) arrive after the first reveal, and the reveal they cause must have run before the
+            // rail is scrolled by hand: otherwise it would scroll the rail back down under the test, whatever the code under test does.
+            await WaitForRailToSettleAsync(page);
 
             Placement loaded = await PlacementAsync(page);
             loaded.Scrollable.Should().BeTrue("the Marten rail does not fit a 500 px window, which is what makes the entry start out of view");
