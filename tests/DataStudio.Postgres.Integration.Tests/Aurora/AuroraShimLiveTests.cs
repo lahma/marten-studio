@@ -547,6 +547,9 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         view.Waits!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound, "a sentence, not a SQLSTATE");
         view.Replicas!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
         view.Database!.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound);
+        view.SessionsShown.Should().BeTrue("the matrix host has every capability on, and its write policy allows everything");
+        view.Sessions!.Value.Should().BeNull();
+        view.Sessions.Note.Should().Be(PostgresServerFacts.AuroraFunctionsNotFound, "the sessions' waits say the same sentence, not an exception's name");
     }
 
     /// <summary>
