@@ -17942,4 +17942,52 @@ dialog.ms-modal::backdrop {
     .ms-health-finding {
         padding-inline: var(--ms-space-sm);
     }
+
+/* ===== V2-B2-A: the Health page's Critical list (#87) ===== */
+/* One compact region above the areas: each Critical finding the visitor may see, its code and title, linking to its card. */
+.ms-health-critical {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-danger);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+}
+
+.ms-health-critical-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-health-critical-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    color: var(--ms-color-text);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.ms-health-critical-link:hover .ms-health-critical-title,
+.ms-health-critical-link:focus-visible .ms-health-critical-title {
+    text-decoration: underline;
+}
+
+.ms-health-critical-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* A card is focusable (tabindex="-1") so a link can move focus to it; the ring shows where it landed. */
+.ms-health-finding:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
 }

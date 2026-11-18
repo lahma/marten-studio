@@ -33,6 +33,11 @@ that read it (Show SQL - parameter names, never values), a caveat that says how 
 - **Warning**: something is wrong or risky and is worth fixing on purpose.
 - **Info**: a setting that would let the store - or the advisor - tell you more.
 
+The Health page lists its findings by area, in a fixed order, so a Critical finding can sit below many Warnings. Above the
+first area, one short list names each Critical finding you are shown - its code and title - and links its card, which takes
+focus. With no Critical finding to show you, the list is not drawn; one you are not shown is counted in the notice about
+withheld findings and never named.
+
 For a table a Marten store declares, a remedy is always a `StoreOptions` line for the host's own registration,
 never DDL. An index, a storage parameter or a setting the studio created itself would be schema the host's
 configuration does not know about, and the next `CreateOrUpdate` would take it away again. A remedy that needs a
