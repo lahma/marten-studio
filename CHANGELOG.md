@@ -26,13 +26,20 @@ may read do, the address `GetStudioPath(..., PostgresPage.Overview)` returns in 
 - An Amazon Aurora cluster is recognised as Aurora when it has a function named `aurora_version` owned by a superuser,
   in any schema, or a setting named `aurora_*` or `apg_*`; beta.1 looked for the function in `pg_catalog` only, called
   such a cluster Amazon RDS and raised S02 as Critical for `full_page_writes = off`, which is Aurora's normal value. A
-  function a database owner creates does not count (#81).
+  function a database owner creates does not count (#81). Aurora's own reads call its functions in the schema that
+  function lives in, quoted, and only where the schema is a superuser's and nobody else may create in it; where there
+  is no such schema the Aurora sections say so in a sentence, not as a SQLSTATE.
 - In the Kafka module a time zone is named by its IANA id on Windows too ("Europe/Helsinki (UTC+02:00)"), in the
   Preferences menu and in a search's absolute window. The topic count reads "1 selected (a search reads at most 20)",
   the line under a search text with errors says how many there are, and when a search text has several errors the
   earliest in the text is reported first, which is also the one the audit records (#80).
-- The cluster selector shows the cluster's own name; "Same servers as ..." is its tooltip, and Cluster settings still
-  says it in text. At a phone's width the Health page's checks table scrolls inside its own region.
+- A visitor who has chosen no time zone reads times in their browser's zone, where beta.1 used the server's: the shell
+  asks the browser once when the circuit starts, and stores nothing (only a zone the visitor picks in Preferences is
+  stored, as before). The Preferences menu always lists the zone in use and marks the browser's ("Europe/Helsinki
+  (UTC+02:00), this browser"). A page is first drawn in the server's zone and changes when the circuit starts.
+- The cluster selector shows the cluster's own name, with "(shared servers)" after it when another cluster you may see
+  is on the same servers; "Same servers as ..." is its tooltip, and Cluster settings still says it in text. At a
+  phone's width the Health page's checks table scrolls inside its own region.
 - The Kafka sample keeps the user-secrets id it had in 1.3.x (`kstudio-sample`), so stored secrets are found again.
 - For maintainers: the Kafka live suite's brokers keep records for a hundred years. The tests stamp records from a
   fixed instant, and under Kafka's default of seven days the broker had been deleting them under the running tests
