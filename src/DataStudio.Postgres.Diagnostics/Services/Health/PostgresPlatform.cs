@@ -217,7 +217,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
     /// place of the SQLSTATE of a call that was never made.
     /// </summary>
     public const string AuroraFunctionsNotFound =
-        "This server is Aurora by its settings, but no aurora_version() function that only a superuser could have made is visible to the studio, so Aurora's own functions are not called.";
+        "This server is Aurora, but the studio found no aurora_version() function in a schema that only a superuser can create in, so Aurora's own functions are not called.";
 
     /// <summary>
     /// What the studio hands a host's <see cref="IPostgresCapacitySource" />, and the API (D31): the public shape of these

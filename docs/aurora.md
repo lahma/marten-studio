@@ -32,10 +32,10 @@ Where a database owner can also put a function (the `public` schema, say), a fun
 called as the studio's own role, so the studio calls nothing there. A function a database owner planted in `public` is
 neither a marker nor ever called (`PlatformMarkerSpoofLiveTests`, `AuroraShimLiveTests`).
 
-A server that Aurora's settings alone mark (no `aurora_version()` is visible, or the one that is sits in a schema a database
-owner could write to) has no schema to call. Its Aurora sections say so in a sentence ("This server is Aurora by its
-settings, but no aurora_version() function that only a superuser could have made is visible to the studio, so Aurora's own
-functions are not called."), not a SQLSTATE:
+An Aurora server with no schema to call (its settings alone mark it, no `aurora_version()` is visible, or the one that is
+sits in a schema somebody short of a superuser could create in) has its Aurora sections say so in a sentence ("This server
+is Aurora, but the studio found no aurora_version() function in a schema that only a superuser can create in, so Aurora's
+own functions are not called."), not a SQLSTATE:
 
 | Function | What the studio reads | Where it is shown |
 |---|---|---|

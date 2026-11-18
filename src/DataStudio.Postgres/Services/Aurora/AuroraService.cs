@@ -235,6 +235,11 @@ internal sealed class AuroraService : IAuroraService
         {
             sessions = ServerRead<AuroraSessionWaits>.Of(await facts.GetSessionsAsync(resolved, cancellationToken).ConfigureAwait(false));
         }
+        catch (HealthCheckUnavailableException exception) when (exception.Message == PostgresServerFacts.AuroraFunctionsNotFound)
+        {
+            // No schema to call Aurora's functions in: a state of the server, said in the sentence the other sections use, not a failure.
+            sessions = new ServerRead<AuroraSessionWaits>(null, PostgresServerFacts.AuroraFunctionsNotFound);
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
