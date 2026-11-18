@@ -14,8 +14,9 @@ its own version; everything below about the shared screens holds there too, with
 
 ## Install and register
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Postgres --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio.Postgres --prerelease
 ```
 
 The package references `DataStudio` (the shell: the mount, the layout, the front page, Activity and the static assets) and

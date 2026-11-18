@@ -11,8 +11,9 @@ Software Foundation.
 
 ## Registration
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Kafka --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio.Kafka --prerelease
 ```
 
 ```csharp
@@ -317,8 +318,9 @@ The cluster selector and the Settings page show each cluster's profile and the l
 
 `DataStudio.Kafka.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
 
+<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Kafka.Wolverine --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio.Kafka.Wolverine --prerelease
 ```
 
 ```csharp
