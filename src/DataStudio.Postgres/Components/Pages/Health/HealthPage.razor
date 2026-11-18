@@ -210,6 +210,28 @@
         }
         else
         {
+            @if (CriticalFindings is { Count: > 0 } critical)
+            {
+                @* Issue #87: the areas keep their order, so a Critical finding can sit below every Warning of the areas before it; this
+                   names each one the visitor may see (a withheld finding is counted above, never named) and links its card. *@
+                <section class="ms-section ms-health-critical" aria-labelledby="ms-health-critical-title">
+                    <h2 class="ms-section-title" id="ms-health-critical-title">@HealthPresentation.Count(critical.Count, "critical finding")</h2>
+                    <ul class="ms-health-critical-list">
+                        @foreach (HealthReportFinding finding in critical)
+                        {
+                            <li class="ms-health-critical-item" @key="finding.MuteKey">
+                                <a class="ms-health-critical-link"
+                                   href="@HealthLinks.ToFinding(Descriptor.SourceQueryParameter, State.ActiveScope, finding)"
+                                   @onclick="() => ShowFindingAsync(finding.Anchor)">
+                                    <code class="ms-health-code">@finding.Code</code>
+                                    <span class="ms-health-critical-title">@finding.Finding.Title</span>
+                                </a>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+
             @foreach (IGrouping<HealthArea, HealthReportFinding> group in VisibleFindings.GroupBy(static x => x.Finding.Area).OrderBy(static x => x.Key))
             {
                 <section class="ms-section ms-health-area" @key="group.Key" aria-label="@HealthPresentation.AreaTitle(group.Key)">
@@ -318,6 +340,16 @@
 
     private List<HealthReportFinding> VisibleFindings =>
         report is null ? [] : [.. report.Findings.Where(x => x.Counts(Mutes.IsMuted))];
+
+    /// <summary>
+    /// The Critical findings this visitor is shown and has not muted, in the page's own order (area, then the report's): the report
+    /// holds only what the gates let this visitor see, so none is named here that the cards below would not draw.
+    /// </summary>
+    private List<HealthReportFinding> CriticalFindings =>
+        [.. VisibleFindings.Where(static x => x.Severity == HealthSeverity.Critical)];
+
+    /// <summary>The card elements by id, so a click on the Critical list can move focus to the card it names.</summary>
+    private readonly Dictionary<string, ElementReference> cards = [];
 
     private List<HealthReportFinding> MutedFindings =>
         report is null ? [] : [.. report.Findings.Where(x => !x.Accepted && Mutes.IsMuted(x.MuteKey))];
@@ -463,6 +495,36 @@
         {
             linkedFindingGone = true;
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// A click on a Critical finding's link (issue #87): scrolls to its card and marks it, as an address's fragment does, and moves focus
+    /// to it, so a keyboard visitor lands where the link said. The link's own address names the card as well, so with no circuit
+    /// it is still a link to it.
+    /// </summary>
+    private async Task ShowFindingAsync(string anchor)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.health.revealFinding", lifetime.Token, anchor);
+
+            if (cards.TryGetValue(anchor, out ElementReference card))
+            {
+                await card.FocusAsync(preventScroll: true);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A circuit that closed, or a browser that refused: the link is right without the scroll.
         }
     }
 
@@ -787,7 +849,7 @@
     {
         string severity = finding.Severity.ToString().ToLowerInvariant();
 
-        <article class="@("ms-health-finding ms-health-finding-" + severity)" id="@finding.Anchor" @key="finding.MuteKey" aria-labelledby="@(finding.Anchor + "-title")">
+        <article class="@("ms-health-finding ms-health-finding-" + severity)" id="@finding.Anchor" tabindex="-1" @ref="cards[finding.Anchor]" @key="finding.MuteKey" aria-labelledby="@(finding.Anchor + "-title")">
             <header class="ms-health-finding-header">
                 <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
                 <code class="ms-health-code">@finding.Code</code>

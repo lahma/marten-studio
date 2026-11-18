@@ -122,6 +122,17 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 await UntilShownAsync(t11, HealthRefresh(studio.Page), NextSweep, "T11 after the Invoice HiLo row was put near its ceiling");
                 (await t11.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Critical");
 
+                // Issue #87: the Critical list above the areas names T11, and its link lands on T11's card with focus.
+                string t11Card = (await t11.GetAttributeAsync("id"))!;
+                ILocator listed = studio.Page.Locator(".ms-health-critical .ms-health-critical-link").Filter(new LocatorFilterOptions { HasTextString = "T11" });
+                (await listed.CountAsync()).Should().Be(1, "the Critical list names each Critical finding the visitor is shown");
+                (await listed.GetAttributeAsync("href")).Should().EndWith("#" + t11Card, "the link names the card");
+                await listed.ClickAsync();
+                await studio.Page.WaitForFunctionAsync(
+                    "id => document.activeElement && document.activeElement.id === id",
+                    t11Card,
+                    new PageWaitForFunctionOptions { Timeout = 10_000 });
+
                 IJSHandle recorded = await studio.Page.WaitForFunctionAsync(
                     "() => (window.__msToasts || []).find(t => t.includes('ms-toast-error') && t.includes('Health: ') && t.includes('int ids')) || null",
                     null,
