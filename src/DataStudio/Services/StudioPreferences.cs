@@ -122,7 +122,9 @@ internal sealed class StudioPreferences
     /// <returns>Whether the circuit's zone is now the browser's. An id of an unexpected shape, or one this server does not know, is not used.</returns>
     public bool TryUseBrowserTimeZone(string? ianaId)
     {
-        if (!LooksLikeZoneId(ianaId) || !TimeZoneInfo.TryFindSystemTimeZoneById(ianaId, out _))
+        // The current name is asked for first: a host whose zone data has only the current names knows Asia/Kolkata and not the Asia/Calcutta a
+        // browser says, and the spelling alone is no reason to refuse the browser's zone.
+        if (!LooksLikeZoneId(ianaId) || !TimeZoneInfo.TryFindSystemTimeZoneById(StudioTimeZones.CurrentName(ianaId), out _))
         {
             return false;
         }
@@ -241,13 +243,13 @@ internal sealed class StudioPreferences
             return TimeZoneInfo.Local.Id;
         }
 
-        string candidate = value.Trim();
+        // A stored legacy spelling (Asia/Calcutta) is read as the current name (#92), so choosing or storing the same zone twice is no change;
+        // and it is the current name that is looked for, which a host with only the current names in its zone data still finds.
+        string candidate = StudioTimeZones.CurrentName(value.Trim());
         try
         {
             _ = TimeZoneInfo.FindSystemTimeZoneById(candidate);
-
-            // A stored legacy spelling (Asia/Calcutta) is read as the current name (#92), so choosing or storing the same zone twice is no change.
-            return StudioTimeZones.CurrentName(candidate);
+            return candidate;
         }
         catch (TimeZoneNotFoundException)
         {

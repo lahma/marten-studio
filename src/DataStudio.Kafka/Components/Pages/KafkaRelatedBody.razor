@@ -153,7 +153,7 @@
                     <details class="ms-k-custom-window">
                         <summary>Custom window (UTC)</summary>
                         @* The type is not written as a literal: the compiler binds a literal datetime-local as a DateTime, and these boxes keep the text the
-                           browser gives, which is parsed in the zone the visitor chose. *@
+                           browser gives, which is read as UTC. *@
                         <div class="ms-k-absolute">
                             <label>From <input type="@DateTimeLocal" class="ms-input" @bind:get="customFrom" @bind:event="onchange" @bind:set="value => SetCustom(KafkaLocalInput.Minutes(value), customTo)" /></label>
                             <label>To <input type="@DateTimeLocal" class="ms-input" @bind:get="customTo" @bind:event="onchange" @bind:set="value => SetCustom(customFrom, KafkaLocalInput.Minutes(value))" /></label>
