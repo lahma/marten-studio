@@ -3,13 +3,13 @@ using System.Text.RegularExpressions;
 namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
-/// Keeps the code blocks in <c>README.md</c> equal to the <c>#region</c> bodies they were taken from in
+/// Keeps the code blocks in <c>docs/setup.md</c> (the setup guide the README points at) equal to the <c>#region</c> bodies they were taken from in
 /// <c>samples/DataStudio.Sample.Marten/Program.cs</c>, and those in <c>src/DataStudio.Postgres/README.md</c> - the Postgres module's
 /// package readme - equal to the regions of <c>samples/DataStudio.Sample.Postgres/Program.cs</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// README.md is also the nuget.org package readme, so its "Register and mount" section is the first
+/// The setup guide's "Register and mount" section (in README.md until 2.0, now in docs/setup.md) is the first
 /// code anybody sees and the only code most people will copy. A hand-maintained copy of a registration
 /// rots the moment an API changes: the sample still compiles, the README still looks plausible, and the
 /// first thing a new consumer types does not build. Marking the blocks and comparing them against the
@@ -45,10 +45,10 @@ public class ReadmeSnippetTests
         RegexOptions.Multiline | RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 
-    /// <summary>The Data Studio readme, the repository's own, and the Postgres module package's readme.</summary>
+    /// <summary>The setup guide the repository's README points at, <c>docs/setup.md</c>, and the Postgres module package's readme.</summary>
     public static TheoryData<string, string> Readmes => new()
     {
-        { "README.md", "samples/DataStudio.Sample.Marten/Program.cs" },
+        { "docs/setup.md", "samples/DataStudio.Sample.Marten/Program.cs" },
         { "src/DataStudio.Postgres/README.md", "samples/DataStudio.Sample.Postgres/Program.cs" },
     };
 
@@ -90,9 +90,9 @@ public class ReadmeSnippetTests
     /// failure rather than a quietly smaller test.
     /// </summary>
     [Theory]
-    [InlineData("README.md", "readme_register")]
-    [InlineData("README.md", "readme_map")]
-    [InlineData("README.md", "readme_health")]
+    [InlineData("docs/setup.md", "readme_register")]
+    [InlineData("docs/setup.md", "readme_map")]
+    [InlineData("docs/setup.md", "readme_health")]
     [InlineData("src/DataStudio.Postgres/README.md", "readme_register")]
     [InlineData("src/DataStudio.Postgres/README.md", "readme_map")]
     [InlineData("src/DataStudio.Postgres/README.md", "readme_health")]

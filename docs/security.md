@@ -923,7 +923,7 @@ Ids **9200–9299**, **9300–9329** and **9400–9519**, are reserved for the M
 space: each shared event has one id, level, set of properties and template, whichever module logs it. The Kafka module's are
 9600–9699. The
 audit events are these, and the numbers are fixed: an operator's log query is written against the number, and
-renumbering one later would silently change what a saved query matches. The README lists the operational ones, which
+renumbering one later would silently change what a saved query matches. [limits.md](limits.md#security-model-and-limits) and [setup.md](setup.md#hosting-notes) list the operational ones, which
 say something went wrong.
 
 Every value a visitor could shape - a typed `?store=` or `?db=`, a statement, a reason, a document id - reaches these

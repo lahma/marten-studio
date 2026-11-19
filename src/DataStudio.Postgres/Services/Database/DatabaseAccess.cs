@@ -123,7 +123,7 @@ internal sealed record DatabaseRowAccessResult(DatabaseRowGrant? Grant, Database
 /// <c>tenant_id</c> for the studio to filter on, so a read of it is a read for every tenant at once. The
 /// policy is therefore asked against <c>scope with { TenantId = null }</c> - a database-level resource - even
 /// when the visitor has a tenant selected, and a handler that restricts visitors to their own tenant
-/// refuses it, as it should (see the README's handler example).
+/// refuses it, as it should (see the handler example in docs/authorization.md).
 /// </para>
 /// <para>
 /// <b>Only catalog-sourced names reach SQL.</b> <see cref="RequireRowAccessAsync" /> looks the relation up

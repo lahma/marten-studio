@@ -237,7 +237,7 @@ samples/DataStudio.Sample.Marten/Generation/   The demo-data panel: hosted job, 
 tests/DataStudio.Marten.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in; the
                                          unhealthy switches' gates, markup, checks and clean-up
 docs/                                    Long-form documentation linked from README.md; never packed
-docs/screenshots/                        The fourteen README screenshots (ScreenshotCaptureTests retakes them)
+docs/screenshots/                        The README screenshots (ScreenshotCaptureTests retakes the Marten ones)
 docs/maintainers/                        Maintainer reference moved out of AGENTS.md: this tree, the dated package
                                          budget entries (package-budget-changes.md), the evidence and history
                                          behind the rules (decision-notes.md) and the full texts of the rules
