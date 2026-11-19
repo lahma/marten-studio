@@ -9,7 +9,8 @@ Nothing a host writes changes.
   (`GetClusterAsync`); a topic's first and end offsets per partition, `retention.ms`, `retention.bytes` and `cleanup.policy`
   (`GetTopicAsync`); and a consumer group's state, its members with their client ids, hosts and partitions, and the committed
   offset, end offset, lag and owning member of each partition (`GetGroupAsync`). `KafkaGroupStatus.PlaceOf(clientId)` says whether
-  a member stands by, has caught up, is behind or is not a member at all. The reads go through the module's pooled clients and
+  a member stands by, has caught up, is behind or is not a member at all, judging only the partitions that member owns and
+  counting a partition with nothing committed from its first offset. The reads go through the module's pooled clients and
   single-flight caches and ask no visitor's policy; a refusal or an unreachable cluster is a `KafkaReadProblem` on the result,
   never an exception, and nothing is served by the studio. Docs: [kafka.md](docs/kafka.md#diagnostics-api), D50.
 - A group read (the group's description, or its committed offsets) answered `NotCoordinatorForGroup` or

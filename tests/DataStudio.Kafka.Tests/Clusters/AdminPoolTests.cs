@@ -353,6 +353,44 @@ public class AdminPoolTests
         rig.Created[0].Disposed.Should().BeFalse("the second lease is still held");
     }
 
+    /// <summary>
+    /// v249: a coordinator that keeps answering "not available" does not cost a new client at every refresh. A cluster's client is
+    /// replaced at most once per cooldown, and again by the next stale answer after it.
+    /// </summary>
+    [Fact]
+    public void A_cluster_s_client_is_replaced_at_most_once_per_cooldown()
+    {
+        Rig rig = new();
+
+        using (KafkaAdminPool<StubClient>.Lease first = rig.Pool.Rent(Cluster("a")))
+        {
+            first.Retire("GroupCoordinatorNotAvailable").Should().BeTrue();
+        }
+
+        using (KafkaAdminPool<StubClient>.Lease second = rig.Pool.Rent(Cluster("a")))
+        {
+            second.Retire("GroupCoordinatorNotAvailable").Should().BeFalse("its predecessor was replaced a moment ago");
+        }
+
+        rig.Created.Should().HaveCount(2);
+        rig.Clock.Advance(KafkaAdminPool<StubClient>.RetireCooldown);
+
+        using (KafkaAdminPool<StubClient>.Lease third = rig.Pool.Rent(Cluster("a")))
+        {
+            ReferenceEquals(third.Client, rig.Created[1]).Should().BeTrue("the client kept through the cooldown is still the cluster's");
+            third.Retire("GroupCoordinatorNotAvailable").Should().BeTrue("the cooldown has passed");
+        }
+
+        using (rig.Pool.Rent(Cluster("b")))
+        {
+        }
+
+        using (KafkaAdminPool<StubClient>.Lease other = rig.Pool.Rent(Cluster("b")))
+        {
+            other.Retire("NotCoordinatorForGroup").Should().BeTrue("the cooldown is each cluster's own");
+        }
+    }
+
     [Fact]
     public void A_client_answered_with_a_stale_coordinator_is_replaced_once_and_disposed_when_its_last_lease_is_released()
     {

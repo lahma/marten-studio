@@ -409,6 +409,9 @@ public sealed class ConsumerHealthCheck(IKafkaDiagnostics kafka) : IHealthCheck
 }
 ```
 
+A health check's description is often served without authentication. The sentences above name a topic, a group and a client id:
+map the endpoint with a response writer that leaves descriptions out, or return your own words, where that matters.
+
 - `GetClusterAsync(cluster, topics)`: whether the cluster answers, how many brokers its metadata names, and whether it lists each
   topic you name.
 - `GetTopicAsync(cluster, topic)`: each partition's first and end offset, and `retention.ms`, `retention.bytes` and
@@ -419,11 +422,14 @@ public sealed class ConsumerHealthCheck(IKafkaDiagnostics kafka) : IHealthCheck
   no member shows its position only on those.
 - `PlaceOf(clientId)` on a group says where one member stands: `Standby` (it has no partition, because the topics have fewer
   partitions than the group has members), `CaughtUp`, `Behind`, `NotAMember` (the coordinator removed it, or it never joined) or
-  `Unknown` (the group could not be read). It tells a quiet consumer from a stuck one.
+  `Unknown` (the group, or the offsets of a partition the member owns, could not be read). It tells a quiet consumer from a stuck
+  one. A partition with no committed offset is counted from its first offset (`KafkaGroupPartition.FirstOffset`), so records
+  that have expired are not waiting.
 
 A refusal, a missing topic or an unreachable cluster is a `KafkaReadProblem` on the part of the answer it withheld (its outcome,
 the client's error code and a sentence such as "Not available: needs `DESCRIBE` on group `orders-service`"), and the rest is still
-read. Only an unknown cluster key throws. The cluster keys are in `IKafkaDiagnostics.Clusters`.
+read. A call throws only for what the caller got wrong or asked for: an unknown cluster key or a blank topic or group id
+(`ArgumentException`), and a cancelled token. The cluster keys are in `IKafkaDiagnostics.Clusters`.
 
 ## Links
 
