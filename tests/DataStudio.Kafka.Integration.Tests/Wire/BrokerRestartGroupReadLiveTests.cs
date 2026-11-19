@@ -4,9 +4,12 @@ using System.Text;
 
 using Confluent.Kafka;
 
+using DataStudio.Kafka.Core.Catalog;
 using DataStudio.Kafka.Core.Wire;
 using DataStudio.Kafka.Integration.Tests.Support;
 using DataStudio.Kafka.Tests.Contract;
+
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DataStudio.Kafka.Integration.Tests.Wire;
 
@@ -27,14 +30,13 @@ namespace DataStudio.Kafka.Integration.Tests.Wire;
 /// <para>
 /// The broker is the test's own, never reused, bound to a host port chosen up front (Docker gives an unpinned port a new number at every start, and
 /// the advertised address would no longer be the engine's bootstrap). The collection runs alone: the measurement is of time, which another
-/// class's load would blur. The variants are the host's ways of reading: back to back, and at a gap, so that no read is in flight when the broker
-/// returns.
+/// class's load would blur. The variants are the host's ways of reading: back to back, at a gap, so that no read is in flight when the broker
+/// returns, and back to back with a caller that gives up.
 /// </para>
 /// <para>
-/// <b>Not covered, and open:</b> a caller that gives up on a read (a host that allows eight seconds, below the engine's ten-second request timeout)
-/// leaves the call running on its client, and the next read, a second later, runs beside it on the same client. The client the first call timed
-/// out on is replaced at once, but it is disposed only when the second call ends, which can be after the broker is back, and then the process
-/// died in two runs of five (Windows, Confluent.Kafka 2.14.0). The variant is left out because it is not deterministic, not because it is safe.
+/// The third variant is the host that allows a read eight seconds, below the engine's ten-second request timeout, and reads again a second later:
+/// the caller gives up and the call goes on holding its client. It passes because the snapshot cache shares the read that is still running with the
+/// next caller of the key (one read per key at a time); reads of different keys on one client still overlap, which this test does not cover (D36).
 /// </para>
 /// </remarks>
 [Collection(KafkaCollections.Restart)]
@@ -49,6 +51,9 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
     /// </summary>
     private static readonly TimeSpan Outage = TimeSpan.FromSeconds(15);
 
+    /// <summary>The shell's default <c>RefreshInterval</c>, which is how long the engine reuses a completed read.</summary>
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
+
     /// <summary>How long a reader keeps reading before it gives up, so that a run that never recovers fails instead of waiting.</summary>
     private static readonly TimeSpan MeasureFor = TimeSpan.FromSeconds(240);
 
@@ -56,14 +61,16 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
 
     /// <summary>The group reads recover after a restart, for each way a host reads.</summary>
     /// <param name="gapSeconds">The pause between one read and the next: the host's own cadence, scenario time as <see cref="Outage" /> is.</param>
+    /// <param name="callerSeconds">How long the caller waits for a read before it gives up and reads again; <c>0</c> waits for the engine's own timeout.</param>
     [KafkaTheory]
-    [InlineData(1)]
-    [InlineData(20)]
-    public async Task Both_group_reads_answer_again_soon_after_the_broker_answers_metadata_following_a_restart(int gapSeconds)
+    [InlineData(1, 0)]
+    [InlineData(20, 0)]
+    [InlineData(1, 8)]
+    public async Task Both_group_reads_answer_again_soon_after_the_broker_answers_metadata_following_a_restart(int gapSeconds, int callerSeconds)
     {
         await using RestartableKafkaFixture broker = new(image);
         await broker.InitializeAsync();
-        await using LiveContractCluster cluster = LiveContractCluster.Open(broker);
+        await using LiveContractCluster cluster = LiveContractCluster.Open(broker, catalogTimeToLive: RefreshInterval);
 
         string topic = cluster.NewTopic("restart");
         string group = "data-studio-restart-" + broker.RunId;
@@ -75,9 +82,13 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
         WirePartition partition = new(topic, 0);
         StringBuilder log = new();
 
+        // The reads are the engine's own, through the single-flight cache the pages and the diagnostics API share (D50), which is what a host runs.
+        KafkaWireReads reads = cluster.Engine.Provider.GetRequiredService<KafkaWireReads>();
+        string key = EngineHarness.ClusterKey;
+
         // Before the outage both calls answer a value, so the clients the outage will leave behind are ones that have worked.
-        (await cluster.Wire.DescribeGroupAsync(group, Token)).IsOk.Should().BeTrue("the group is described before the outage");
-        (await cluster.Wire.ListGroupOffsetsAsync(group, [partition], Token)).IsOk.Should().BeTrue("the group's offsets are read before the outage");
+        (await reads.GroupAsync(key, group, Token)).IsOk.Should().BeTrue("the group is described before the outage");
+        (await reads.GroupOffsetsAsync(key, group, topic, [partition], Token)).IsOk.Should().BeTrue("the group's offsets are read before the outage");
 
         // The host reads through the outage, as a page that refreshes does.
         Stopwatch clock = Stopwatch.StartNew();
@@ -87,8 +98,9 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
         TimeSpan gap = TimeSpan.FromSeconds(gapSeconds);
 
-        Task<TimeSpan?> describing = ReadUntilValueAsync("DescribeGroup", clock, log, gap, token => cluster.Wire.DescribeGroupAsync(group, token), stop.Token);
-        Task<TimeSpan?> committing = ReadUntilValueAsync("GroupOffsets", clock, log, gap, token => cluster.Wire.ListGroupOffsetsAsync(group, [partition], token), stop.Token);
+        TimeSpan? caller = callerSeconds > 0 ? TimeSpan.FromSeconds(callerSeconds) : null;
+        Task<TimeSpan?> describing = ReadUntilValueAsync("DescribeGroup", clock, log, gap, caller, token => reads.GroupAsync(key, group, token), stop.Token);
+        Task<TimeSpan?> committing = ReadUntilValueAsync("GroupOffsets", clock, log, gap, caller, token => reads.GroupOffsetsAsync(key, group, topic, [partition], token), stop.Token);
 
         await Task.Delay(Outage, Token);
         await DockerCli.StartAsync(broker.ContainerId);
@@ -122,15 +134,34 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
         Stopwatch clock,
         StringBuilder log,
         TimeSpan gap,
+        TimeSpan? caller,
         Func<CancellationToken, Task<WireResult<T>>> read,
         CancellationToken token)
     {
         while (clock.Elapsed < MeasureFor && !token.IsCancellationRequested)
         {
             TimeSpan begun = clock.Elapsed;
-            WireResult<T> result = await read(token);
-            bool ok = result.IsOk;
-            string outcome = ok ? "value" : result.Error!.Kind + ":" + result.Error.Code;
+            bool ok = false;
+            string outcome;
+
+            using (CancellationTokenSource given = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                if (caller is { } limit)
+                {
+                    given.CancelAfter(limit);
+                }
+
+                try
+                {
+                    WireResult<T> result = await read(given.Token);
+                    ok = result.IsOk;
+                    outcome = ok ? "value" : result.Error!.Kind + ":" + result.Error.Code;
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    outcome = "the caller gave up";
+                }
+            }
 
             TimeSpan ended = clock.Elapsed;
 

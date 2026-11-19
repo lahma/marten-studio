@@ -38,7 +38,8 @@ internal sealed class LiveContractCluster : IContractCluster
     /// <param name="fixture">The broker.</param>
     /// <param name="user">The principal the engine reads as.</param>
     /// <param name="requestTimeout">The engine's request timeout; the default when <see langword="null" />.</param>
-    public static LiveContractCluster Open(KafkaFixture fixture, string user = "admin", TimeSpan? requestTimeout = null)
+    /// <param name="catalogTimeToLive">How long the engine's cached reads are reused (the shell's <c>RefreshInterval</c>); zero when <see langword="null" />, so that a read after a seed really reads.</param>
+    public static LiveContractCluster Open(KafkaFixture fixture, string user = "admin", TimeSpan? requestTimeout = null, TimeSpan? catalogTimeToLive = null)
     {
         Assert.SkipUnless(DockerAvailability.IsAvailable, DockerAvailability.SkipReason);
         DockerAvailability.ThrowIfMissingOnContinuousIntegration();
@@ -52,6 +53,7 @@ internal sealed class LiveContractCluster : IContractCluster
             fixture,
             EngineHarness.ForClient(
                 fixture.Client(user),
+                catalogTimeToLive,
                 configure: requestTimeout is { } timeout ? options => options.RequestTimeout = timeout : null));
     }
 
