@@ -1,6 +1,9 @@
-# 2.0.0-beta.4
+# 2.0.0
 
-2.0.0-beta.4 is the fourth beta of 2.0. All seven packages are at 2.0.0-beta.4. Nothing a host writes changes.
+2.0.0 is the first stable release of Data Studio: one embeddable admin UI for the Marten stores, PostgreSQL data sources and
+Kafka clusters an ASP.NET Core application already uses, as seven packages at one version. It replaces Marten Studio,
+Postgres Studio and KStudio 1.x; [docs/upgrading.md](docs/upgrading.md) is the move from 1.x, and the sections of the four
+betas below say what 2.0 is and how it changed on the way. Since 2.0.0-beta.3:
 
 - `IKafkaDiagnostics.GetGroupAsync` lists a partition that no member owns and the group has committed nothing to only
   when its committed or end offset could not be read. When the first-offset read alone failed, beta.3 listed every such

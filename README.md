@@ -1,9 +1,5 @@
 # Data Studio
 
-<!-- beta: remove at 2.0.0 -->
-> **Data Studio 2.0 is in beta** (`2.0.0-beta.4`), published for trial: names, addresses and options may still move before
-> 2.0.0, and every package is installed with `--prerelease`. What is promised meanwhile is in [docs/stability.md](https://github.com/lahma/marten-studio/blob/main/docs/stability.md).
-
 An admin UI for the data stores your ASP.NET Core application already uses, **embedded in the application itself**. Add
 `AddDataStudio()`, one call per module, and `MapDataStudio()`, and it runs inside your process against your own
 configured Marten store, `NpgsqlDataSource` and Kafka clusters: no connection string to hand over, no second deployment,
@@ -65,12 +61,12 @@ Apache Software Foundation.
 
 | Your application | Install |
 |---|---|
-| Uses Marten | `dotnet add package DataStudio.Marten --prerelease` <!-- beta: remove at 2.0.0 --> |
-| Uses Npgsql with no Marten | `dotnet add package DataStudio.Postgres --prerelease` <!-- beta: remove at 2.0.0 --> |
-| Uses only Kafka | `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
-| Uses Marten and Kafka | `dotnet add package DataStudio.Marten --prerelease`, then `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
-| Is a Wolverine application with Kafka | also `dotnet add package DataStudio.Kafka.Wolverine --prerelease` <!-- beta: remove at 2.0.0 --> |
-| Wants only the health findings in its own code, with no UI | `dotnet add package DataStudio.Postgres.Diagnostics --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses Marten | `dotnet add package DataStudio.Marten` |
+| Uses Npgsql with no Marten | `dotnet add package DataStudio.Postgres` |
+| Uses only Kafka | `dotnet add package DataStudio.Kafka` |
+| Uses Marten and Kafka | `dotnet add package DataStudio.Marten`, then `dotnet add package DataStudio.Kafka` |
+| Is a Wolverine application with Kafka | also `dotnet add package DataStudio.Kafka.Wolverine` |
+| Wants only the health findings in its own code, with no UI | `dotnet add package DataStudio.Postgres.Diagnostics` |
 
 Seven packages, released together at one version and pinned exactly to each other, so upgrade them together.
 `DataStudio.Marten` brings `Marten` (floor `9.57.0`) and the Postgres module; `Npgsql` has floor `9.0.4` and
