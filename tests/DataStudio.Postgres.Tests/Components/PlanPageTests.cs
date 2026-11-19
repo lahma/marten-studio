@@ -168,6 +168,26 @@ public class PlanPageTests
         context.Services.GetRequiredService<DataStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
     }
 
+    /// <summary>
+    /// ffm6 (REVIEW-B3-A F3): a pasted plan that was not analyzed is told so in words that name nothing the page cannot do. With
+    /// <c>RunSql</c> off there is no Explain analyze here, so the line under the insights does not send the visitor to one.
+    /// </summary>
+    [Fact]
+    public async Task Without_RunSql_a_pasted_plan_that_was_not_analyzed_names_no_Explain_analyze()
+    {
+        await using PostgresComponentContext context = await ReadyAsync(runSql: false);
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        await PasteAsync(
+            context,
+            page,
+            """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Alias":"orders","Startup Cost":0.00,"Total Cost":35.50,"Plan Rows":2550,"Plan Width":4}}]""");
+
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
+        page.Find(".ms-plan-not-judged").TextContent.Trim().Should().StartWith("Not judged, because this plan was not analyzed:");
+        page.Markup.Should().NotContain("Explain analyze").And.NotContain("EXPLAIN ANALYZE");
+    }
+
     [Fact]
     public async Task Under_ReadOnly_the_paste_box_is_still_offered()
     {

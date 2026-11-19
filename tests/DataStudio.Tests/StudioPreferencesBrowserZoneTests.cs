@@ -92,13 +92,13 @@ public class StudioPreferencesBrowserZoneTests
         return new StudioPreferences(new HttpContextAccessor { HttpContext = context });
     }
 
+    private const string BothSpellingsReason =
+        "This host's zone data does not have both Asia/Calcutta and Asia/Kolkata, so there is no alias to prove here; the table's own answer is proved where the resolver is given.";
+
     [Fact]
     public void A_browser_that_reports_a_legacy_spelling_selects_and_marks_the_current_name_and_stores_nothing()
     {
-        if (!HostKnowsBothSpellings)
-        {
-            return;
-        }
+        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
 
         StudioPreferences preferences = Preferences();
         long version = preferences.PreferenceVersion;
@@ -113,10 +113,7 @@ public class StudioPreferencesBrowserZoneTests
     [Fact]
     public void A_stored_legacy_spelling_is_read_as_the_current_name_and_a_browser_answer_in_either_spelling_changes_nothing()
     {
-        if (!HostKnowsBothSpellings)
-        {
-            return;
-        }
+        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
 
         StudioPreferences preferences = PreferencesWithCookie("Asia/Calcutta");
 
@@ -138,10 +135,7 @@ public class StudioPreferencesBrowserZoneTests
     [Fact]
     public void Choosing_the_current_name_stores_the_current_name_and_a_legacy_value_is_the_same_choice()
     {
-        if (!HostKnowsBothSpellings)
-        {
-            return;
-        }
+        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
 
         StudioPreferences preferences = Preferences();
 

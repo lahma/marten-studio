@@ -206,7 +206,7 @@
             @if (notJudged.Count > 0)
             {
                 <p class="ms-plan-not-judged">
-                    @(Analyzer ? "Not judged without Explain analyze:" : "Not judged without EXPLAIN ANALYZE, which only the SQL console runs:")
+                    @(!CanAnalyze ? "Not judged, because this plan was not analyzed:" : Analyzer ? "Not judged without Explain analyze:" : "Not judged without EXPLAIN ANALYZE, which only the SQL console runs:")
                     @string.Join(", ", notJudged.Select(static x => x.Code + " " + x.Title)).
                 </p>
             }
@@ -299,6 +299,13 @@
     /// </summary>
     [Parameter]
     public bool Analyzer { get; set; }
+
+    /// <summary>
+    /// Whether anything here can run Explain analyze. <see langword="false" /> on the Plan page with <c>RunSql</c> off (#90), where a
+    /// pasted plan that was not analyzed is told so without naming a button the page does not have.
+    /// </summary>
+    [Parameter]
+    public bool CanAnalyze { get; set; } = true;
 
     /// <summary>
     /// The statement the plan is of, which names the speedscope export; <see langword="null" /> for a pasted plan (X3). Read only
