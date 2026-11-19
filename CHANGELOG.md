@@ -28,7 +28,7 @@ Nothing a host writes changes.
   who put the earlier text back and clicked Run got the statement of the chord again, because the browser reports no
   change for a box that holds what it held when it was entered; LINQ mode's order-by box had the same fault.
 - The Kafka window's date-and-time boxes keep the value as the browser holds it, to the minute. The custom window of
-  Related records is read again: with both boxes filled it said "Enter both times of the window." and Search stayed
+  Related records is read: with both boxes filled it said "Enter both times of the window." and Search stayed
   off until a preset was picked.
 - Plan with `RunSql` off says "Planning a statement is not available here." and speaks only of pasting a plan: no option
   names, no SQL console warning, and an intro that no longer describes Explain (#90). The paste box's help says "a SQL
