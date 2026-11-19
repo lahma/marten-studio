@@ -40,7 +40,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
                 .Select(topic => new WireTopicInfo(topic.Name, Partitions(topic), null)),
         ];
 
-        return Task.FromResult(WireResult<WireMetadata>.Ok(new WireMetadata(topics)));
+        return Task.FromResult(WireResult<WireMetadata>.Ok(new WireMetadata(topics) { Brokers = [new WireNode(1, "fake", 9092)] }));
     }
 
     public Task<WireResult<IReadOnlyList<WireTopicDescription>>> DescribeTopicsAsync(
@@ -227,7 +227,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
         // An unknown group is "Dead", as Kafka describes it, not an error.
         (string State, int Members)? group = Cluster.Group(groupId);
         return Task.FromResult(WireResult<WireGroupDescription>.Ok(
-            new WireGroupDescription(groupId, group?.State ?? "Dead", group?.Members ?? 0, null)));
+            new WireGroupDescription(groupId, group?.State ?? "Dead", group?.Members ?? 0, null) { Members = Cluster.GroupMembers(groupId) }));
     }
 
     public IWireScanReader OpenReader(WireReaderOptions options)

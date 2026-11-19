@@ -49,6 +49,8 @@ internal sealed class EngineHarness : IAsyncDisposable
 
     public IKafkaCatalog Catalog => Provider.GetRequiredService<IKafkaCatalog>();
 
+    public IKafkaDiagnostics Diagnostics => Provider.GetRequiredService<IKafkaDiagnostics>();
+
     public WindowResolver Resolver => Provider.GetRequiredService<WindowResolver>();
 
     public KafkaEngineOptions Options => Provider.GetRequiredService<KafkaEngineOptions>();

@@ -451,6 +451,41 @@ public abstract class WireContract
     }
 
     [Fact]
+    public async Task A_described_group_lists_each_member_with_its_client_id_and_its_partitions()
+    {
+        // D50: the member list and assignments a host reads through IKafkaDiagnostics; the fake may model them only because this holds on both images.
+        await using IContractCluster cluster = await OpenAsync();
+        string topic = cluster.NewTopic("members");
+        await cluster.CreateTopicAsync(topic, 2);
+        string group = "ks-members-" + topic;
+
+        await using (await cluster.JoinGroupAsync(group, "ks-member", topic))
+        {
+            WireResult<WireGroupDescription> described = await cluster.Wire.DescribeGroupAsync(group, Token);
+
+            described.Error.Should().BeNull();
+            described.Value.State.Should().Be("Stable");
+            described.Value.MemberCount.Should().Be(1);
+            WireGroupMember member = described.Value.Members.Should().ContainSingle().Subject;
+            member.ClientId.Should().Be("ks-member");
+            member.MemberId.Should().NotBeNullOrEmpty();
+            member.Host.Should().NotBeNullOrEmpty();
+            member.Assignment.Should().BeEquivalentTo([new WirePartition(topic, 0), new WirePartition(topic, 1)]);
+        }
+    }
+
+    [Fact]
+    public async Task Metadata_names_the_brokers_of_the_cluster()
+    {
+        await using IContractCluster cluster = await OpenAsync();
+
+        WireResult<WireMetadata> metadata = await cluster.Wire.GetMetadataAsync(Token);
+
+        metadata.Error.Should().BeNull();
+        metadata.Value.Brokers.Should().NotBeEmpty("a cluster that answers names at least the broker that answered (D50's broker count)");
+    }
+
+    [Fact]
     public async Task List_offsets_of_a_partition_an_existing_topic_does_not_have_is_not_reported_as_a_missing_topic()
     {
         // librdkafka answers Local_NoEnt whenever no requested partition has a leader, which a missing topic is only one cause of

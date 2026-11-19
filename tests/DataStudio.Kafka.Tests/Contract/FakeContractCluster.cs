@@ -96,7 +96,23 @@ internal sealed class FakeContractCluster : IContractCluster
         return Task.FromResult(new AppendBatch(first, Cluster.Topic(topic)!.Partitions[partition].End, max));
     }
 
+    public Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic)
+    {
+        WirePartition[] partitions = [.. Enumerable.Range(0, Cluster.Topic(topic)!.Partitions.Count).Select(x => new WirePartition(topic, x))];
+        Cluster.SetGroupMembers(group, "Stable", new WireGroupMember(clientId + "-" + Guid.NewGuid().ToString("N"), clientId, "/127.0.0.1", partitions));
+        return Task.FromResult<IAsyncDisposable>(new FakeMembership(Cluster, group));
+    }
+
     public async ValueTask DisposeAsync() => await Engine.DisposeAsync();
+
+    private sealed class FakeMembership(FakeKafkaCluster cluster, string group) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            cluster.SetGroup(group, "Empty", 0);
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private void Append(string topic, int partition, ContractRecord record, long? transaction) =>
         Cluster.Produce(

@@ -3,7 +3,7 @@
 Data Studio's Kafka module (`DataStudio.Kafka`, with its engine `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`) is for
 Apache Kafka®. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software
 Foundation. AGENTS.md states each rule; this document holds its full text and wins where they differ. D34 and D35 are the module's half, D36 to
-D41 the engine's, D45 to D48 M5's.
+D41 the engine's, D45 to D48 M5's, and D50 the engine's diagnostics API.
 
 ## D34
 
@@ -1096,3 +1096,50 @@ timeout): never the query, the literal, the message or a hint. The audit gains t
 own. `IndexNarrowerTests`, `IndexClauseSelectorTests`, `IndexPlanTests` (with a sentinel literal and exception message that no log line may contain),
 `KafkaSearchIndexTextTests` and `KafkaSearchIndexPageTests` hold all of this; `PublicApiTest_DataStudioKafkaCore` holds the surface (the interface, `RecordIndex<T>()`, and the four
 types the interface's one method takes and returns).
+
+## D50
+
+**D50 — The Kafka diagnostics API: what the engine reads, for the host's own code, and never served by the studio.** `IKafkaDiagnostics` (public, in
+`DataStudio.Kafka.Core`, registered by the engine's registration, so by `AddKafka()`) is the Kafka engine's counterpart of `IPostgresDiagnostics` (D31). A host that
+watches its own consumers (a health check, an operations page, a support summary) gets the cluster, topic and group reads the Kafka module's pages make, instead of a
+second admin client of its own: one more set of broker connections, and the librdkafka traps the engine already avoids (#5040's crash on a group-offsets read from a
+plain admin client, the coordinator a client never forgets, the native handle freed under a call at shutdown).
+
+*What it answers.* `Clusters` (the keys, no I/O beyond running the sources once, D43); `GetClusterAsync` (whether the metadata answers, its broker count, and
+whether it lists each topic asked about); `GetTopicAsync` (each partition's first and end offset, `retention.ms`, `retention.bytes` and `cleanup.policy`); and
+`GetGroupAsync` (the group's state, its members with client id, host and assignment, and the committed offset, end offset, lag and owning member of every partition a
+member is assigned or the group has committed to on the topics asked about). `KafkaGroupStatus.PlaceOf(clientId)` says where one member stands: `Standby` (no
+partition), `CaughtUp`, `Behind` (with the records waiting), `NotAMember`, or `Unknown` (the group or its offsets could not be read). It tells a quiet consumer from a
+stuck one, which a consumer that marks progress only when a record arrives cannot. A partition a member owns with no committed offset counts from offset 0, where a
+consumer that starts at the earliest record begins.
+
+*Reads, not seams.* As D31 says of the Postgres API, it is results: no wire, catalog, cache or client crosses it, and a host cannot add a read or change a cache. Every
+call goes through `KafkaWireReads`, so it shares the pages' single-flight caches (an answer is up to the shell's `RefreshInterval` old) and pooled clients, and the
+group offsets go through the offsets reader (D36). The engine never lists every group or every committed offset (D37), so `GetGroupAsync` reads committed offsets
+only on the topics the host names and the topics its members are assigned: a group with no member shows its position only on the topics named.
+
+*No visitor, so no visitor's gates.* The API answers host code, which already holds the cluster's credentials, so it asks neither Kafka policy nor any capability (D35)
+and reads exactly what the application's principal may read. A read never writes (D37).
+
+*Errors are values.* A refusal, a missing topic or group, an unreachable cluster or an authentication failure is a `KafkaReadProblem` on the part of the result it
+withheld (the outcome, the client's error code name and the engine's sentence, "Not available: needs `DESCRIBE` on group `billing`"), and the rest of the result is
+still read: a refused configuration leaves the offsets, a refused group description leaves the committed offsets. A group Kafka does not know is `Dead` with no member
+and no problem, as Kafka itself describes one. Only an unknown cluster key (a programming error) and a canceled call throw.
+
+*Shape (hard rule 7).* The read model is extend-only, as D31's: sealed, non-positional records with `init` properties and no `required` member, so a host can build one
+in its tests; enums with explicit values, which may gain members; the interface gains members only as default interface members. `PublicApiTest_DataStudioKafkaCore`
+holds it.
+
+*Never served.* No page, endpoint, log line above Debug, metric or audit entry carries a result; a call is event **9681** (Debug: the read, the cluster and the outcome's
+code, nothing else), and it is not audited, as host code is not a visitor.
+
+*The coordinator a client never forgets.* librdkafka's admin API caches the coordinator it looked up for a group and renews the entry with every lookup, so a client
+used more often than its idle timeout keeps asking a broker that no longer coordinates the group (`NotCoordinatorForGroup`) for as long as it lives. A group call (the
+description, or the committed offsets on the offsets reader) that is answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` therefore retires the client it
+ran on (`KafkaAdminPool.Retire`): the next call builds a new one and looks the coordinator up afresh, the retired client is disposed when its last lease is released (as
+at shutdown, and a shutdown waits for it), concurrent failures replace it once, and event **9680** (Debug) names the pool, the cluster and the code.
+`GroupLoadInProgress` is the right coordinator still loading and keeps the client. `AdminPoolTests` and `ConfluentErrorMappingTests` hold this.
+
+*Proved on Kafka.* The member list and the broker list come from the wire (`WireGroupDescription.Members`, `WireMetadata.Brokers`), so the fake models them only as
+far as `WireContract` proves them on `apache/kafka` 3.9 and 4.x: a described group lists a joined member with its client id, host and partitions, and metadata names
+the brokers. `KafkaDiagnosticsTests` holds the API's mapping on the fake.

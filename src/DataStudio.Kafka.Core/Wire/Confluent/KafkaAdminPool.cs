@@ -165,6 +165,38 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Takes the client a lease holds out of the pool, so that the next <see cref="Rent" /> builds a new one (D50). librdkafka's admin API
+    /// keeps a group coordinator it looked up for as long as the client is used, and every lookup renews it, so a client that was answered
+    /// <c>NOT_COORDINATOR</c> would keep asking the broker that no longer coordinates the group until it sat idle. The client is disposed
+    /// when its last lease is released, as a client leased at shutdown is; one another call already replaced is left alone, so concurrent
+    /// failures replace it once.
+    /// </summary>
+    /// <param name="lease">The lease whose call was answered with a stale coordinator.</param>
+    /// <param name="code">The error code that said so, for the log.</param>
+    /// <returns>Whether this call took the client out.</returns>
+    public bool Retire(Lease lease, string code)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+
+        lock (gate)
+        {
+            if (disposed || !slots.TryGetValue(lease.Cluster, out Slot? current) || !ReferenceEquals(current, lease.Held))
+            {
+                return false;
+            }
+
+            slots.Remove(lease.Cluster);
+            current.Retired = true;
+            retiredPending++;
+        }
+
+        string key = KafkaLogValue.Cap(lease.Cluster);
+        string reason = KafkaLogValue.Cap(code);
+        KafkaEngineLog.AdminClientReplaced(logger, clientKind, key, reason);
+        return true;
+    }
+
     private void Reap(object? state)
     {
         // A timer callback that throws ends the process, so nothing escapes this method.
@@ -308,6 +340,13 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
 
         /// <summary>The client; valid until the lease is disposed.</summary>
         public TClient Client => slot.Client;
+
+        /// <summary>The slot this lease holds, so that <see cref="KafkaAdminPool{TClient}.Retire" /> retires only the client the call ran on.</summary>
+        internal Slot Held => slot;
+
+        /// <summary>Takes this lease's client out of the pool (see <see cref="KafkaAdminPool{TClient}.Retire" />).</summary>
+        /// <param name="code">The error code that said the client's coordinator is stale.</param>
+        public bool Retire(string code) => pool.Retire(this, code);
 
         /// <inheritdoc />
         public void Dispose()

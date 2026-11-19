@@ -103,7 +103,11 @@ internal sealed record WireTopicInfo(string Name, IReadOnlyList<WirePartitionInf
 
 /// <summary>Every topic this principal may describe.</summary>
 /// <param name="Topics">The topics.</param>
-internal sealed record WireMetadata(IReadOnlyList<WireTopicInfo> Topics);
+internal sealed record WireMetadata(IReadOnlyList<WireTopicInfo> Topics)
+{
+    /// <summary>The brokers the metadata names: the cluster answered, with this many brokers (D50's cluster status).</summary>
+    public IReadOnlyList<WireNode> Brokers { get; init; } = [];
+}
 
 /// <summary>A topic with the operations this principal may perform on it (KIP-430).</summary>
 /// <param name="Name">The topic's name.</param>
@@ -165,7 +169,18 @@ internal sealed record WireGroupOffset(WirePartition Partition, long? Committed,
 /// <param name="State">The state's name (<c>Stable</c>, <c>Empty</c>, ...).</param>
 /// <param name="MemberCount">How many members the group has.</param>
 /// <param name="PartitionAssignor">The assignor, when known.</param>
-internal sealed record WireGroupDescription(string GroupId, string State, int MemberCount, string? PartitionAssignor);
+internal sealed record WireGroupDescription(string GroupId, string State, int MemberCount, string? PartitionAssignor)
+{
+    /// <summary>The group's members with their assignments, as the describe answered them (D50).</summary>
+    public IReadOnlyList<WireGroupMember> Members { get; init; } = [];
+}
+
+/// <summary>One member of a group, as a group description lists it.</summary>
+/// <param name="MemberId">The member id the coordinator gave it.</param>
+/// <param name="ClientId">The member's <c>client.id</c>.</param>
+/// <param name="Host">The member's address as the coordinator sees it.</param>
+/// <param name="Assignment">The partitions assigned to it; none for a member that stands by.</param>
+internal sealed record WireGroupMember(string MemberId, string ClientId, string Host, IReadOnlyList<WirePartition> Assignment);
 
 /// <summary>The kind of timestamp a record carries.</summary>
 internal enum WireTimestampType

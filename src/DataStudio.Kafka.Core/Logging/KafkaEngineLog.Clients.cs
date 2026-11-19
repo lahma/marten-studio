@@ -34,6 +34,9 @@ internal static partial class KafkaEngineLog
     [LoggerMessage(EventId = 9664, Level = LogLevel.Debug, Message = "Data Studio could not dispose the {Kind} client of cluster {Cluster}: {ExceptionKind}")]
     public static partial void AdminClientDisposeFailed(ILogger logger, string kind, string cluster, string exceptionKind);
 
+    [LoggerMessage(EventId = 9680, Level = LogLevel.Debug, Message = "Data Studio replaced the {Kind} client of cluster {Cluster} after {Code}: the group coordinator it knew has moved")]
+    public static partial void AdminClientReplaced(ILogger logger, string kind, string cluster, string code);
+
     [LoggerMessage(EventId = 9662, Level = LogLevel.Debug, Message = "Data Studio is stopping {Count} scans")]
     public static partial void ShutdownStarted(ILogger logger, int count);
 

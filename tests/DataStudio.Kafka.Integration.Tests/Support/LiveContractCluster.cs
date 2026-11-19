@@ -228,6 +228,52 @@ internal sealed class LiveContractCluster : IContractCluster
         }
     }
 
+    public Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic)
+    {
+        // The partitions from the all-topics metadata: a single-topic request is the one that can create a topic (D37).
+        int partitions;
+
+        using (IAdminClient check = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build())
+        {
+            partitions = check.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Single(x => x.Topic == topic).Partitions.Count;
+        }
+
+        ConsumerConfig config = new(fixture.Client("admin"))
+        {
+            GroupId = group,
+            ClientId = clientId,
+            EnableAutoCommit = false,
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            AllowAutoCreateTopics = false,
+        };
+
+        IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
+
+        try
+        {
+            consumer.Subscribe(topic);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+
+            // The rebalance completes inside Consume: poll, a wait on a condition (every partition assigned), bounded at 60 seconds.
+            while (consumer.Assignment.Count < partitions)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException($"Group {group} did not assign the {partitions} partitions of {topic} to {clientId}.");
+                }
+
+                consumer.Consume(TimeSpan.FromMilliseconds(100));
+            }
+
+            return Task.FromResult<IAsyncDisposable>(new LiveMembership(consumer));
+        }
+        catch
+        {
+            consumer.Dispose();
+            throw;
+        }
+    }
+
     private static bool IsCoordinatorNotReady(ErrorCode code) =>
         code is ErrorCode.NotCoordinatorForGroup or ErrorCode.GroupLoadInProgress or ErrorCode.GroupCoordinatorNotAvailable;
 
@@ -280,6 +326,23 @@ internal sealed class LiveContractCluster : IContractCluster
             Headers = headers,
             Timestamp = new Timestamp(record.TimestampMs, TimestampType.CreateTime),
         };
+    }
+
+    private sealed class LiveMembership(IConsumer<byte[], byte[]> consumer) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            try
+            {
+                consumer.Close();
+            }
+            finally
+            {
+                consumer.Dispose();
+            }
+
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class LiveTransaction(IProducer<byte[], byte[]> producer, Func<Task> settled) : IContractTransaction

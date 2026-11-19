@@ -32,33 +32,47 @@ public class PublicApiTest
 
     /// <summary>
     /// The engine's public types by name, so an extra one fails with its name rather than a diff. ENG-A's (decision 1.5): the options, the
-    /// two builders and the key formats; ENG-B adds the decoder extension point; ENG-E the partitioner; INDEX the host's record index (D48) and the four types its one method takes and returns.
+    /// two builders and the key formats; ENG-B adds the decoder extension point; ENG-E the partitioner; INDEX the host's record index (D48) and the four types its one method takes and returns; D50 the diagnostics
+    /// API and its read model.
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_and_the_extension_points()
     {
         Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().Equal(
+            "DataStudio.Kafka.IKafkaDiagnostics",
             "DataStudio.Kafka.IKafkaRecordDecoder",
             "DataStudio.Kafka.IKafkaRecordIndex",
             "DataStudio.Kafka.KafkaClusterBuilder",
+            "DataStudio.Kafka.KafkaClusterStatus",
             "DataStudio.Kafka.KafkaCorrelationBuilder",
             "DataStudio.Kafka.KafkaCorrelationField",
             "DataStudio.Kafka.KafkaDecodeContext",
             "DataStudio.Kafka.KafkaDecodeResult",
             "DataStudio.Kafka.KafkaDecoders",
             "DataStudio.Kafka.KafkaEngineOptions",
+            "DataStudio.Kafka.KafkaGroupMember",
+            "DataStudio.Kafka.KafkaGroupPartition",
+            "DataStudio.Kafka.KafkaGroupStatus",
             "DataStudio.Kafka.KafkaHeader",
             "DataStudio.Kafka.KafkaIndexAnswer",
             "DataStudio.Kafka.KafkaIndexField",
             "DataStudio.Kafka.KafkaIndexHint",
             "DataStudio.Kafka.KafkaIndexQuery",
             "DataStudio.Kafka.KafkaKeyFormat",
+            "DataStudio.Kafka.KafkaMemberPlace",
+            "DataStudio.Kafka.KafkaMemberState",
+            "DataStudio.Kafka.KafkaPartitionOffsets",
             "DataStudio.Kafka.KafkaPartitioner",
             "DataStudio.Kafka.KafkaProfile",
+            "DataStudio.Kafka.KafkaReadOutcome",
+            "DataStudio.Kafka.KafkaReadProblem",
             "DataStudio.Kafka.KafkaRedactionBuilder",
             "DataStudio.Kafka.KafkaRedactionRule",
             "DataStudio.Kafka.KafkaScanLimits",
-            "DataStudio.Kafka.KafkaTopicBuilder");
+            "DataStudio.Kafka.KafkaTopicBuilder",
+            "DataStudio.Kafka.KafkaTopicPartition",
+            "DataStudio.Kafka.KafkaTopicPresence",
+            "DataStudio.Kafka.KafkaTopicStatus");
     }
 
     /// <summary>
