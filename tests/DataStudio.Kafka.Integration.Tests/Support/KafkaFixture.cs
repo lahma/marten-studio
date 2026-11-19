@@ -101,7 +101,9 @@ public abstract class KafkaFixture : IAsyncLifetime
     /// <param name="image">The image.</param>
     /// <param name="reuse">Whether to ask for reuse; the reuse hash does not depend on it.</param>
     /// <param name="packet">The agent packet, for the <c>kstudio.packet</c> label; <see langword="null" /> adds none.</param>
-    public static KafkaContainer CreateContainer(string image, bool reuse, string? packet)
+    /// <param name="hostPort">A host port to bind the broker's to, for a test that restarts the container (Docker gives a random one a new number
+    /// at every start, and the advertised listener names the old one); <see langword="null" /> lets Docker choose.</param>
+    public static KafkaContainer CreateContainer(string image, bool reuse, string? packet, int? hostPort = null)
     {
         string users = string.Concat(UserNames.Select(static x => $" user_{x}=\"{Password(x)}\""));
         string jaas = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\"" + users + ";";
@@ -141,6 +143,11 @@ public abstract class KafkaFixture : IAsyncLifetime
             builder = builder.WithLabel("kstudio.packet", packet);
         }
 
+        if (hostPort is { } port)
+        {
+            builder = builder.WithPortBinding(port, KafkaBuilder.KafkaPort);
+        }
+
         return builder.Build();
     }
 
@@ -171,7 +178,7 @@ public abstract class KafkaFixture : IAsyncLifetime
             return;
         }
 
-        container = CreateContainer(Image, Reuse, Environment.GetEnvironmentVariable(PacketEnvironmentVariable));
+        container = CreateContainer(Image, Reuse, Environment.GetEnvironmentVariable(PacketEnvironmentVariable), HostPort);
         await container.StartAsync();
         Bootstrap = $"{container.Hostname}:{container.GetMappedPublicPort(KafkaBuilder.KafkaPort)}";
         volumes = await DockerCli.VolumesOfAsync(container.Id);
@@ -204,6 +211,12 @@ public abstract class KafkaFixture : IAsyncLifetime
             await DockerCli.RemoveVolumesAsync(volumes);
         }
     }
+
+    /// <summary>The host port the broker is bound to; <see langword="null" /> (a port Docker chooses) unless a derived fixture restarts the broker.</summary>
+    protected virtual int? HostPort => null;
+
+    /// <summary>The container's id, once it is running.</summary>
+    public string ContainerId => container?.Id ?? throw new InvalidOperationException("The broker is not running.");
 
     /// <summary>Whether this instance asks for a reusable container; <see cref="ShouldReuse" /> unless a derived fixture needs a broker of its own.</summary>
     protected virtual bool Reuse => ShouldReuse;
@@ -313,6 +326,37 @@ public sealed class FreshKafkaFixture(string image) : KafkaFixture(image)
     protected override bool WarmUpCoordinator => false;
 }
 
+/// <summary>
+/// A broker of its own that a test stops and starts again, as <c>docker stop</c> and <c>docker start</c> do (issue #97): never reused, bound to a
+/// host port picked when the fixture is built so that its advertised address survives the restart.
+/// </summary>
+/// <param name="image">The image.</param>
+public sealed class RestartableKafkaFixture(string image) : KafkaFixture(image)
+{
+    private readonly int hostPort = FreePort();
+
+    /// <inheritdoc />
+    protected override bool Reuse => false;
+
+    /// <inheritdoc />
+    protected override int? HostPort => hostPort;
+
+    private static int FreePort()
+    {
+        System.Net.Sockets.TcpListener listener = new(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+
+        try
+        {
+            return ((System.Net.IPEndPoint) listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+}
+
 /// <summary>The xunit collections that give each image one broker for every live class on it.</summary>
 public static class KafkaCollections
 {
@@ -328,7 +372,17 @@ public static class KafkaCollections
     /// broker of its own, which a reusing run attaches to the same container as <see cref="V4" />'s.
     /// </summary>
     public const string V4Alone = "kafka-4-alone";
+
+    /// <summary>
+    /// A collection that runs alone and has no fixture: a class in it starts, stops and restarts a broker of its own, and measures how long a
+    /// read takes to recover, which another class's load would blur (<c>BrokerRestartGroupReadLiveTests</c>).
+    /// </summary>
+    public const string Restart = "kafka-restart";
 }
+
+/// <summary>Classes that restart a broker of their own, one at a time and after every parallel collection has finished.</summary>
+[CollectionDefinition(KafkaCollections.Restart, DisableParallelization = true)]
+public sealed class KafkaRestartGroup;
 
 /// <summary>Kafka 3.9: one broker for every class in the collection.</summary>
 [CollectionDefinition(KafkaCollections.V39)]
@@ -375,6 +429,14 @@ internal static class DockerCli
         string output = await RunAsync("inspect", "--format", "{{range .Mounts}}{{if .Name}}{{.Name}} {{end}}{{end}}", containerId);
         return output.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
+
+    /// <summary>Stops a container, as <c>docker stop</c> does (a graceful stop, then a kill after ten seconds).</summary>
+    /// <param name="containerId">The container.</param>
+    public static async Task StopAsync(string containerId) => await RunAsync("stop", containerId);
+
+    /// <summary>Starts a stopped container again, as <c>docker start</c> does.</summary>
+    /// <param name="containerId">The container.</param>
+    public static async Task StartAsync(string containerId) => await RunAsync("start", containerId);
 
     /// <summary>Removes volumes; one that is already gone is not an error.</summary>
     /// <param name="volumes">The volumes' names.</param>
