@@ -319,7 +319,7 @@ statement. Grant `RunSql` to people you would give `psql` to, and set `SqlConsol
 ## Options
 
 The shell's options (`DataStudioOptions`: `Path`, `Title`, `ApplicationPath`, `AuthorizationPolicy`, `ReadOnly` and
-`RefreshInterval`) are set in `AddDataStudio(...)` and described in the [README](../README.md#options). The module's are
+`RefreshInterval`) are set in `AddDataStudio(...)` and described in [setup.md](setup.md#options). The module's are
 every property of `PostgresOptions`, set in `.AddPostgres(...)`:
 
 | Option | Default | Bounds and notes |

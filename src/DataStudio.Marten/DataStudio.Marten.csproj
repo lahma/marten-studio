@@ -18,7 +18,7 @@
     framework by construction: a component's [Parameter] properties are set by name from the render
     tree, and the document viewer deserializes into types discovered from IDocumentType.DocumentType
     at run time. Marking this IsTrimmable would tell a trimmer it may cut into a graph nothing
-    statically references. README.md says the same for anyone reading on nuget.org.
+    statically references. docs/setup.md (Hosting notes) says the same for a host.
   -->
   <PropertyGroup>
     <IsTrimmable>false</IsTrimmable>

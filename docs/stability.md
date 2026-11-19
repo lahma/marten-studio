@@ -52,7 +52,7 @@ These are about safety, not about compatibility, and no release trades them away
 
 | | Supported | Tested |
 |---|---|---|
-| .NET | `net10.0` | .NET 10; on .NET 11.0 (GA, 11.0.0) the studio runs in a Release build of the host and in a Debug build with the 11 SDK. On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](../README.md#hosting-notes) |
+| .NET | `net10.0` | .NET 10; on .NET 11.0 (GA, 11.0.0) the studio runs in a Release build of the host and in a Debug build with the 11 SDK. On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](setup.md#hosting-notes) |
 | Marten (the Marten module) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (the Postgres module, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
 | PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |
