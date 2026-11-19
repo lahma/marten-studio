@@ -107,6 +107,11 @@ public abstract class KafkaFixture : IAsyncLifetime
         string jaas = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\"" + users + ";";
 
         KafkaBuilder builder = new KafkaBuilder(image)
+            // The vendor is named, not left for the builder to read from the image name. Testcontainers.Kafka 4.15.0 finds an unnamed
+            // vendor with `enumValue.Equals(nullableEnum)`, which .NET 11.0.0 answers with a NullReferenceException once the code is
+            // optimised (dotnet/runtime#137270): the first containers of a process build, and a later one throws. Naming the vendor
+            // keeps the nullable out of that call. Remove this line when the Testcontainers.Kafka in use has testcontainers-dotnet#1830.
+            .WithVendor(KafkaVendor.ApacheSoftwareFoundation)
             .WithEnvironment("KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", "BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT:SASL_PLAINTEXT")
             .WithEnvironment("KAFKA_SASL_ENABLED_MECHANISMS", "PLAIN")
             .WithEnvironment("KAFKA_LISTENER_NAME_PLAINTEXT_SASL_ENABLED_MECHANISMS", "PLAIN")
