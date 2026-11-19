@@ -1,6 +1,6 @@
 # Testing
 
-This is the full text of D16, D19 and the description of the seven kinds of test. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D16, D19 and the description of the seven kinds of test. `tests/AGENTS.md` states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D16
 

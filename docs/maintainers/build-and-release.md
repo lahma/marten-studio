@@ -1,6 +1,6 @@
 # Build, packages and release
 
-This is the full text of D3, D21, the *Package budget changes* and *Held deliberately* subsections, and the *Build* and *Release engineering* sections (their command blocks and the CHANGELOG paragraph stay in AGENTS.md). AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D3, D21, the *Package budget changes* and *Held deliberately* subsections, and the *Build* and *Release engineering* sections (their command blocks and the CHANGELOG paragraph stay in `build/AGENTS.md`, which also holds the *Package budget* table). The root `AGENTS.md` and `build/AGENTS.md` state each rule in brief; this document holds the detail and wins where they differ.
 
 ## D3
 

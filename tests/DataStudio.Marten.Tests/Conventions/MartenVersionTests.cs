@@ -70,10 +70,9 @@ public class MartenVersionTests
     [Fact]
     public void AGENTS_md_states_the_floor_and_the_latest_tested_version()
     {
-        var agents = File.ReadAllText(RepositoryRoot.Combine("AGENTS.md"));
-
-        agents.Should().Contain($"(`Marten`, floor `{Floor}`", "D3 names the floor");
-        agents.Should().Contain($"| `Marten` | `{Floor}` (latest tested `{Latest}`) |",
+        File.ReadAllText(RepositoryRoot.Combine("AGENTS.md")).Should().Contain($"(`Marten`, floor `{Floor}`", "D3 names the floor");
+        File.ReadAllText(RepositoryRoot.Combine("build", "AGENTS.md")).Should().Contain(
+            $"| `Marten` | `{Floor}` (latest tested `{Latest}`) |",
             "the package budget row names both versions");
     }
 

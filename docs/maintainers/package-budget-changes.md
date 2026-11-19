@@ -1,6 +1,6 @@
 # Package budget changes
 
-The dated entries behind `AGENTS.md`'s *Package budget* table, oldest first. Hard rule 1 requires a new entry here
+The dated entries behind the *Package budget* table of `build/AGENTS.md`, oldest first. Hard rule 1 requires a new entry here
 before any new package is referenced, and every floor or latest-tested move adds one. Moved from `AGENTS.md` on 2026-10-26.
 
 **2026-09-14 — initial budget.** Everything in the table above, taken at once as the bootstrap commit.

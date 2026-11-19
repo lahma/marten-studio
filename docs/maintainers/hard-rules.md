@@ -1,6 +1,6 @@
 # Hard rules
 
-This is the full text of hard rules 1 to 17. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ. In rule 1, 'this file' and 'below' mean AGENTS.md. Where a rule names a studio's module it names the module, as 2.0 does: **Marten**, **Postgres** and **Kafka** attach to the one shell, **Data Studio** (`DataStudio`), and the engines are `DataStudio.Postgres.Diagnostics` and `DataStudio.Kafka.Core`.
+This is the full text of hard rules 1 to 17. The root `AGENTS.md` and the area files (`src/DataStudio.Marten/AGENTS.md` and its like, which the root's table *Where the rules live* lists) state each rule in brief, each rule in one of them; this document holds the detail and wins where they differ. In rule 1, 'this file' and 'below' mean the package budget in `build/AGENTS.md`. Where a rule names a studio's module it names the module, as 2.0 does: **Marten**, **Postgres** and **Kafka** attach to the one shell, **Data Studio** (`DataStudio`), and the engines are `DataStudio.Postgres.Diagnostics` and `DataStudio.Kafka.Core`.
 
 ## Hard rules 1-17
 
