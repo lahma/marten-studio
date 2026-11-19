@@ -347,6 +347,23 @@ internal sealed class ConfluentWire(
         CancellationToken cancellationToken) =>
         Leased(pool, call, resource, run, cancellationToken);
 
+    /// <summary>
+    /// Gives a call's lease back when the call has ended: a client that was answered with a stale coordinator is retired first, so the
+    /// next call builds one that looks the coordinator up afresh (D50). A method of its own so that a test holds the retire to this place.
+    /// </summary>
+    /// <param name="done">The call, completed.</param>
+    /// <param name="held">The lease the call ran on.</param>
+    internal static void Release<TClient, T>(Task<WireResult<T>> done, KafkaAdminPool<TClient>.Lease held)
+        where TClient : class, IDisposable
+    {
+        if (done.IsCompletedSuccessfully && StaleCoordinator(done.Result.Error) is { } code)
+        {
+            held.Retire(code);
+        }
+
+        held.Dispose();
+    }
+
     /// <summary>The same, over any pool: the lag read leases the offsets reader, every other call the admin client.</summary>
     private async Task<WireResult<T>> Leased<TClient, T>(
         KafkaAdminPool<TClient> clients,
@@ -381,18 +398,7 @@ internal sealed class ConfluentWire(
         }
 
         _ = work.ContinueWith(
-            static (done, state) =>
-            {
-                KafkaAdminPool<TClient>.Lease held = (KafkaAdminPool<TClient>.Lease) state!;
-
-                // A client that was answered with a stale coordinator is replaced before its lease goes back (D50).
-                if (done.IsCompletedSuccessfully && StaleCoordinator(done.Result.Error) is { } code)
-                {
-                    held.Retire(code);
-                }
-
-                held.Dispose();
-            },
+            static (done, state) => Release(done, (KafkaAdminPool<TClient>.Lease) state!),
             lease,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,

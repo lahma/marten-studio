@@ -98,7 +98,8 @@ public class StudioPreferencesBrowserZoneTests
     [Fact]
     public void A_browser_that_reports_a_legacy_spelling_selects_and_marks_the_current_name_and_stores_nothing()
     {
-        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
+        // Only the current name has to be known: a host whose zone data has no legacy spellings is where this used to fail.
+        Assert.SkipUnless(Finds("Asia/Kolkata"), "This host's zone data does not have Asia/Kolkata.");
 
         StudioPreferences preferences = Preferences();
         long version = preferences.PreferenceVersion;

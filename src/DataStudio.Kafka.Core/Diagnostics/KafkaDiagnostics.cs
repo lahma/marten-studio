@@ -240,7 +240,11 @@ internal sealed class KafkaDiagnostics(
                 (long? end, WireError? endError) = Offset(ends, partition);
                 (long? first, WireError? firstError) = Offset(starts, partition);
                 long? at = position?.Error is null ? position?.Committed : null;
-                WireError? partitionError = committed.Error is null && ends.Error is null && starts.Error is null ? position?.Error ?? endError ?? firstError : null;
+
+                // The first offset matters only where nothing is committed: its failure alone leaves a partition with a commit as it was read.
+                WireError? partitionError = committed.Error is null && ends.Error is null
+                    ? position?.Error ?? endError ?? (at is null ? firstError : null)
+                    : null;
 
                 return new KafkaGroupPartition
                 {
@@ -255,7 +259,7 @@ internal sealed class KafkaDiagnostics(
             }),
         ];
 
-        return new TopicPositions(topic, rows, committed.Error ?? ends.Error ?? starts.Error);
+        return new TopicPositions(topic, rows, committed.Error ?? ends.Error);
     }
 
     /// <summary>A topic's partitions from the metadata, or <see langword="null" /> with the error that withheld them.</summary>
@@ -364,6 +368,6 @@ internal sealed class KafkaDiagnostics(
         KafkaEngineLog.DiagnosticsRead(loggers.Catalog, read, key, outcome);
     }
 
-    /// <summary>One topic's rows, and the error that withheld its committed, first or end offsets as a whole.</summary>
+    /// <summary>One topic's rows, and the error that withheld its committed or end offsets as a whole.</summary>
     private sealed record TopicPositions(string Topic, IReadOnlyList<KafkaGroupPartition> Rows, WireError? Error);
 }

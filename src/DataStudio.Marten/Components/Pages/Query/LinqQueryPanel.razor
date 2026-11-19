@@ -589,8 +589,12 @@
         });
     }
 
+    private bool disposed;
+
     public async ValueTask DisposeAsync()
     {
+        disposed = true;
+
         State.ScopeChanged -= OnScopeChangedAsync;
 
         if (orderByRegisteredFor is not null)
@@ -896,6 +900,13 @@
     {
         where = text;
         await ReadOrderByAsync();
+
+        // Reading the box is a round trip: a visitor who left the page within it disposed this panel, and nothing runs on it.
+        if (disposed)
+        {
+            return;
+        }
+
         await NotifyAsync();
         await ExecuteAsync(offset: 0);
     }

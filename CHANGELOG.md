@@ -16,7 +16,7 @@ Nothing a host writes changes.
 - A group read (the group's description, or its committed offsets) answered `NotCoordinatorForGroup` or
   `GroupCoordinatorNotAvailable` now replaces the client it ran on, so the next read looks the coordinator up afresh: librdkafka's
   admin API keeps a coordinator it looked up for as long as the client is used, and a page left open kept asking a broker that no
-  longer coordinated the group. Event 9680 (Debug) names the cluster and the code.
+  longer coordinated the group. A cluster's client is replaced at most once in 30 seconds. Event 9680 (Debug) names the cluster and the code.
 - New log events, both Debug: 9680 (a client replaced after a stale coordinator) and 9681 (a diagnostics API read: the read, the
   cluster and the outcome's code).
 - Text typed on a slow connection stays as typed. The answer to a keystroke could arrive after later keystrokes and put
@@ -49,6 +49,9 @@ Nothing a host writes changes.
   are documents of their own, unchanged: `docs/setup.md` (packages, registration, options, tenancy, hosting),
   `docs/authorization.md`, `docs/screens.md`, `docs/sample.md`, `docs/limits.md` and `docs/building.md`. A link into the
   old README's `#options` or `#hosting-notes` now belongs in `docs/setup.md`.
+- A time zone has one name wherever a sentence names it. The Kafka window labels a Windows zone that has no IANA name by its
+  display name ("Alberta (UTC-06:00)") where it showed the offset alone, and the tooltips that say which zone a time is
+  shown in no longer print a raw Windows id such as "FLE Standard Time".
 - For maintainers: two browser tests type over a circuit whose answers are held back; `TypedTextIsBoundTests` keeps a
   hand-written `value` with `@oninput` out of `src/`; the display-version scan reads code files, any receiver and a
   time inside quotes; the Rebuild dialog tests type the phrase the dialog asks for.

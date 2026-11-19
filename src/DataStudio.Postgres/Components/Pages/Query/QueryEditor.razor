@@ -294,6 +294,8 @@
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
+        disposed = true;
+
         try
         {
             if (registered)
@@ -323,26 +325,34 @@
 
     private async Task RunClickAsync()
     {
-        await CommitLiveAsync();
-        await OnRun.InvokeAsync(Value ?? string.Empty);
+        if (await CommitLiveAsync())
+        {
+            await OnRun.InvokeAsync(Value ?? string.Empty);
+        }
     }
 
     private async Task SaveClickAsync()
     {
-        await CommitLiveAsync();
-        await OnSave.InvokeAsync(Value ?? string.Empty);
+        if (await CommitLiveAsync())
+        {
+            await OnSave.InvokeAsync(Value ?? string.Empty);
+        }
     }
 
     private async Task ExplainClickAsync()
     {
-        await CommitLiveAsync();
-        await OnExplain.InvokeAsync(Value ?? string.Empty);
+        if (await CommitLiveAsync())
+        {
+            await OnExplain.InvokeAsync(Value ?? string.Empty);
+        }
     }
 
     private async Task ExplainAnalyzeClickAsync()
     {
-        await CommitLiveAsync();
-        await OnExplainAnalyze.InvokeAsync(Value ?? string.Empty);
+        if (await CommitLiveAsync())
+        {
+            await OnExplainAnalyze.InvokeAsync(Value ?? string.Empty);
+        }
     }
 
     /// <summary>
@@ -350,16 +360,31 @@
     /// when the text differs from what the box held when it was entered; after a chord ran other text and the visitor put the first text
     /// back, it does not, and the copy held here is the chord's. Without the script or the circuit, the copy held here stands.
     /// </summary>
-    private async Task CommitLiveAsync()
+    /// <returns>
+    /// Whether the editor is still on the page. Reading the box is a round trip, and a visitor who leaves the page within it has
+    /// disposed the editor and its owner: the button then acts on nothing, where acting would run on a disposed panel.
+    /// </returns>
+    private async Task<bool> CommitLiveAsync()
     {
         try
         {
-            await CommitAsync(await JsRuntime.InvokeAsync<string?>("martenStudio.query.readValue", new object?[] { textArea }));
+            string? live = await JsRuntime.InvokeAsync<string?>("martenStudio.query.readValue", new object?[] { textArea });
+
+            if (disposed)
+            {
+                return false;
+            }
+
+            await CommitAsync(live);
         }
         catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
         }
+
+        return !disposed;
     }
+
+    private bool disposed;
 
     private async Task CommitAsync(string? value)
     {
