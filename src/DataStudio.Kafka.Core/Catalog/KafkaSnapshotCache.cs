@@ -6,11 +6,22 @@ namespace DataStudio.Kafka.Core.Catalog;
 /// One read per interval, however many tabs are watching: a port of the studios' <c>StudioSnapshotCache</c> (decision 5.3).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Single flight: concurrent callers for one key share one in-flight task. The work runs under <see cref="CancellationToken.None" /> and
 /// each caller waits through <c>WaitAsync(token)</c>, so one tab navigating away never cancels the read the others wait on. A faulted or
 /// cancelled entry is removed. <b>Authorization is never part of a key</b>: the Kafka module asks its cluster policy before it calls, and the
 /// engine answers only what the broker allows this application's principal. The time-to-live is per call, so the 60-second entries
 /// (configs, authorized operations, the cluster description) and the refresh-interval entries share one cache.
+/// </para>
+/// <para>
+/// <b>One read per key at a time.</b> The time-to-live decides how long a <em>completed</em> value is reused, counted from when the entry was created;
+/// an entry whose read is still running is shared until the read completes, however old it is. A slow read is therefore shared and never doubled: a
+/// group read that times out after the request timeout (10 seconds) against a refresh interval of 5 would otherwise start a second read of the same
+/// key beside the first, on the same client, and a client a group call has timed out on is replaced (D50) but disposed only when its last call ends,
+/// so a doubled read keeps it alive past the broker's return, which is when it crashes the process (D36). The price is that a factory that never
+/// completes would hold its key for good: every caller is a wire call bounded by the request timeout (see <see cref="KafkaWireReads" />), and a
+/// caller added here must be bounded the same way.
+/// </para>
 /// </remarks>
 internal sealed class KafkaSnapshotCache(TimeProvider timeProvider)
 {
@@ -97,18 +108,15 @@ internal sealed class KafkaSnapshotCache(TimeProvider timeProvider)
 
     private static bool IsUsable(Entry entry, DateTimeOffset now)
     {
-        if (now - entry.CreatedAt >= entry.TimeToLive)
-        {
-            return false;
-        }
-
-        if (!entry.Work.IsValueCreated)
+        // One read per key at a time: an entry whose read is still running is shared whatever its age, so a read that outlasts its
+        // time-to-live (a group read that times out after the request timeout, against a refresh interval below it) is not doubled.
+        if (!entry.Work.IsValueCreated || !entry.Work.Value.IsCompleted)
         {
             return true;
         }
 
-        Task<object?> work = entry.Work.Value;
-        return !work.IsFaulted && !work.IsCanceled;
+        // A completed entry is reused for its time-to-live, counted from when the entry was created, and not when it faulted or was cancelled.
+        return now - entry.CreatedAt < entry.TimeToLive && !entry.Work.Value.IsFaulted && !entry.Work.Value.IsCanceled;
     }
 
     private void Prune(DateTimeOffset now)

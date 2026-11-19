@@ -159,6 +159,142 @@ public class KafkaSnapshotCacheTests
         sawCancellation.Should().BeFalse("the shared read runs under CancellationToken.None");
     }
 
+    /// <summary>
+    /// Issue #97: one read per key at a time. A read that outlasts its time-to-live (a group read that times out after the request timeout,
+    /// against a refresh interval below it) is shared with the caller that arrives after the interval, not doubled beside it.
+    /// </summary>
+    [Fact]
+    public async Task A_caller_after_the_time_to_live_shares_a_read_that_is_still_running()
+    {
+        ManualTimeProvider clock = new();
+        KafkaSnapshotCache cache = new(clock);
+        TaskCompletionSource<int> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        Task<int> first = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        Task<int> second = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        calls.Should().Be(1, "the first read is still running, so the key is held");
+        gate.SetResult(5);
+        (await first, await second).Should().Be((5, 5));
+        calls.Should().Be(1);
+    }
+
+    /// <summary>The time-to-live is counted from when the entry was created, so a read that took longer than it completes already expired.</summary>
+    [Fact]
+    public async Task After_a_slow_read_completes_its_expired_entry_is_read_again()
+    {
+        ManualTimeProvider clock = new();
+        KafkaSnapshotCache cache = new(clock);
+        TaskCompletionSource<int> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        Task<int> slow = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+        gate.SetResult(1);
+        await slow;
+
+        int again = await cache.GetAsync("k", OneSecond, _ => Task.FromResult(++calls), Token);
+
+        (calls, again).Should().Be((2, 2), "the completed entry is older than its time-to-live");
+    }
+
+    [Fact]
+    public async Task A_completed_entry_inside_its_time_to_live_is_served_after_a_slow_read_of_another_key()
+    {
+        ManualTimeProvider clock = new();
+        KafkaSnapshotCache cache = new(clock);
+        TaskCompletionSource<int> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        Task<int> slow = cache.GetAsync("slow", OneSecond, async _ => await gate.Task.Bounded(), Token);
+        await cache.GetAsync("fast", TimeSpan.FromMinutes(1), _ => Task.FromResult(++calls), Token);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        await cache.GetAsync("fast", TimeSpan.FromMinutes(1), _ => Task.FromResult(++calls), Token);
+
+        calls.Should().Be(1, "a held key does not hold another");
+        gate.SetResult(1);
+        await slow;
+    }
+
+    /// <summary>A caller that gives up leaves the read running, and the next caller, after the time-to-live, shares it.</summary>
+    [Fact]
+    public async Task A_caller_that_cancels_its_wait_leaves_the_read_running_and_the_next_caller_shares_it()
+    {
+        ManualTimeProvider clock = new();
+        KafkaSnapshotCache cache = new(clock);
+        TaskCompletionSource<int> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        using CancellationTokenSource leaving = new();
+
+        Task<int> abandoned = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, leaving.Token);
+
+        await leaving.CancelAsync();
+        Func<Task> awaiting = async () => await abandoned;
+        await awaiting.Should().ThrowAsync<OperationCanceledException>();
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        Task<int> next = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        calls.Should().Be(1, "the read the first caller left is still running, so the second shares it");
+        gate.SetResult(9);
+        (await next).Should().Be(9);
+    }
+
+    /// <summary>A read that faulted while others waited is still not served: the next caller reads again, at any age.</summary>
+    [Fact]
+    public async Task A_read_that_faulted_after_the_time_to_live_is_not_served()
+    {
+        ManualTimeProvider clock = new();
+        KafkaSnapshotCache cache = new(clock);
+        TaskCompletionSource<int> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        Task<int> failing = cache.GetAsync("k", OneSecond, async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Task<int> sharing = cache.GetAsync("k", OneSecond, _ => Task.FromResult(-1), Token);
+        gate.SetException(new InvalidOperationException("the cluster went away"));
+
+        Func<Task> first = async () => await failing;
+        Func<Task> second = async () => await sharing;
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        await second.Should().ThrowAsync<InvalidOperationException>("it shared the read that faulted");
+
+        int value = await cache.GetAsync("k", OneSecond, _ => Task.FromResult(++calls), Token);
+
+        (calls, value).Should().Be((2, 2));
+    }
+
     [Fact]
     public async Task Invalidating_a_prefix_drops_every_key_under_it()
     {
