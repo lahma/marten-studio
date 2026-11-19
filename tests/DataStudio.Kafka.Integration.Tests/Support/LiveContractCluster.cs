@@ -228,7 +228,13 @@ internal sealed class LiveContractCluster : IContractCluster
         }
     }
 
-    public Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic)
+    public Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic) => JoinGroupAsync(group, clientId, topic, protocol: null);
+
+    /// <summary>
+    /// Joins as <see cref="JoinGroupAsync(string, string, string)" /> does, under the group protocol given: <see cref="GroupProtocol.Consumer" />
+    /// is Kafka 4's own (KIP-848), where the broker assigns the partitions and describes the group through another request.
+    /// </summary>
+    public Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic, GroupProtocol? protocol)
     {
         // The partitions from the all-topics metadata: a single-topic request is the one that can create a topic (D37).
         int partitions;
@@ -246,6 +252,11 @@ internal sealed class LiveContractCluster : IContractCluster
             AutoOffsetReset = AutoOffsetReset.Earliest,
             AllowAutoCreateTopics = false,
         };
+
+        if (protocol is { } chosen)
+        {
+            config.GroupProtocol = chosen;
+        }
 
         IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
 
