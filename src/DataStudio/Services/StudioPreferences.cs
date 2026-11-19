@@ -27,7 +27,7 @@ internal sealed class StudioPreferences
     private readonly TimeProvider clock;
 
     private string selectedTheme = "system";
-    private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
+    private string selectedTimeZoneId = StudioTimeZones.CurrentName(TimeZoneInfo.Local.Id);
     private long preferenceVersion;
     private long displayVersion;
 
@@ -108,7 +108,7 @@ internal sealed class StudioPreferences
     public long DisplayVersion => Volatile.Read(ref displayVersion);
 
     /// <summary>
-    /// The IANA id of the time zone this circuit's browser reported (<c>Europe/Helsinki</c>), or <see langword="null" /> until it has and where the
+    /// The IANA id of the time zone this circuit's browser reported (<c>Europe/Helsinki</c>; under its current name, <c>Asia/Kolkata</c> for a browser that says <c>Asia/Calcutta</c>), or <see langword="null" /> until it has and where the
     /// visitor had chosen a zone of their own, which the browser is then not asked about. Never stored: only a choice in Preferences is.
     /// </summary>
     public string? BrowserTimeZoneId { get; private set; }
@@ -127,10 +127,14 @@ internal sealed class StudioPreferences
             return false;
         }
 
-        BrowserTimeZoneId = ianaId;
-        if (!string.Equals(selectedTimeZoneId, ianaId, StringComparison.Ordinal))
+        // Under its current name (#92): Chromium says Asia/Calcutta, and the circuit's zone, the select's entry and its "this browser" mark are all Asia/Kolkata -
+        // one zone under one name, so a spelling alone moves neither version.
+        string name = StudioTimeZones.CurrentName(ianaId);
+
+        BrowserTimeZoneId = name;
+        if (!string.Equals(selectedTimeZoneId, name, StringComparison.Ordinal))
         {
-            selectedTimeZoneId = ianaId;
+            selectedTimeZoneId = name;
             Interlocked.Increment(ref displayVersion);
         }
 
@@ -241,7 +245,9 @@ internal sealed class StudioPreferences
         try
         {
             _ = TimeZoneInfo.FindSystemTimeZoneById(candidate);
-            return candidate;
+
+            // A stored legacy spelling (Asia/Calcutta) is read as the current name (#92), so choosing or storing the same zone twice is no change.
+            return StudioTimeZones.CurrentName(candidate);
         }
         catch (TimeZoneNotFoundException)
         {

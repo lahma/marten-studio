@@ -76,4 +76,80 @@ public class StudioPreferencesBrowserZoneTests
         niue.Offset.Should().Be(TimeZoneInfo.FindSystemTimeZoneById("Pacific/Niue").GetUtcOffset(instant));
         (kiritimati.DateTime - niue.DateTime).Should().Be(kiritimati.Offset - niue.Offset, "the same instant reads as many hours apart as the two zones are, whatever this machine's own zone is");
     }
+
+    // ---- #92: a legacy spelling is the same zone as the current name ----------------------------------------------------------------
+
+    private static bool Finds(string id) => TimeZoneInfo.TryFindSystemTimeZoneById(id, out _);
+
+    /// <summary>A host that finds both spellings of a zone (every Linux with tzdata, and Windows with ICU); on one that does not there is nothing to alias.</summary>
+    private static bool HostKnowsBothSpellings => Finds("Asia/Calcutta") && Finds("Asia/Kolkata");
+
+    private static StudioPreferences PreferencesWithCookie(string zone)
+    {
+        DefaultHttpContext context = new();
+        context.Request.Headers.Cookie = StudioPreferences.TimeZonePreferenceKey + "=" + zone;
+
+        return new StudioPreferences(new HttpContextAccessor { HttpContext = context });
+    }
+
+    [Fact]
+    public void A_browser_that_reports_a_legacy_spelling_selects_and_marks_the_current_name_and_stores_nothing()
+    {
+        if (!HostKnowsBothSpellings)
+        {
+            return;
+        }
+
+        StudioPreferences preferences = Preferences();
+        long version = preferences.PreferenceVersion;
+
+        preferences.TryUseBrowserTimeZone("Asia/Calcutta").Should().BeTrue();
+
+        preferences.SelectedTimeZoneId.Should().Be("Asia/Kolkata");
+        preferences.BrowserTimeZoneId.Should().Be("Asia/Kolkata", "the entry the select marks is the one it lists");
+        preferences.PreferenceVersion.Should().Be(version);
+    }
+
+    [Fact]
+    public void A_stored_legacy_spelling_is_read_as_the_current_name_and_a_browser_answer_in_either_spelling_changes_nothing()
+    {
+        if (!HostKnowsBothSpellings)
+        {
+            return;
+        }
+
+        StudioPreferences preferences = PreferencesWithCookie("Asia/Calcutta");
+
+        preferences.SelectedTimeZoneId.Should().Be("Asia/Kolkata");
+
+        long display = preferences.DisplayVersion;
+        long version = preferences.PreferenceVersion;
+
+        preferences.TryUseBrowserTimeZone("Asia/Calcutta").Should().BeTrue();
+        preferences.TryUseBrowserTimeZone("Asia/Kolkata").Should().BeTrue();
+        preferences.SelectedTimeZoneId = "Asia/Calcutta";
+        preferences.SelectedTimeZoneId = "Asia/Kolkata";
+
+        preferences.SelectedTimeZoneId.Should().Be("Asia/Kolkata");
+        preferences.DisplayVersion.Should().Be(display, "a spelling alone is no change of the zone every time is drawn in");
+        preferences.PreferenceVersion.Should().Be(version, "and it is not an expression of the visitor's");
+    }
+
+    [Fact]
+    public void Choosing_the_current_name_stores_the_current_name_and_a_legacy_value_is_the_same_choice()
+    {
+        if (!HostKnowsBothSpellings)
+        {
+            return;
+        }
+
+        StudioPreferences preferences = Preferences();
+
+        preferences.SelectedTimeZoneId = "Asia/Calcutta";
+        long display = preferences.DisplayVersion;
+        preferences.SelectedTimeZoneId = "Asia/Kolkata";
+
+        preferences.SelectedTimeZoneId.Should().Be("Asia/Kolkata", "what is stored when a zone is picked is the current name");
+        preferences.DisplayVersion.Should().Be(display);
+    }
 }

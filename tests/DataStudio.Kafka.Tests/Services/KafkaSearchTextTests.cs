@@ -137,6 +137,17 @@ public class KafkaSearchTextTests
         KafkaSearchText.WindowLine(at, at.AddHours(1), unknown).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
     }
 
+    /// <summary>#92: the window's zone label asks the same function the Preferences list does, so a zone whose id is a legacy spelling reads under the current name where the host finds it.</summary>
+    [Fact]
+    public void A_legacy_IANA_spelling_reads_under_its_current_name_where_the_host_finds_one()
+    {
+        DateTimeOffset at = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+        TimeZoneInfo calcutta = TimeZoneInfo.CreateCustomTimeZone("Asia/Calcutta", new TimeSpan(5, 30, 0), "Calcutta", "Asia/Calcutta");
+        string expected = TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out _) ? "Asia/Kolkata" : "Asia/Calcutta";
+
+        KafkaSearchText.ZoneLabel(calcutta, at, "IN").Should().Be(expected + " (UTC+05:30)");
+    }
+
     [Fact]
     public void A_Windows_id_reads_as_the_IANA_id_it_converts_to_whatever_the_operating_system()
     {

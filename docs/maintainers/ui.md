@@ -143,9 +143,24 @@ Preferences is), no preference is counted as the visitor's (`PreferenceVersion` 
 browser was being asked still wins), and an id the server does not know, a call that failed (interop loss is caught with
 `StudioLiveUpdates.IsInteropUnavailable`) or a prerender leaves the server's zone. A visitor with a stored zone is never asked. The
 Preferences select always holds the circuit's zone under its own id, even where the host's list names the same zone otherwise (a
-Windows host names a zone by its region: "Europe/Kiev" for the Helsinki visitor's "Europe/Helsinki"), adds the browser's under its
+Windows host names a zone by its region: "Europe/Kyiv" for the Helsinki visitor's "Europe/Helsinki"), adds the browser's under its
 own id as well, and says "this browser" beside it ("Europe/Helsinki (UTC+02:00), this browser"). Every page formats through
 `StudioPreferences`, and the Kafka search's absolute window reads the same zone and the same label.
+
+**How the list names a zone (#80, #92), and which function decides.** A zone is listed under its IANA id: a Windows id is converted
+(`StudioTimeZones.IanaId`, the host's region first), and CLDR's legacy spellings are replaced by the current names from one closed
+table (`Asia/Calcutta` is `Asia/Kolkata`, `Europe/Kiev` is `Europe/Kyiv`, `America/Godthab` is `America/Nuuk`, and so on:
+`StudioTimeZones.CurrentName`), **only where `TimeZoneInfo.TryFindSystemTimeZoneById` finds a zone by the current name**; a host that
+cannot keeps the spelling it can read. `IanaId` applies it to every id it returns, so the select's values, the label of the selected
+zone and the Kafka window's zone label cannot differ. A stored zone or a browser answer in a legacy spelling still works and is the
+same entry: `StudioPreferences` keeps the current name (the cookie's `Asia/Calcutta` is read as `Asia/Kolkata`, and the select stores
+the current name), so there is no second entry, the "this browser" mark stays, and a spelling alone moves neither `DisplayVersion` nor
+`PreferenceVersion`. The two obsolete Windows zones (`Kamchatka Standard Time`, `Mid-Atlantic Standard Time`, by id, never by the
+localized display name) are not listed; a visitor whose stored or browser zone is one still gets it as an option of its own. A Windows
+zone with no IANA name (`British Columbia Standard Time`, which Windows hosts have and Linux hosts do not) is listed **after** the IANA
+ids, named by its display name without the system's `(UTC-07:00) ` prefix and followed by the studio's own offset ("Pacific Time
+(British Columbia) (UTC-07:00)"), with its id as the option's value, which the host reads back; a zone with no display name is named
+by its id. A host with no such zone lists as it did.
 
 **A zone change is a display change, never a scope change, and it draws every time on screen in one render pass.** However the
 circuit's zone moves (a choice in Preferences, a stored zone read once the circuit has started, the browser's own),
