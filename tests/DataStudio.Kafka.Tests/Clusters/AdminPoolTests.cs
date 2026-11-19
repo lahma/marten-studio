@@ -1,6 +1,7 @@
 using Confluent.Kafka;
 
 using DataStudio.Kafka.Core.Clusters;
+using DataStudio.Kafka.Core.Wire;
 using DataStudio.Kafka.Core.Wire.Confluent;
 using DataStudio.Kafka.Tests.Contract;
 using DataStudio.Kafka.Tests.Support.FakeKafka;
@@ -389,6 +390,43 @@ public class AdminPoolTests
         {
             other.Retire("NotCoordinatorForGroup").Should().BeTrue("the cooldown is each cluster's own");
         }
+    }
+
+    /// <summary>
+    /// 66sw (REVIEW-PR95 F4): the wire's own return of a lease is where a stale coordinator retires the client. A call answered
+    /// "not coordinator" or "coordinator not available" leaves the cluster a new client for the next call; any other answer keeps it.
+    /// </summary>
+    [Theory]
+    [InlineData("NotCoordinatorForGroup", 2)]
+    [InlineData("GroupCoordinatorNotAvailable", 2)]
+    [InlineData("GroupLoadInProgress", 1)]
+    [InlineData("RequestTimedOut", 1)]
+    public void The_wire_retires_the_client_a_stale_coordinator_answered_on_when_it_gives_the_lease_back(string code, int clients)
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+
+        ConfluentWire.Release(Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable(code, Retriable: true))), lease);
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().HaveCount(clients);
+    }
+
+    [Fact]
+    public void The_wire_keeps_the_client_of_a_call_that_answered()
+    {
+        Rig rig = new();
+
+        ConfluentWire.Release(Task.FromResult(WireResult<int>.Ok(1)), rig.Pool.Rent(Cluster("a")));
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().ContainSingle();
     }
 
     [Fact]

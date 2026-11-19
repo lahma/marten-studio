@@ -295,6 +295,26 @@ public class KafkaDiagnosticsTests
     }
 
     /// <summary>
+    /// REVIEW-B3-LAST F2: a committed offset that retention has passed counts from the first record the partition still holds, as a
+    /// partition with nothing committed does. What expired is not waiting.
+    /// </summary>
+    [Fact]
+    public async Task A_committed_offset_that_retention_has_passed_is_counted_from_the_partitions_first_offset()
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 1);
+        rig.Produce("orders", 0, 5);
+        rig.Fake.SetGroupMembers("billing", "Stable", Member("billing-a", new WirePartition("orders", 0)));
+        rig.Fake.Commit("billing", "orders", 0, 1);
+        rig.Fake.DeleteRecords("orders", 0, 5);
+
+        KafkaMemberPlace place = (await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders"], Token)).PlaceOf("billing-a");
+
+        place.State.Should().Be(KafkaMemberState.CaughtUp, "the four records after the commit have expired, and nothing is left to read");
+        place.RecordsWaiting.Should().Be(0);
+    }
+
+    /// <summary>
     /// v249: only the member's own partitions are judged. A topic the host named that cannot be read is a problem on the status, and
     /// says nothing about a member that owns no partition of it.
     /// </summary>

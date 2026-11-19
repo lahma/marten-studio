@@ -1110,7 +1110,7 @@ whether it lists each topic asked about); `GetTopicAsync` (each partition's firs
 `GetGroupAsync` (the group's state, its members with client id, host and assignment, and the committed offset, end offset, lag and owning member of every partition a
 member is assigned or the group has committed to on the topics asked about). `KafkaGroupStatus.PlaceOf(clientId)` says where one member stands: `Standby` (no
 partition), `CaughtUp`, `Behind` (with the records waiting), `NotAMember`, or `Unknown` (the group, or the offsets of a partition the member owns, could not be read: only the member's own partitions are judged, and a topic's problem is on each of its rows). It tells a quiet consumer from a
-stuck one, which a consumer that marks progress only when a record arrives cannot. A partition a member owns with no committed offset counts from the partition's first offset (`FirstOffset`, the same cached read the topic status makes), where a
+stuck one, which a consumer that marks progress only when a record arrives cannot. A committed offset that retention has passed, and a partition a member owns with no committed offset, count from the partition's first offset (`FirstOffset`, the same cached read the topic status makes), where a
 consumer that starts at the earliest record begins: records that have expired are not waiting. A cluster's client is retired at most once per 30 seconds (`KafkaAdminPool.RetireCooldown`), so a coordinator that keeps answering "not available" does not cost a client per refresh.
 
 *Reads, not seams.* As D31 says of the Postgres API, it is results: no wire, catalog, cache or client crosses it, and a host cannot add a read or change a cache. Every
@@ -1138,7 +1138,7 @@ used more often than its idle timeout keeps asking a broker that no longer coord
 description, or the committed offsets on the offsets reader) that is answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` therefore retires the client it
 ran on (`KafkaAdminPool.Retire`): the next call builds a new one and looks the coordinator up afresh, the retired client is disposed when its last lease is released (as
 at shutdown, and a shutdown waits for it), concurrent failures replace it once, and event **9680** (Debug) names the pool, the cluster and the code.
-`GroupLoadInProgress` is the right coordinator still loading and keeps the client. `AdminPoolTests` and `ConfluentErrorMappingTests` hold this.
+`GroupLoadInProgress` is the right coordinator still loading and keeps the client. `AdminPoolTests` holds the pool, the cooldown and the wire's return of a lease (`ConfluentWire.Release`, where the retire is), `ConfluentErrorMappingTests` which codes mean a stale coordinator, and `KafkaDiagnosticsApiIsNotServedTests` that nothing outside the API's folder and its registration names the API or its read model.
 
 *Proved on Kafka.* The member list and the broker list come from the wire (`WireGroupDescription.Members`, `WireMetadata.Brokers`), so the fake models them only as
 far as `WireContract` proves them on `apache/kafka` 3.9 and 4.x: a described group lists a joined member with its client id, host and partitions, and metadata names

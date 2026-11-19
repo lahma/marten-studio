@@ -184,7 +184,10 @@ public sealed record KafkaGroupStatus
     /// <summary>Every partition a member is assigned or the group has committed to on the topics asked about, in topic and partition order.</summary>
     public IReadOnlyList<KafkaGroupPartition> Partitions { get; init; } = [];
 
-    /// <summary>Why the committed or end offsets of a topic could not be read; a single partition's problem is on that partition.</summary>
+    /// <summary>
+    /// Why the committed or end offsets of a topic could not be read; a single partition's problem is on that partition, and so is a
+    /// first offset that could not be read where the group has committed nothing.
+    /// </summary>
     public KafkaReadProblem? OffsetsProblem { get; init; }
 
     /// <summary>
@@ -273,7 +276,12 @@ public sealed record KafkaGroupStatus
             }
 
             // Nothing committed: from the first record the partition still holds, never from offset 0, which retention may have long passed.
-            if ((row.CommittedOffset ?? row.FirstOffset) is not { } from)
+            // A committed offset that retention has passed counts from the first record too: what expired is not waiting.
+            long? start = row.CommittedOffset is { } committed
+                ? row.FirstOffset is { } first ? Math.Max(committed, first) : committed
+                : row.FirstOffset;
+
+            if (start is not { } from)
             {
                 return KafkaMemberPlace.Unknown($"the first offset of {owned.Topic} partition {owned.Partition} is not known, and the group has committed none");
             }

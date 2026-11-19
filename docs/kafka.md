@@ -403,7 +403,7 @@ public sealed class ConsumerHealthCheck(IKafkaDiagnostics kafka) : IHealthCheck
         KafkaMemberPlace place = group.PlaceOf("orders-service-1");
 
         return place.HasNothingToRead || place.State == KafkaMemberState.Behind
-            ? HealthCheckResult.Healthy($"{group.TotalLag} records behind")
+            ? HealthCheckResult.Healthy($"{place.RecordsWaiting ?? 0} records waiting")
             : HealthCheckResult.Degraded(place.Detail);
     }
 }
@@ -423,8 +423,8 @@ map the endpoint with a response writer that leaves descriptions out, or return 
 - `PlaceOf(clientId)` on a group says where one member stands: `Standby` (it has no partition, because the topics have fewer
   partitions than the group has members), `CaughtUp`, `Behind`, `NotAMember` (the coordinator removed it, or it never joined) or
   `Unknown` (the group, or the offsets of a partition the member owns, could not be read). It tells a quiet consumer from a stuck
-  one. A partition with no committed offset is counted from its first offset (`KafkaGroupPartition.FirstOffset`), so records
-  that have expired are not waiting.
+  one. A partition with no committed offset, or one whose committed offset retention has passed, is counted from its first offset
+  (`KafkaGroupPartition.FirstOffset`), so records that have expired are not waiting.
 
 A refusal, a missing topic or an unreachable cluster is a `KafkaReadProblem` on the part of the answer it withheld (its outcome,
 the client's error code and a sentence such as "Not available: needs `DESCRIBE` on group `orders-service`"), and the rest is still
