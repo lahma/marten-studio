@@ -81,6 +81,9 @@ internal static class KafkaEngineRegistration
         services.TryAddSingleton(static provider => new KafkaThroughputSamples(provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<KafkaWireReads>();
         services.TryAddSingleton<IKafkaCatalog, KafkaCatalog>();
+
+        // The host's own read of what the pages read (D50): public, resolved by host code, never by a page.
+        services.TryAddSingleton<IKafkaDiagnostics, DataStudio.Kafka.Core.Diagnostics.KafkaDiagnostics>();
         services.TryAddSingleton<WindowResolver>();
 
         DataStudio.Kafka.Core.Scanning.ScanningRegistration.Add(services);

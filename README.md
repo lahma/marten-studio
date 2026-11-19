@@ -1,7 +1,7 @@
 # Data Studio
 
 <!-- beta: remove at 2.0.0 -->
-> **Data Studio 2.0 is in beta** (`2.0.0-beta.2`), published for trial: names, addresses and options may still move before
+> **Data Studio 2.0 is in beta** (`2.0.0-beta.3`), published for trial: names, addresses and options may still move before
 > 2.0.0, and every package is installed with `--prerelease`. What is promised meanwhile is in [docs/stability.md](docs/stability.md).
 
 An embeddable Blazor Server admin UI for the data stores your ASP.NET Core application already uses, shipped as

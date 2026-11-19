@@ -59,4 +59,10 @@ internal interface IContractCluster : IAsyncDisposable
     /// matches the broker's. Records produced while waiting precede <see cref="AppendBatch.FirstOffset" />.
     /// </summary>
     Task<AppendBatch> ProduceAppendTimeAsync(string topic, int partition, int count, long afterMs);
+
+    /// <summary>
+    /// Starts a consumer of <paramref name="topic" /> in <paramref name="group" /> with <paramref name="clientId" /> and returns once the group
+    /// has assigned it every partition of the topic; disposing it leaves the group (D50's member list).
+    /// </summary>
+    Task<IAsyncDisposable> JoinGroupAsync(string group, string clientId, string topic);
 }

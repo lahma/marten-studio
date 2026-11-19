@@ -9,9 +9,9 @@ The packages always ship together, at one version, each depending on exactly its
 each checks at startup that the others are that version. Upgrade them together, and pin the version you tested.
 
 <!-- beta: remove at 2.0.0 -->
-**2.0 is in beta** (`2.0.0-beta.2`). A beta is published for trial in real projects: the safety promises below hold for it,
+**2.0 is in beta** (`2.0.0-beta.3`). A beta is published for trial in real projects: the safety promises below hold for it,
 and everything else, names, addresses and options included, may still move before `2.0.0`. Its packages are prereleases, so
-`dotnet add package` needs `--prerelease` and a central `PackageVersion` names the beta, `2.0.0-beta.2`, exactly.
+`dotnet add package` needs `--prerelease` and a central `PackageVersion` names the beta, `2.0.0-beta.3`, exactly.
 
 ## What holds
 

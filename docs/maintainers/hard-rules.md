@@ -96,8 +96,8 @@ This is the full text of hard rules 1 to 17. The root `AGENTS.md` and the area f
      of the Postgres module.
    - **`DataStudio.Kafka`** (`tests/DataStudio.Kafka.Tests`), one static class, two classes and one record:
      `KafkaDataStudioBuilderExtensions` (`AddKafka`), `KafkaOptions`, `KafkaCapabilities` and `KafkaTopicResource`.
-     **`DataStudio.Kafka.Core`**'s is its own, beside it: the builders, limits, decoders and the record-index seam, under
-     `Kafka…` names. **`DataStudio.Kafka.Wolverine`**'s (`tests/DataStudio.Kafka.Wolverine.Tests`) is one static class and
+     **`DataStudio.Kafka.Core`**'s is its own, beside it: the builders, limits, decoders, the record-index seam and D50's
+     `IKafkaDiagnostics` with its extend-only read model, under `Kafka…` names. **`DataStudio.Kafka.Wolverine`**'s (`tests/DataStudio.Kafka.Wolverine.Tests`) is one static class and
      one class, `KafkaWolverineExtensions` (`UseWolverineKafka`) and `KafkaWolverineOptions`.
 
    Anything else that appears in any baseline is a mistake, not a feature.

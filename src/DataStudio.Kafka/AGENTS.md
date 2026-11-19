@@ -2,7 +2,7 @@
 
 The [root AGENTS.md](../../AGENTS.md) applies here as everywhere: what the product is, its two constraints, the hard rules and decisions that hold in every directory, and the index of all of them. This file holds what applies only to the Kafka module, its engine and its Wolverine adapter. Rules and decisions keep their numbers wherever they live; each one's full text is in the topic document it names, which wins where they differ.
 
-**Read first.** The engine (`DataStudio.Kafka.Core`), reads, scans, predicates, decoders, redaction, the seams, the pages, authorization, capabilities and audit: [kafka.md](../../docs/maintainers/kafka.md) (D34-D48); the Kafka suites: [testing.md](../../docs/maintainers/testing.md); [hard-rules.md](../../docs/maintainers/hard-rules.md) rules 5, 6, 7, 16 and 17.
+**Read first.** The engine (`DataStudio.Kafka.Core`), reads, scans, predicates, decoders, redaction, the seams, the pages, authorization, capabilities and audit, the diagnostics API: [kafka.md](../../docs/maintainers/kafka.md) (D34-D48, D50); the Kafka suites: [testing.md](../../docs/maintainers/testing.md); [hard-rules.md](../../docs/maintainers/hard-rules.md) rules 5, 6, 7, 16 and 17.
 
 ## Hard rules
 
@@ -126,3 +126,10 @@ equality on the key, a header or a CloudEvents attribute, about the visitor's au
 partition's range inside the window; every record there is still judged, a hint about another topic is dropped unseen, a failure
 reads the whole window (9679, kind only), and a negative is said only of the ranges read, with "Search the whole window" beside it.
 Full text: [kafka.md](../../docs/maintainers/kafka.md#d48).
+
+**D50 — The Kafka diagnostics API: what the engine reads, for the host's own code, and never served by the studio.** `IKafkaDiagnostics`
+(public, in `DataStudio.Kafka.Core`, registered by `AddKafka()`) answers a cluster's broker count and listed topics, a topic's offsets and
+retention, and a group's members, assignments, committed and end offsets and lag (`PlaceOf` says where one member stands), through the
+pages' cached reads and pooled clients, with every refusal a value and no visitor's policy asked. A group call answered
+`NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` retires the client it ran on (9680); a call is event 9681 at Debug and is
+never audited or served. Full text: [kafka.md](../../docs/maintainers/kafka.md#d50).

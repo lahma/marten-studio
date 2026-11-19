@@ -145,6 +145,7 @@ internal sealed class FakeKafkaCluster(TimeProvider clock)
     private readonly Dictionary<string, FakeTopic> topics = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Group, string Topic, int Partition), long> committed = [];
     private readonly Dictionary<string, (string State, int Members)> groups = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<WireGroupMember>> members = new(StringComparer.Ordinal);
     private readonly HashSet<(KafkaAclOperation, KafkaResourceType, string)> denied = [];
     private readonly Dictionary<WireCall, Queue<WireError>> failures = [];
     private readonly List<FakeCall> calls = [];
@@ -251,6 +252,25 @@ internal sealed class FakeKafkaCluster(TimeProvider clock)
         lock (gate)
         {
             groups[group] = (state, members);
+            this.members.Remove(group);
+        }
+    }
+
+    /// <summary>A group with these members and their assignments, as a describe lists them (D50).</summary>
+    public void SetGroupMembers(string group, string state, params WireGroupMember[] groupMembers)
+    {
+        lock (gate)
+        {
+            groups[group] = (state, groupMembers.Length);
+            members[group] = [.. groupMembers];
+        }
+    }
+
+    public IReadOnlyList<WireGroupMember> GroupMembers(string group)
+    {
+        lock (gate)
+        {
+            return members.TryGetValue(group, out IReadOnlyList<WireGroupMember>? value) ? value : [];
         }
     }
 

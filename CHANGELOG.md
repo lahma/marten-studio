@@ -1,3 +1,22 @@
+# 2.0.0-beta.3
+
+2.0.0-beta.3 adds the Kafka engine's diagnostics API. All seven packages are at 2.0.0-beta.3. Nothing a host writes changes.
+
+- `IKafkaDiagnostics` (in `DataStudio.Kafka.Core`, registered by `AddKafka()`) gives the host's own code what the Kafka pages read,
+  without an admin client of its own: whether a cluster answers, its broker count and whether it lists the topics asked about
+  (`GetClusterAsync`); a topic's first and end offsets per partition, `retention.ms`, `retention.bytes` and `cleanup.policy`
+  (`GetTopicAsync`); and a consumer group's state, its members with their client ids, hosts and partitions, and the committed
+  offset, end offset, lag and owning member of each partition (`GetGroupAsync`). `KafkaGroupStatus.PlaceOf(clientId)` says whether
+  a member stands by, has caught up, is behind or is not a member at all. The reads go through the module's pooled clients and
+  single-flight caches and ask no visitor's policy; a refusal or an unreachable cluster is a `KafkaReadProblem` on the result,
+  never an exception, and nothing is served by the studio. Docs: [kafka.md](docs/kafka.md#diagnostics-api), D50.
+- A group read (the group's description, or its committed offsets) answered `NotCoordinatorForGroup` or
+  `GroupCoordinatorNotAvailable` now replaces the client it ran on, so the next read looks the coordinator up afresh: librdkafka's
+  admin API keeps a coordinator it looked up for as long as the client is used, and a page left open kept asking a broker that no
+  longer coordinated the group. Event 9680 (Debug) names the cluster and the code.
+- New log events, both Debug: 9680 (a client replaced after a stale coordinator) and 9681 (a diagnostics API read: the read, the
+  cluster and the outcome's code).
+
 # 2.0.0-beta.2
 
 2.0.0-beta.2 is the second beta of 2.0: it fixes what the first days of use found in beta.1 (#83 to #88) and two reports

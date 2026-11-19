@@ -17,6 +17,9 @@ internal static partial class KafkaEngineLog
     [LoggerMessage(EventId = 9659, Level = LogLevel.Debug, Message = "Data Studio could not read {Call} of cluster {Cluster}: {ExceptionKind}")]
     public static partial void CatalogReadFailed(ILogger logger, string call, string cluster, string exceptionKind);
 
+    [LoggerMessage(EventId = 9681, Level = LogLevel.Debug, Message = "Data Studio's diagnostics API read the {Read} of cluster {Cluster}: {Outcome}")]
+    public static partial void DiagnosticsRead(ILogger logger, string read, string cluster, string outcome);
+
     [LoggerMessage(EventId = 9660, Level = LogLevel.Debug, Message = "Partition {Partition} of {Topic} on {Cluster} starts at offset {LogStart}: earlier records are gone")]
     public static partial void RetentionGap(ILogger logger, int partition, string topic, string cluster, long logStart);
 }
