@@ -88,10 +88,13 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
 
             ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
             await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-            string name = await rebuild.EvaluateAsync<string>("b => b.closest('tr').dataset.projection");
             await rebuild.ClickAsync();
 
             await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
+
+            // The phrase is read from the dialog that opened, never from a row found before the click: the locator is resolved again at the
+            // click, and on a host other tests rebuild on, the first row with a Rebuild button may by then be another (2026-11-19 on CI).
+            string name = await page.Locator(".ms-confirm-label code").InnerTextAsync();
             await page.Keyboard.TypeAsync(name);
             await page.Keyboard.PressAsync("Tab");
             await page.Keyboard.PressAsync("Enter");
