@@ -3,7 +3,7 @@
 ## 1.x → 2.0: one product, Data Studio
 
 <!-- beta: remove at 2.0.0 -->
-**2.0 is in beta** (`2.0.0-beta.2`), published for trial: names, addresses and options may still move before `2.0.0`
+**2.0 is in beta** (`2.0.0-beta.3`), published for trial: names, addresses and options may still move before `2.0.0`
 ([stability.md](stability.md)). Every package is a prerelease, so install with `--prerelease`, and pin the beta version
 exactly.
 
@@ -22,7 +22,7 @@ step-by-step path through 1.3.x: go to 2.0 in one move.
    `PostgresStudio.Diagnostics`, `KStudio`, `KStudio.Core` and `KStudio.Wolverine` and add the 2.0 ids. If your repository
    keeps a central `PackageVersion` for any of them, rename it and keep every `DataStudio*` package at one version: each
    depends on exactly its own version of the ones below it and checks that at startup. While 2.0 is in beta that version
-   is `2.0.0-beta.2` and installing needs `--prerelease`. <!-- beta: remove at 2.0.0 -->
+   is `2.0.0-beta.3` and installing needs `--prerelease`. <!-- beta: remove at 2.0.0 -->
 2. **Replace the registration.** One call registers the shell, and one call per module adds a module to it:
 
    ```csharp
