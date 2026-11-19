@@ -65,7 +65,7 @@
                 @onchange="TimeZoneChanged">
             @foreach (StudioTimeZones.ZoneOption option in zoneOptions)
             {
-                <option value="@option.Id" selected="@(string.Equals(option.Id, selectedName, StringComparison.Ordinal))">@(StudioTimeZones.Label(option.Id, option.Zone, now) + (option.IsBrowser ? StudioTimeZones.BrowserMark : string.Empty))</option>
+                <option value="@option.Id" selected="@(string.Equals(option.Id, selectedName, StringComparison.Ordinal))">@(StudioTimeZones.Label(option.Name, option.Zone, now) + (option.IsBrowser ? StudioTimeZones.BrowserMark : string.Empty))</option>
             }
         </select>
     </div>
@@ -112,7 +112,7 @@
             : null;
 
         (string Id, TimeZoneInfo Zone)? browser = BrowserTimeZoneId is { Length: > 0 } browserId && TimeZoneInfo.TryFindSystemTimeZoneById(browserId, out TimeZoneInfo? browserZone)
-            ? (browserId, browserZone)
+            ? (StudioTimeZones.IanaId(browserId, StudioTimeZones.CurrentRegion), browserZone)
             : null;
 
         zoneOptions = StudioTimeZones.Options(ListedZones, selected, browser);

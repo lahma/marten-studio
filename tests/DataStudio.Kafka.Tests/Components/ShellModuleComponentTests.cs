@@ -392,6 +392,35 @@ public class ShellModuleComponentTests
         options.Select(static x => x.GetAttribute("value")!).Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// #92: a stored zone and a browser answer in a legacy spelling (<c>Asia/Calcutta</c>, which Chromium reports) select and mark the one entry the list holds under
+    /// the current name (<c>Asia/Kolkata</c>): no second entry, and the "this browser" mark is on it.
+    /// </summary>
+    [Fact]
+    public async Task A_legacy_spelling_stored_or_reported_is_the_current_names_one_entry_and_keeps_the_browser_mark()
+    {
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Calcutta", out _) || !TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out _))
+        {
+            // A host that cannot find both spellings has nothing to alias; the table's own answer for it is tested where the resolver is given.
+            return;
+        }
+
+        using KafkaHarness harness = new();
+        await harness.Context.ReadyAsync();
+
+        IRenderedComponent<PreferencesMenu> menu = harness.Context.Render<PreferencesMenu>(p => p
+            .Add(x => x.SelectedTimeZoneId, "Asia/Calcutta")
+            .Add(x => x.BrowserTimeZoneId, "Asia/Calcutta"));
+
+        IElement[] options = [.. menu.FindAll("#ms-timezone-select option")];
+        string[] values = [.. options.Select(static x => x.GetAttribute("value")!)];
+
+        values.Should().ContainSingle(static x => x == "Asia/Kolkata").And.NotContain("Asia/Calcutta").And.OnlyHaveUniqueItems();
+        options.Where(static x => x.HasAttribute("selected")).Select(static x => x.GetAttribute("value")).Should().ContainSingle().Which.Should().Be("Asia/Kolkata");
+        options.Where(static x => x.TextContent.Contains("this browser", StringComparison.Ordinal)).Select(static x => x.GetAttribute("value")).Should().Equal("Asia/Kolkata");
+        options.Single(static x => x.GetAttribute("value") == "Asia/Kolkata").TextContent.Trim().Should().Be("Asia/Kolkata (UTC+05:30), this browser");
+    }
+
     [Fact]
     public async Task The_rail_credit_names_the_module()
     {
