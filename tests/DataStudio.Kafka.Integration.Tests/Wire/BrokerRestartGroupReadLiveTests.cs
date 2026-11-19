@@ -46,10 +46,10 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
     public static readonly TimeSpan Deadline = TimeSpan.FromSeconds(90);
 
     /// <summary>
-    /// How long the broker stays stopped. This is scenario time, the outage the issue describes, not a wait for anything: every wait that
-    /// is for something is on a condition, with a bound.
+    /// How long the test waits for both readers to have recorded a read that failed <c>Unavailable</c> while the broker was away. A group request
+    /// that times out takes the engine's ten-second request timeout, so this is the outage's minimum length, as a condition and not a delay.
     /// </summary>
-    private static readonly TimeSpan Outage = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan FirstFailureBound = TimeSpan.FromSeconds(90);
 
     /// <summary>The shell's default <c>RefreshInterval</c>, which is how long the engine reuses a completed read.</summary>
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
@@ -60,7 +60,7 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>The group reads recover after a restart, for each way a host reads.</summary>
-    /// <param name="gapSeconds">The pause between one read and the next: the host's own cadence, scenario time as <see cref="Outage" /> is.</param>
+    /// <param name="gapSeconds">The pause between one read and the next: the host's own cadence, which is scenario time.</param>
     /// <param name="callerSeconds">How long the caller waits for a read before it gives up and reads again; <c>0</c> waits for the engine's own timeout.</param>
     [KafkaTheory]
     [InlineData(1, 0)]
@@ -97,12 +97,18 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
 
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
         TimeSpan gap = TimeSpan.FromSeconds(gapSeconds);
-
         TimeSpan? caller = callerSeconds > 0 ? TimeSpan.FromSeconds(callerSeconds) : null;
-        Task<TimeSpan?> describing = ReadUntilValueAsync("DescribeGroup", clock, log, gap, caller, token => reads.GroupAsync(key, group, token), stop.Token);
-        Task<TimeSpan?> committing = ReadUntilValueAsync("GroupOffsets", clock, log, gap, caller, token => reads.GroupOffsetsAsync(key, group, topic, [partition], token), stop.Token);
+        Reader describer = new("DescribeGroup");
+        Reader committer = new("GroupOffsets");
 
-        await Task.Delay(Outage, Token);
+        Task<TimeSpan?> describing = ReadUntilValueAsync(describer, clock, log, gap, caller, token => reads.GroupAsync(key, group, token), stop.Token);
+        Task<TimeSpan?> committing = ReadUntilValueAsync(committer, clock, log, gap, caller, token => reads.GroupOffsetsAsync(key, group, topic, [partition], token), stop.Token);
+
+        // The scenario's precondition: each call has read through the outage and been answered "unavailable" (a group request that timed out
+        // while the broker was away). Reads from before the outage, still in the cache, do not count, and a reader does not stop on one.
+        bool read = await Task.Run(() => SpinWait.SpinUntil(() => describer.Failures > 0 && committer.Failures > 0, FirstFailureBound), Token);
+        read.Should().BeTrue($"each read must have failed Unavailable during the outage before the broker is started; DescribeGroup {describer.Failures}, GroupOffsets {committer.Failures}\n{log}");
+
         await DockerCli.StartAsync(broker.ContainerId);
         Line(log, "broker started", clock);
 
@@ -120,17 +126,33 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
             $"{log}DescribeGroup answered {Format(describedAt)} after metadata, GroupOffsets {Format(committedAt)}; the bound is {Deadline.TotalSeconds:F0}s");
 
         TestContext.Current.SendDiagnosticMessage(summary);
+        describer.FailuresBeforeValue.Should().BeGreaterThan(0, summary);
+        committer.FailuresBeforeValue.Should().BeGreaterThan(0, summary);
         (describedAt ?? TimeSpan.MaxValue).Should().BeLessThan(Deadline, summary);
         (committedAt ?? TimeSpan.MaxValue).Should().BeLessThan(Deadline, summary);
     }
 
+    /// <summary>What one reader saw: how many of its reads failed <c>Unavailable</c>, and how many had by the time it got its first value.</summary>
+    private sealed class Reader(string name)
+    {
+        private int failures;
+
+        public string Name { get; } = name;
+
+        public int Failures => Volatile.Read(ref failures);
+
+        public int FailuresBeforeValue { get; set; }
+
+        public void Failed() => Interlocked.Increment(ref failures);
+    }
+
     /// <summary>
-    /// Reads one wire call over and over, one at a time, until it answers a value or <see cref="MeasureFor" /> has passed, and returns when
-    /// the first value came on the test's clock. The broker is stopped until the test starts it, so the first value is the first read after it
-    /// came back.
+    /// Reads one wire call over and over, one at a time, until it answers a value <b>after it has failed Unavailable at least once</b> or
+    /// <see cref="MeasureFor" /> has passed, and returns when that value came on the test's clock. A value before any failure (one the cache still
+    /// held from before the outage) is not the recovery and is read past.
     /// </summary>
     private static async Task<TimeSpan?> ReadUntilValueAsync<T>(
-        string name,
+        Reader reader,
         Stopwatch clock,
         StringBuilder log,
         TimeSpan gap,
@@ -156,6 +178,11 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
                     WireResult<T> result = await read(given.Token);
                     ok = result.IsOk;
                     outcome = ok ? "value" : result.Error!.Kind + ":" + result.Error.Code;
+
+                    if (result.Error is WireError.Unavailable)
+                    {
+                        reader.Failed();
+                    }
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested)
                 {
@@ -167,15 +194,16 @@ public abstract class BrokerRestartGroupReadLiveTests(string image)
 
             lock (log)
             {
-                log.AppendLine(string.Create(CultureInfo.InvariantCulture, $"{name} +{begun.TotalSeconds:F1}s took {(ended - begun).TotalSeconds:F1}s: {outcome}"));
+                log.AppendLine(string.Create(CultureInfo.InvariantCulture, $"{reader.Name} +{begun.TotalSeconds:F1}s took {(ended - begun).TotalSeconds:F1}s: {outcome}"));
             }
 
-            if (ok)
+            if (ok && reader.Failures > 0)
             {
+                reader.FailuresBeforeValue = reader.Failures;
                 return ended;
             }
 
-            // The host's own cadence between two reads: scenario time, as the outage is.
+            // The host's own cadence between two reads: scenario time.
             await Task.Delay(gap, CancellationToken.None);
         }
 
