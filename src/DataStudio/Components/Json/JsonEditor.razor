@@ -54,8 +54,9 @@
                   autocorrect="off"
                   aria-label="@Label"
                   aria-describedby="@_statusId"
-                  value="@_text"
-                  @onchange="OnChangedAsync"></textarea>
+                  @bind:get="_text"
+                  @bind:event="onchange"
+                  @bind:set="OnChangedAsync"></textarea>
     </div>
 
     <div id="@_statusId" class="ms-editor-status" role="status" aria-live="polite">
@@ -291,10 +292,10 @@
         _self = null;
     }
 
-    private async Task OnChangedAsync(ChangeEventArgs args)
+    private async Task OnChangedAsync(string? value)
     {
         var wasDirty = IsDirty;
-        _text = args.Value?.ToString() ?? string.Empty;
+        _text = value ?? string.Empty;
         _status = string.Empty;
         _error = null;
         _caretSource = null;

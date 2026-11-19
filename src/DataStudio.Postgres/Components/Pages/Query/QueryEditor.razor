@@ -87,9 +87,10 @@
               placeholder="@Placeholder"
               aria-label="@Label"
               aria-describedby="@statusId"
-              value="@Value"
-              @oninput="InputHandler"
-              @onchange="OnChangedAsync"></textarea>
+              @bind:get="Value"
+              @bind:event="onchange"
+              @bind:set="CommitAsync"
+              @oninput="InputHandler"></textarea>
 
     <div id="@statusId" class="ms-query-editor-status" role="status" aria-live="polite">
         @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -319,9 +320,6 @@
             : default;
 
     private async Task OnInputAsync(ChangeEventArgs args) => await OnInput.InvokeAsync();
-
-    private async Task OnChangedAsync(ChangeEventArgs args) =>
-        await CommitAsync(args.Value?.ToString());
 
     private async Task RunClickAsync()
     {

@@ -21,21 +21,23 @@ public class TypedTextIsBoundTests
     private static readonly Regex Element = new(@"<(?:input|textarea)\b(?:""[^""]*""|'[^']*'|[^>""'])*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
-    /// The two editors that are committed on <c>change</c>: their <c>@oninput</c> handler only clears an error and never sets the value
-    /// the box is drawn from, so a render after a keystroke has no new value to send.
+    /// The boxes a chord commits (Ctrl+Enter, Ctrl+S): the chord raises <c>change</c> from the script before it calls the server, so each is
+    /// bound on <c>change</c>, and the render after the chord has nothing to send the box (xvfv). Named by the file and what marks the box.
     /// </summary>
-    private static readonly string[] CommittedOnChange =
+    private static readonly (string File, string Marker)[] CommittedByAChord =
     [
-        "src/DataStudio.Postgres/Components/Pages/Query/QueryEditor.razor",
-        "src/DataStudio.Marten/Components/Pages/Query/LinqQueryPanel.razor",
+        ("src/DataStudio.Postgres/Components/Pages/Query/QueryEditor.razor", "ms-query-editor-input"),
+        ("src/DataStudio.Marten/Components/Pages/Query/LinqQueryPanel.razor", "ms-query-linq-orderby"),
+        ("src/DataStudio/Components/Json/JsonEditor.razor", "ms-editor-input"),
     ];
 
-    /// <summary>The exception is the box, not its file: a listed file's box that is not committed on <c>change</c> is an offender like any other.</summary>
-    private static bool IsCommittedOnChange(string relative, string element) =>
-        CommittedOnChange.Contains(relative) && element.Contains("@onchange=", StringComparison.Ordinal);
-
+    /// <summary>
+    /// A box kept as it is typed, or a date-and-time box, which a browser commits part by part while the visitor is still typing in it:
+    /// neither is drawn from a hand-written <c>value</c>.
+    /// </summary>
     internal static bool IsUnboundTypedText(string element) =>
-        element.Contains("@oninput=", StringComparison.Ordinal) && Regex.IsMatch(element, @"(?<![\w:-])value=""@");
+        Regex.IsMatch(element, @"(?<![\w:-])value=""@")
+        && (element.Contains("@oninput=", StringComparison.Ordinal) || element.Contains("datetime-local", StringComparison.OrdinalIgnoreCase) || element.Contains("DateTimeLocal", StringComparison.Ordinal));
 
     [Fact]
     public void No_box_in_src_pairs_a_value_with_an_oninput_handler()
@@ -55,7 +57,7 @@ public class TypedTextIsBoundTests
             foreach (Match match in Element.Matches(File.ReadAllText(file)))
             {
                 boxes++;
-                if (IsUnboundTypedText(match.Value) && !IsCommittedOnChange(relative, match.Value))
+                if (IsUnboundTypedText(match.Value))
                 {
                     offenders.Add(relative);
                 }
@@ -67,12 +69,15 @@ public class TypedTextIsBoundTests
     }
 
     [Fact]
-    public void The_exceptions_still_exist_and_still_commit_on_change()
+    public void Every_box_a_chord_commits_is_bound_on_change()
     {
-        foreach (string relative in CommittedOnChange)
+        foreach ((string file, string marker) in CommittedByAChord)
         {
-            string text = File.ReadAllText(RepositoryRoot.Combine(relative.Split('/')));
-            Element.Matches(text).Should().Contain(x => IsUnboundTypedText(x.Value) && x.Value.Contains("@onchange=", StringComparison.Ordinal), relative + " is listed because it has such a box");
+            string text = File.ReadAllText(RepositoryRoot.Combine(file.Split('/')));
+            Match[] boxes = [.. Element.Matches(text).Where(x => x.Value.Contains(marker, StringComparison.Ordinal))];
+
+            boxes.Should().ContainSingle(file + " has the box marked " + marker);
+            boxes[0].Value.Should().Contain("@bind:get=").And.Contain("@bind:event=\"onchange\"").And.NotContain("value=\"@", file);
         }
     }
 
@@ -81,6 +86,8 @@ public class TypedTextIsBoundTests
     [InlineData("<textarea class=\"a\" value=\"@predicate\"\n   @oninput=\"OnInput\"></textarea>", true)]
     [InlineData("<input @bind:get=\"typed\" @bind:event=\"oninput\" @bind:set=\"OnTyped\" />", false)]
     [InlineData("<input value=\"@typed\" @onchange=\"OnChanged\" />", false)]
+    [InlineData("<input type=\"datetime-local\" value=\"@from\" @onchange=\"OnChanged\" />", true)]
+    [InlineData("<input type=\"@DateTimeLocal\" @bind:get=\"from\" @bind:event=\"onchange\" @bind:set=\"Set\" />", false)]
     [InlineData("<input type=\"checkbox\" data-value=\"@x\" @oninput=\"OnInput\" />", false)]
     public void The_scanner_knows_the_pair(string element, bool expected)
     {

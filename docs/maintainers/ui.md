@@ -201,5 +201,10 @@ A box whose text the server keeps on every keystroke (a typed confirmation, a fi
 sets the field. With the hand-written pair, the render after each keystroke sends the box the value the server had, and
 on a slow connection that arrives after later keystrokes and puts older text back: characters are lost, and a typed
 confirmation stops matching its phrase. A bind tells the renderer what the box held when the event was raised, so a
-render sends it nothing it already has. `TypedTextIsBoundTests` scans `src/` for the pair; its two exceptions (the SQL
-editor and LINQ mode's order-by box) commit on `change`, and their `@oninput` handler only clears an error.
+render sends it nothing it already has. `TypedTextIsBoundTests` scans `src/` for the pair.
+
+A box a chord commits (the SQL editor, LINQ mode's order-by box, the JSON editor: Ctrl+Enter, Ctrl+S, Esc) is bound on
+`change`, and the script raises `change` on the box (`martenStudio.commitField`) before it calls the server: interop
+carries no field value, so without it the render after the chord would erase the keys typed since. A date-and-time box
+is bound on `change` too, because a browser commits it part by part while it is still being typed in; its `type` is not
+written as a literal, so that it binds as text and not as a `DateTime`.
