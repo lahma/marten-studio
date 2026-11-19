@@ -83,6 +83,75 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
     }
 
     /// <summary>
+    /// The Health page on a phone (the "The Health page on a phone" section of <c>studio.css</c>): at 390 px the checks table
+    /// keeps a width its columns can read in and scrolls inside its own region, a check's code stays on one line, the page
+    /// does not scroll sideways, the section and the cards give back their padding, and the page is not far taller than at
+    /// 1440 px (the squeezed table alone had made it about 1.65 times as tall; the page now measures about 1.4).
+    /// </summary>
+    [BrowserFact]
+    public async Task The_health_page_at_390_px_keeps_its_checks_table_readable_in_its_own_scroll_region()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "health-390", fixture.Root, "admin", async studio =>
+        {
+            const string Measure =
+                """
+                () => {
+                    const table = document.querySelector('.ms-health-check-table');
+                    const region = table.closest('.ms-table-scroll');
+                    const codes = [...table.querySelectorAll('tbody tr td:first-child')];
+                    const oneLine = codes.every(td => {
+                        const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+                        for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+                            if (n.textContent.trim() === '') { continue; }
+                            const r = document.createRange(); r.selectNodeContents(n);
+                            if (r.getClientRects().length > 1) { return false; }
+                        }
+                        return true;
+                    });
+                    return {
+                        pageHeight: document.querySelector('.ms-health').getBoundingClientRect().height,
+                        tableWidth: table.getBoundingClientRect().width,
+                        regionClient: region.clientWidth,
+                        regionScroll: region.scrollWidth,
+                        rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+                        codesOnOneLine: oneLine,
+                        findingPadding: parseFloat(getComputedStyle(document.querySelector('.ms-health-finding')).paddingLeft)
+                    };
+                }
+                """;
+
+            async Task<(double PageHeight, double TableWidth, double RegionClient, double RegionScroll, double Rem, bool CodesOnOneLine, double FindingPadding)> MeasureAsync(int width, int height)
+            {
+                await studio.Page.SetViewportSizeAsync(width, height);
+                await studio.GoAsync(fixture.Root.StudioUrl("postgres/health"));
+                await studio.Page.Locator(".ms-health-check-table tbody tr").First.WaitForAsync();
+                await studio.Page.Locator(".ms-health-finding").First.WaitForAsync();
+
+                System.Text.Json.JsonElement m = await studio.Page.EvaluateAsync<System.Text.Json.JsonElement>(Measure);
+                return (
+                    m.GetProperty("pageHeight").GetDouble(),
+                    m.GetProperty("tableWidth").GetDouble(),
+                    m.GetProperty("regionClient").GetDouble(),
+                    m.GetProperty("regionScroll").GetDouble(),
+                    m.GetProperty("rem").GetDouble(),
+                    m.GetProperty("codesOnOneLine").GetBoolean(),
+                    m.GetProperty("findingPadding").GetDouble());
+            }
+
+            var wide = await MeasureAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
+            var phone = await MeasureAsync(390, 844);
+
+            phone.TableWidth.Should().BeGreaterThanOrEqualTo(56 * phone.Rem - 1, "the checks table keeps the width its columns can read in");
+            phone.RegionScroll.Should().BeGreaterThan(phone.RegionClient, "the table scrolls inside its own labelled region (D25)");
+            phone.CodesOnOneLine.Should().BeTrue("a check's code stays on one line");
+            phone.FindingPadding.Should().BeLessThan(wide.FindingPadding, "the cards give back padding on a phone");
+            phone.PageHeight.Should().BeLessThan(wide.PageHeight * 1.5, "a squeezed table made the page about 1.65 times as tall as at 1440 px");
+            await studio.AssertNoSidewaysScrollAsync("the Health page at 390 px");
+            studio.AssertClean("the Health page at 390 px");
+        });
+    }
+
+    /// <summary>
     /// Issue #33: a finding's address ends in its card's fragment, and the browser resolves that against the prerendered
     /// document, before the circuit has drawn the cards, and leaves the page at the top. The page scrolls to the card itself
     /// once the report is on screen, marks it for two seconds and takes the mark off.
