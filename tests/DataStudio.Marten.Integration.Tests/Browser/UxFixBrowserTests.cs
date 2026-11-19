@@ -123,23 +123,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
             IPage page = studio.Page;
             await page.SetViewportSizeAsync(1280, 900);
 
-            // SignalR's transport sets onmessage on its socket: what the server sends is handed over 150 ms later, in order.
-            await page.AddInitScriptAsync(
-                """
-                (() => {
-                    const descriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
-                    Object.defineProperty(WebSocket.prototype, 'onmessage', {
-                        configurable: true,
-                        get() { return descriptor.get.call(this); },
-                        set(handler) {
-                            descriptor.set.call(this, typeof handler !== 'function' || !window.__msSlowCircuit
-                                ? handler
-                                : function (message) { const socket = this; window.__msHeldBack = (window.__msHeldBack || 0) + 1; setTimeout(() => handler.call(socket, message), window.__msSlowCircuit); });
-                        }
-                    });
-                    window.__msSlowCircuit = 150;
-                })();
-                """);
+            await SlowCircuitAsync(page);
 
             await studio.GoAsync(fixture.Root.StudioUrl("marten/projections"));
 
@@ -162,6 +146,68 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
             await page.WaitForFunctionAsync("() => document.querySelector('dialog.ms-confirm-overlay') === null", null, Wait);
 
             studio.AssertClean("typing a confirmation's phrase over a slow connection");
+        });
+
+    /// <summary>Holds back what the server sends the page by 150 ms, in order, and counts it in <c>window.__msHeldBack</c>.</summary>
+    private static async Task SlowCircuitAsync(IPage page)
+    {
+        // SignalR's transport sets onmessage on its socket: what the server sends is handed over 150 ms later, in order.
+        await page.AddInitScriptAsync(
+            """
+            (() => {
+                const descriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
+                Object.defineProperty(WebSocket.prototype, 'onmessage', {
+                    configurable: true,
+                    get() { return descriptor.get.call(this); },
+                    set(handler) {
+                        descriptor.set.call(this, typeof handler !== 'function' || !window.__msSlowCircuit
+                            ? handler
+                            : function (message) { const socket = this; window.__msHeldBack = (window.__msHeldBack || 0) + 1; setTimeout(() => handler.call(socket, message), window.__msSlowCircuit); });
+                    }
+                });
+                window.__msSlowCircuit = 150;
+            })();
+            """);
+    }
+
+    /// <summary>
+    /// Keys typed right after Ctrl+Enter in the SQL editor stay (xvfv). The chord sends the editor's text through interop, which tells the
+    /// renderer nothing about what the box holds; the render that followed sent the box the text of the moment of the chord, and on a slow
+    /// connection that arrived after the next keys and erased them. The chord now raises <c>change</c> first and the box is bound on it.
+    /// </summary>
+    [BrowserFact]
+    public Task Keys_typed_after_Ctrl_Enter_in_the_SQL_editor_over_a_slow_connection_stay() =>
+        RunAsync("uxfix-chord-slow", async studio =>
+        {
+            IPage page = studio.Page;
+            await page.SetViewportSizeAsync(1280, 900);
+            await SlowCircuitAsync(page);
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=sql"));
+
+            ILocator editor = page.Locator(".ms-query-editor-input").First;
+            await editor.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await editor.ClickAsync();
+            await page.Keyboard.TypeAsync("select 1", new KeyboardTypeOptions { Delay = 20 });
+            await page.Keyboard.PressAsync("Control+Enter");
+            await page.Keyboard.TypeAsync(" as one", new KeyboardTypeOptions { Delay = 40 });
+
+            // Every render the chord caused has reached the box when the server has had nothing more to say for a second.
+            int held = await page.EvaluateAsync<int>(
+                """
+                () => new Promise(resolve => {
+                    let last = -1;
+                    const timer = setInterval(() => {
+                        const now = window.__msHeldBack || 0;
+                        if (now === last) { clearInterval(timer); resolve(now); }
+                        last = now;
+                    }, 1000);
+                })
+                """);
+            held.Should().BeGreaterThan(0, "the circuit's answers were held back");
+
+            (await editor.InputValueAsync()).Should().Be("select 1 as one", "what was typed after the chord is still in the box");
+
+            studio.AssertClean("typing after Ctrl+Enter over a slow connection");
         });
 
     /// <summary>

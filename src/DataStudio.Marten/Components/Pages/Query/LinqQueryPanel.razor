@@ -135,10 +135,11 @@
                    spellcheck="false"
                    autocomplete="off"
                    placeholder="@OrderByPlaceholder"
-                   value="@orderBy"
+                   @bind:get="orderBy"
+                   @bind:event="onchange"
+                   @bind:set="OnOrderByChangedAsync"
                    aria-describedby="ms-query-linq-orderby-status"
-                   @oninput="OrderByInputHandler"
-                   @onchange="OnOrderByChangedAsync" />
+                   @oninput="OrderByInputHandler" />
             <div id="ms-query-linq-orderby-status" class="ms-query-linq-order-status" role="status" aria-live="polite">
                 @if (orderError is { Length: > 0 })
                 {
@@ -767,9 +768,9 @@
         return Task.CompletedTask;
     }
 
-    private async Task OnOrderByChangedAsync(ChangeEventArgs args)
+    private async Task OnOrderByChangedAsync(string? value)
     {
-        orderBy = args.Value?.ToString() ?? string.Empty;
+        orderBy = value ?? string.Empty;
         await DraftAsync();
     }
 

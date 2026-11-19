@@ -909,6 +909,19 @@
 
     // JSON toolkit helpers (folded in from the W1 packet). Every C# call site degrades when these
     // are missing (prerender), so each function is defensive and idempotent.
+    // A chord that sends a box's text to the server through interop first raises `change` on the box (xvfv). Interop tells the renderer
+    // nothing about what the box holds, so the render after it would send the box the text of the moment of the chord, and over a slow
+    // connection that arrives after the next keys and erases them. `change` is the event these boxes are bound on: it reaches the server
+    // first, with the box's value, and the render then has nothing to send.
+    window.martenStudio.commitField = window.martenStudio.commitField || function (field) {
+        try {
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        catch {
+            // A browser without the Event constructor: the chord still carries the text.
+        }
+    };
+
     window.martenStudio.json = window.martenStudio.json || {
         /*
          * Opens the shared copy menu from the keyboard. A mouse press goes through the row button's
@@ -1073,6 +1086,7 @@
                     event.preventDefault();
                     if (dotNetRef) {
                         try {
+                            window.martenStudio.commitField(textarea);
                             dotNetRef.invokeMethodAsync("OnEditorSaveAsync", textarea.value);
                         }
                         catch {
@@ -1087,6 +1101,7 @@
                     event.preventDefault();
                     if (dotNetRef) {
                         try {
+                            window.martenStudio.commitField(textarea);
                             dotNetRef.invokeMethodAsync("OnEditorCancelAsync", textarea.value);
                         }
                         catch {
@@ -1176,6 +1191,7 @@
             const onKeyDown = function (event) {
                 if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                     event.preventDefault();
+                    window.martenStudio.commitField(textarea);
                     invoke("RunAsync", textarea.value);
                     return;
                 }
@@ -1190,6 +1206,7 @@
                     // Ctrl+S in a browser is Save Page As, which is never what someone means while they
                     // are typing SQL into an editor.
                     event.preventDefault();
+                    window.martenStudio.commitField(textarea);
                     invoke("SaveAsync", textarea.value);
                 }
             };
@@ -1215,6 +1232,7 @@
                     event.preventDefault();
 
                     try {
+                        window.martenStudio.commitField(field);
                         const pending = dotNetRef.invokeMethodAsync(methodName, field.value);
 
                         if (pending && typeof pending.catch === "function") {
