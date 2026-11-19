@@ -81,10 +81,12 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
             ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
             await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-            string name = (await rebuild.EvaluateAsync<string>("b => b.closest('tr').dataset.projection"));
             await rebuild.ClickAsync();
 
             await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
+
+            // The phrase is the dialog's own: the row the locator finds at the click need not be the one it found before it.
+            string name = await page.Locator(".ms-confirm-label code").InnerTextAsync();
 
             const string FocusedText = "() => document.activeElement.textContent.trim()";
 
