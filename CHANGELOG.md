@@ -12,6 +12,18 @@ round of use found (#90 to #92). All seven packages are at 2.0.0-beta.3. Nothing
 - The Kafka window's date-and-time boxes keep the value as the browser holds it, to the minute. The custom window of
   Related records is read again: with both boxes filled it said "Enter both times of the window." and Search stayed
   off until a preset was picked.
+- Plan with `RunSql` off says "Planning a statement is not available here." and speaks only of pasting a plan: no option
+  names, no SQL console warning, and an intro that no longer describes Explain (#90). The paste box's help says "a SQL
+  client" where it said `psql`.
+- C18 ("Npgsql pools in this process connect to this database as the same login") counts every pool it saw. Its title
+  adds "and 2 more named pools could not be identified" when there are such pools, and the sum of `Maximum Pool Size`
+  adds up the pools whose ceiling is known and says how many it could not include ("200 connections at most from 2
+  pools", "100 connections at most from 1 pool; 1 pool did not report its ceiling") where it said "not reported by every
+  pool". The code, severity and variant are unchanged (#91).
+- The Preferences time zone list names zones by their current IANA names (`Asia/Kolkata`, `America/Nuuk`,
+  `Asia/Kathmandu`, `Europe/Kyiv` and fifteen more) where the host knows them, leaves out the two obsolete Windows
+  zones, and lists a Windows zone with no IANA name after the others, by its display name. A stored choice or a browser
+  that says `Asia/Calcutta` selects `Asia/Kolkata` (#92).
 - The documents list applies the scope of its address once. An address naming a tenant that was found nowhere made
   every redraw of the page, a time zone change among them, search the databases' tenants again.
 - The README is short and shows every module, with pictures of the Kafka and Postgres modules. Its reference sections
