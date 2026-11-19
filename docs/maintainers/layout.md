@@ -1,6 +1,6 @@
 # Layout
 
-Where each kind of code lives. `AGENTS.md` points here: read it before adding a file, and keep it in step with the
+Where each kind of code lives. The root `AGENTS.md` points here, and an area with rules of its own has an `AGENTS.md` in its directory (and a `CLAUDE.md` that imports it), which the root's table *Where the rules live* lists: read it before adding a file, and keep it in step with the
 tree in the same pull request.
 
 `AgentsLayoutTests` parses the block below and fails if it names a directory that does not exist, or

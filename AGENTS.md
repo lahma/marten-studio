@@ -1,7 +1,8 @@
 # AGENTS.md
 
-Guidance for humans and AI agents working in this repository. `CLAUDE.md` imports this file, so keep it the single
-source of truth.
+Guidance for humans and AI agents working in this repository. `CLAUDE.md` imports this file. It holds
+what applies in every directory; each area's own `AGENTS.md` holds the rest (*Where the rules live*). A rule or a decision
+is written in one file only: never copy one into another.
 
 This repository ships **Data Studio**: one MIT-licensed embeddable Blazor Server admin UI that runs inside the host's own
 ASP.NET Core application, as a shell and three modules, and the engines under them as packages of their own (D30). A host adds
@@ -48,55 +49,43 @@ into packages and its public API are designed in `marten-studio-0.5-postgresstud
 `.alta/plans/2026-11-16-datastudio-v2.md`. `README.md`, each package's `README.md` and `docs/` are the long
 form a user reads. Read the design before designing anything; read *this* file before writing anything.
 
-## Where to read first
+## Where the rules live
 
-AGENTS.md states each rule; the topic document holds its full text, which wins where they differ. Read the topic
-document for your area before writing code in it. All documents are in `docs/maintainers/`.
+This file holds what applies in every directory. What applies to one area is in that area's own `AGENTS.md`, which an agent working there reads as well (a `CLAUDE.md` beside each imports it). Read the file of every area your change touches before writing in it.
 
-| You are working on | Read first |
-|---|---|
-| SQL builders, catalog reads, the SQL console, the database browser | [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md) (D13, D27), [plan-analyzer.md](docs/maintainers/plan-analyzer.md) (Explain, Query › Plan) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 4, 5 and 14 |
-| Marten documents, events, the daemon, projections, sessions, schema, LINQ mode | [marten.md](docs/maintainers/marten.md) (D6, D7, D28), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27) ("Reach, not scope": rebuild, rewind, skip, high water, apply), [architecture.md](docs/maintainers/architecture.md#d10) (lag samples, dead-letter groups), [testing.md](docs/maintainers/testing.md) (the Marten API surface test, the sibling source checkouts) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 10, 11, 14 and 15 |
-| Health checks, the sweep, the codes table | [health-engine.md](docs/maintainers/health-engine.md) (D29), [architecture.md](docs/maintainers/architecture.md#d31) (stable codes and variants), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27) (what a list may lock or deparse), [testing.md](docs/maintainers/testing.md) (VACUUM, statistics resets, the version matrix) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 4 and 7 |
-| The diagnostics API | [architecture.md](docs/maintainers/architecture.md#d31) (D31), [health-engine.md](docs/maintainers/health-engine.md) (the gates it skips, the content rules it keeps) and [hard-rules.md](docs/maintainers/hard-rules.md) rule 7 |
-| Authorization, capabilities, the audit log | [authorization.md](docs/maintainers/authorization.md) (D4, D5), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27) (the browser's gate, "Reach, not scope"), [health-engine.md](docs/maintainers/health-engine.md) (D29's gates), [architecture.md](docs/maintainers/architecture.md#d30) (`PostgresResource`) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 14 and 15 |
-| UI, CSS, JS, Blazor components and circuits | [ui.md](docs/maintainers/ui.md) (D22-D26), [architecture.md](docs/maintainers/architecture.md) (D10, D11, D30's *Words* and assets, D49) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 3, 6 and 15 (interop loss); D9 and D14 are whole above |
-| The plan analyzer, Explain, plan insights | [plan-analyzer.md](docs/maintainers/plan-analyzer.md) (D32), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md) (D13, D27's masking) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5 and 7 |
-| The Connection page, the connection-settings checks (C16-C18, S11-S13), paste-to-compare | [architecture.md](docs/maintainers/architecture.md#d33) (D33), [health-engine.md](docs/maintainers/health-engine.md) (the connection-settings checks and the page's gates) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5 and 16 |
-| The shell and the modules: the split, registration, routes and addresses, assets, the data seam, words and logs, samples | [architecture.md](docs/maintainers/architecture.md) (D1, D2, D11, D12, D17, D18, D20, D30, D49) and [hard-rules.md](docs/maintainers/hard-rules.md) rule 16 (D1, D15 and D20 are whole above) |
-| Build, packages, versions, CI, release, agent routing | [build-and-release.md](docs/maintainers/build-and-release.md) (D3, D15, D21) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 1, 2, 8, 9 and 16 (D1, D15 and D20 are whole above) |
-| Tests | [testing.md](docs/maintainers/testing.md) (D16, D19) |
-| The Kafka module: the engine (`DataStudio.Kafka.Core`), Kafka reads, scans, predicates, decoders, redaction | [kafka.md](docs/maintainers/kafka.md) (D36-D41) and [testing.md](docs/maintainers/testing.md) (the Kafka suites) |
-| The Kafka module: the seams, Kafka pages, its authorization, capabilities and audit | [kafka.md](docs/maintainers/kafka.md) (D34, D35, D45-D48, and the engine's), [architecture.md](docs/maintainers/architecture.md) (D11, D30), [authorization.md](docs/maintainers/authorization.md) (D4, D5), [ui.md](docs/maintainers/ui.md) (D24-D26) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 6, 7 and 16 |
-| The evidence and history behind a rule, and the 1.x → 2.0 names | [decision-notes.md](docs/maintainers/decision-notes.md) and [v2-public-api.md](docs/maintainers/v2-public-api.md); the dated budget entries are in [package-budget-changes.md](docs/maintainers/package-budget-changes.md) |
+| You are working in | Read its file | It holds |
+|---|---|---|
+| `src/DataStudio/`, or any component, stylesheet or script | [src/DataStudio/AGENTS.md](src/DataStudio/AGENTS.md) | hard rules 3; D2, D10, D11, D22, D23, D24, D25, D26, D34, D44 |
+| `src/DataStudio.Postgres/`, `src/DataStudio.Postgres.Diagnostics/` | [src/DataStudio.Postgres/AGENTS.md](src/DataStudio.Postgres/AGENTS.md) | hard rules 4; D8, D13, D27, D29, D31, D32, D33 |
+| `src/DataStudio.Marten/` | [src/DataStudio.Marten/AGENTS.md](src/DataStudio.Marten/AGENTS.md) | hard rules 10, 11, 14, 15; D6, D7, D9, D14, D28 |
+| `src/DataStudio.Kafka/`, `src/DataStudio.Kafka.Core/`, `src/DataStudio.Kafka.Wolverine/` | [src/DataStudio.Kafka/AGENTS.md](src/DataStudio.Kafka/AGENTS.md) | hard rules 17; D35, D36, D37, D38, D39, D40, D41, D42, D43, D45, D46, D47, D48 |
+| `tests/` | [tests/AGENTS.md](tests/AGENTS.md) | D16, D19; Testing |
+| `samples/` | [samples/AGENTS.md](samples/AGENTS.md) | D17, D18 |
+| `build/`, `Directory.*.props`, a package reference, `.github/workflows/`, a release | [build/AGENTS.md](build/AGENTS.md) | hard rules 2, 8; D15; the package budget, Build, Release engineering |
+
+Each area file names the topic documents of `docs/maintainers/` to read first. Those hold every rule's and decision's full text, which wins where the two differ; the evidence and history behind a rule are in [decision-notes.md](docs/maintainers/decision-notes.md), and the 1.x to 2.0 names in [v2-public-api.md](docs/maintainers/v2-public-api.md).
 
 ## Hard rules
 
 Each rule's full text, with its lists of events, tests and history, is in
 [hard-rules.md](docs/maintainers/hard-rules.md) under the same number.
 
-1. **No new NuGet package without a decision recorded in this file.** The package budget below is complete. If a package
+The rules that hold in every directory are whole here. The others are in their area's file, under the same number:
+
+- **2.** Never hand-edit `.github/workflows/*.yml`. [build](build/AGENTS.md)
+- **3.** No MudBlazor, and no third-party UI, CSS or icon library, ever. [shell](src/DataStudio/AGENTS.md)
+- **4.** No raw SQL outside the three builders' folders, `src/DataStudio.Postgres.Diagnostics/Internal/Sql/`, `src/DataStudio.Postgres/Internal/Sql/` and `src/DataStudio.Marten/Internal/Sql/`. [Postgres](src/DataStudio.Postgres/AGENTS.md)
+- **8.** `.gitignore` must never contain a bare `build` rule. [build](build/AGENTS.md)
+- **10.** In the Marten module, Marten 9 is async-only, and its optional parts are genuinely optional. [Marten](src/DataStudio.Marten/AGENTS.md)
+- **11.** In the Marten module, never call `store.BuildProjectionDaemonAsync()`. [Marten](src/DataStudio.Marten/AGENTS.md)
+- **14.** In the Marten module, a read or navigation path never calls `AllSchemaNames()`, `AllObjects()`, `ToDatabaseScript()` or `CreateMigrationAsync()` — and nothing may describe `CreateOrUpdate` as additive. [Marten](src/DataStudio.Marten/AGENTS.md)
+- **15.** In the Marten module, open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId, resolved.Database)`. [Marten](src/DataStudio.Marten/AGENTS.md)
+- **17.** In the Kafka module, a read never writes. [Kafka](src/DataStudio.Kafka/AGENTS.md)
+
+1. **No new NuGet package without a decision recorded in the package budget.** The budget, in [build/AGENTS.md](build/AGENTS.md), is complete. If a package
    looks necessary, add a dated entry to *Package budget changes* (`docs/maintainers/package-budget-changes.md`) saying
    what it is, what it replaces, and why nothing already present can do the job — before referencing it. Full text: hard
    rule 1.
-
-2. **Never hand-edit `.github/workflows/*.yml`.** All four — `build.yml`, `marten-latest.yml`, `publish.yml`,
-   `release.yml` — are generated from the `[GitHubActions]` attributes in `build/Build.CI.GitHubActions.cs`, and any
-   build run overwrites them. Change the attribute and re-run the build (`dotnet fallout --generate-configuration
-   GitHubActions_publish --host GitHubActions` regenerates just one); a run whose generated output differs *aborts*, so
-   run it again and commit the regenerated YAML. Full text: hard rule 2.
-
-3. **No MudBlazor, and no third-party UI, CSS or icon library, ever.** Styling is hand-rolled, prefixed `ms-`, and
-   driven by the design tokens in `src/DataStudio/wwwroot/css/studio.css`. There is still exactly one stylesheet,
-   and it holds every module's sections (D26). Full text: hard rule 3.
-
-4. **No raw SQL outside the three builders' folders, `src/DataStudio.Postgres.Diagnostics/Internal/Sql/`,
-   `src/DataStudio.Postgres/Internal/Sql/` and `src/DataStudio.Marten/Internal/Sql/`.** Identifiers are quoted through the builder,
-   values are always parameters. The engine's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the
-   Postgres module's own (the console's plans, the browser's rows) in the second; the statements only a Marten store has
-   (the document, event, daemon and projection reads) in the third, which calls the first's quoting. The compiled fence in
-   `HealthQueryConventionTests` exempts each assembly's builders' namespace by name, and each assembly **only in its own
-   folder** (the first two share a namespace). Full text: hard rule 4.
 
 5. **Every mutating operation, and every read authorized like a write, is capability-gated in the service layer, and
    audited.** (The Postgres module has only the latter: `RunSql`, `BrowseDatabase`, `ViewDefinitions` and
@@ -136,24 +125,9 @@ Each rule's full text, with its lists of events, tests and history, is in
    (`HealthCodesTests.verified.txt`); a new check adds its row in the same pull request as its `## <code> <title>`
    heading. Full text: hard rule 7.
 
-8. **`.gitignore` must never contain a bare `build` rule.** The Fallout orchestrator lives in `build/`, and a stock
-   Visual Studio .gitignore silently untracks the whole thing. Full text: hard rule 8.
-
 9. **LF line endings everywhere** (`.gitattributes` enforces it), UTF-8 without BOM. `TreatWarningsAsErrors` is on and
    `CS1591` is an **error in `src/`**, every assembly — the compiler is the lint step. `BL0005` (setting a
    `[Parameter]` from outside its component) is an error. Full text: hard rule 9.
-
-10. **In the Marten module, Marten 9 is async-only, and its optional parts are genuinely optional.** There are no synchronous
-    LINQ terminals — they throw. Serialize and deserialize through `store.Options.Serializer()`, never your own
-    `JsonSerializer`. Never touch `StoreOptions.Storage.AllDocumentMappings` (internal). Every metadata column is
-    optional: build the column set with `DocumentTableInfo.FromDocumentType(...).WithPhysicalColumns(...)`, never
-    `select *`, and enumerate `MartenDuplicatedFields.Physical`, because `IDocumentType.DuplicatedFields` is not a list
-    of columns. Full text: hard rule 10.
-
-11. **In the Marten module, never call `store.BuildProjectionDaemonAsync()`.** It starts a *second* daemon alongside the
-    host's own, and the two fight over the same advisory locks until one hangs. The only supported way to reach a
-    running daemon is the DI-registered coordinator, and its absence is a value — `DaemonHosting.NotHostedInThisProcess`
-    — not an error. Full text: hard rule 11.
 
 12. **The agent definitions in `.claude/agents/*.md` are the only way work is delegated.** A packet is routed to exactly
     one of them; ad-hoc prompting bypasses the rules those files carry (base-commit verification, the shared-files list,
@@ -163,34 +137,6 @@ Each rule's full text, with its lists of events, tests and history, is in
     expected output the orchestrator can state outright — copy these files with these renames, emit this class from this
     table, run this command and paste the output. If a step needs a decision the packet does not make, the correct
     behaviour is to stop and report the question, never to guess. Full text: hard rule 13.
-
-14. **In the Marten module, a read or navigation path never calls `AllSchemaNames()`, `AllObjects()`, `ToDatabaseScript()` or
-    `CreateMigrationAsync()` — and nothing may describe `CreateOrUpdate` as additive.** (The Postgres module's read paths
-    write nothing, as `FirstNavigationLiveTests` proves for every page.) Below Marten 9.50.3 the first two *apply
-    migrations* when a document type has a numeric or HiLo id; the rule stands at every version. **Nor does a read path
-    run a Marten LINQ terminal**, `ToCommand`, `ExplainAsync`, `ToPreviewCommand`, `LoadAsync`, `LoadManyAsync` or a
-    `session.Events` read, nor (from 9.52) `FetchProjectionFloorAsync`, its setters or the high-water advance: each
-    ensures storage, which creates or migrates it. Reads use the studio's own SQL (`StorageEnsuringCallTests`; LINQ
-    mode's composition builds its statement without ensuring storage, and that covers `QueryRawEvents()`, never
-    passed a tenant), and schema names, declared indexes and what Marten owns come from `SchemaDeclarationReader`,
-    without a connection. Enumerating a dynamic tenancy's databases is not read-only either
-    (`TenancyEnumerationCallTests`). Time travel and
-    the stepper fold only through `IAggregateFolder.FoldAsync`. **`AutoCreate.CreateOrUpdate` is not additive**; no
-    screen, comment or doc may say an apply leaves a hand-made index alone. Apply and its preview run under
-    `CreateOrUpdate`, never `AutoCreate.All`; an apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant
-    is selected, and its typed confirmation travels to the service, never re-supplied by the page. Everything
-    schema-related is per database, never per store. **The database browser reads the catalog, never Weasel**:
-    `pg_catalog` (never `information_schema`), filtered by `nspname = any(@schemas)`, inside `ReadOnlySqlSession`. Full
-    text: hard rule 14.
-
-15. **In the Marten module, open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId,
-    resolved.Database)`** (or `ForDatabase(resolved.Database)` where the scope has no tenant), never
-    `Store.QuerySession(tenantId)` / `LightweightSession(tenantId)`. **Never run a user-supplied clause through
-    `Query<T>(string)` / `QueryAsync(Type, string)`**: Marten's `UserSuppliedQueryHandler` adds no tenant or soft-delete
-    predicate. A document type Marten registers `SingleTenanted()` whatever the store (`DeadLetterEvent` is one) has no
-    `tenant_id` column and no Marten predicate: filter on its own `TenantId` property, and prove a sequence is in scope
-    before handing it to an API with no tenant predicate. **In every module, catch interop loss with `catch (Exception
-    e) when (StudioLiveUpdates.IsInteropUnavailable(e))`**, never a ladder of `catch` clauses. Full text: hard rule 15.
 
 16. **The fences are the assemblies.** The references run one way: Marten → Postgres → shell, Postgres → engine, Kafka →
     shell and Kafka.Core, Kafka.Wolverine → Kafka.Core. **The shell, `src/DataStudio`, references ASP.NET Core and nothing
@@ -211,25 +157,60 @@ Each rule's full text, with its lists of events, tests and history, is in
     `DataStudio.Kafka.Tests` does not reference it. A page assembly's root is one segment, unique and never one the shell
     uses (`/postgres`, `/marten`, `/kafka`), and the route table refuses a route two pages claim. Full text: hard rule 16.
 
-17. **In the Kafka module, a read never writes.** No client the engine builds may create a topic, commit or store an offset, join
-    or subscribe a group, or run a host's builder delegate; every assign carries explicit offsets, and the wire seam has
-    no produce, commit, delete or alter method. D37 has the overrides; `ConfluentOverridesTests`,
-    `ReadNeverWritesMetadataLiveTests` and `ReadNeverWritesScanLiveTests` hold them. Full text: hard rule 17.
-
 ## Design decisions (D1–D49)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the rationale is not. D1,
-D8, D9, D14, D15 and D20 are short enough to stand whole here; every other entry is the decision itself, with a pointer
+D8, D9, D14, D15 and D20 are short enough to stand whole where they are; every other entry is the decision itself, with a pointer
 to its full text.
+
+The decisions that hold in every directory are whole here. The others are in their area's file, under the same number:
+
+| Decision | In |
+|---|---|
+| **D2** Interactive Server render mode only, and `IsTrimmable=false` said out loud | [shell](src/DataStudio/AGENTS.md) |
+| **D6** Reads are raw parameterised SQL, writes go through a Marten session | [Marten](src/DataStudio.Marten/AGENTS.md) |
+| **D7** Document edit shows a round-trip diff before saving | [Marten](src/DataStudio.Marten/AGENTS.md) |
+| **D8** Counts are `pg_class.reltuples` estimates by default, prefixed `~` | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D9** Document and stream ids travel in the query string | [Marten](src/DataStudio.Marten/AGENTS.md) |
+| **D10** No SignalR hub | [shell](src/DataStudio/AGENTS.md) |
+| **D11** Sub-path mounting is ported from Quartz.Dashboard, and the shell does it for every module | [shell](src/DataStudio/AGENTS.md) |
+| **D13** The SQL console is off by default, and its real guard is the transaction | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D14** No live SQL tail | [Marten](src/DataStudio.Marten/AGENTS.md) |
+| **D15** Fallout's stable channel (10.5.0), CHANGELOG.md as the version authority, all four workflows generated, trusted publishing for nuget.org | [build](build/AGENTS.md) |
+| **D16** xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, eight test projects all matching `*.Tests` | [tests](tests/AGENTS.md) |
+| **D17** The demo domain lives in `samples/DataStudio.Sample.Marten.Domain` and does not reference `DataStudio.Marten` | [samples](samples/AGENTS.md) |
+| **D18** The sample host starts a throwaway Postgres when no connection string is configured | [samples](samples/AGENTS.md) |
+| **D19** Playwright browsers are installed by a Fallout `Browsers` target; locally the browser suite skips with a reason, on CI a missing browser throws | [tests](tests/AGENTS.md) |
+| **D22** `blazor.web.js` reaches the host through a `PackageReference`, not through a copy in this package | [shell](src/DataStudio/AGENTS.md) |
+| **D23** The studio has no forms, so it disables antiforgery on its own endpoints | [shell](src/DataStudio/AGENTS.md) |
+| **D24** The packages ship no Blazor JS initializer; the shell loads `js/studio.js` itself | [shell](src/DataStudio/AGENTS.md) |
+| **D25** Every data table sits in its own labelled scroll region, and the shell never scrolls sideways | [shell](src/DataStudio/AGENTS.md) |
+| **D26** The stylesheet's UX sections are appended in cascade order, and later wins on purpose | [shell](src/DataStudio/AGENTS.md) |
+| **D27** The database browser: one capability, one schema filter, and Marten's tables are never read raw | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D28** LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and unconditional since the 9.57 floor | [Marten](src/DataStudio.Marten/AGENTS.md) |
+| **D29** The health advisor: one shared sweep, three gates, and two deliberate exceptions | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D31** The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the studio | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D32** The studio draws every plan, plan insights judge it, and EXPLAIN ANALYZE is the console's alone | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D33** The Connection page shows a data source's settings one by one, never its connection string | [Postgres](src/DataStudio.Postgres/AGENTS.md) |
+| **D34** A module joins the shell: the Kafka module is one, and so are the database modules | [shell](src/DataStudio/AGENTS.md) |
+| **D35** The Kafka module is authorized on a resource of its own, by policies of its own | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D36** `DataStudio.Kafka.Core` is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D37** In the Kafka module, a read never writes | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D38** The Kafka module's windows and negatives are truthful | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D39** The Kafka module's search predicates are one hand-written grammar, three-valued, and compared as bytes where they can be | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D40** The Kafka module redacts inside the engine, before any sink | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D41** The Kafka module bounds the cost of a scan in the engine | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D42** The Kafka module correlates by declared fields, in one audited scan | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D43** `DataStudio.Kafka.Wolverine` discovers configuration and nothing else | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D44** Links between modules are pure, internal and grant nothing | [shell](src/DataStudio/AGENTS.md) |
+| **D45** The Kafka module exports what the visitor holds, redacted, through the circuit | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D46** The Kafka module's live tail is a scan with no end | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D47** The Kafka module's profiles lower limits per cluster, explicitly, and never grant | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D48** The record-index seam narrows a search and proves nothing | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
 
 **D1 — `net10.0` only.** Marten 9 targets net9.0 and net10.0, .NET 9 is out of support, and the build template this
 repository came from is net10-only. A second target framework would double the test matrix and the
 conditional-compilation surface to support a runtime nobody should be deploying.
-
-**D2 — Interactive Server render mode only, and `IsTrimmable=false` said out loud.** Blazor Server is what lets the
-studio run against the host's in-process `IDocumentStore`; WebAssembly would need an API surface that is itself the
-security problem. `IsTrimmable=false` is stated in every shipped csproj, because components are bound by name and the document
-viewer deserializes into types found at run time. Full text: [architecture.md](docs/maintainers/architecture.md#d2).
 
 **D3 — Few dependencies a package, and no upper bound on any.** The shell (`DataStudio`) takes `Microsoft.AspNetCore.App.Internal.Assets`
 (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App`, nothing else. The Postgres module takes the shell and
@@ -240,7 +221,7 @@ arrives through `Weasel.Postgresql`. The engine (`DataStudio.Postgres.Diagnostic
 `DataStudio.Kafka.Core`, each at exactly its own version, plus the framework reference; the Kafka engine takes `Confluent.Kafka` (floor
 `2.14.0`) and three `Microsoft.Extensions.*` abstractions, and `DataStudio.Kafka.Wolverine` `DataStudio.Kafka.Core` at exactly its own
 version and `WolverineFx.Kafka` (floor `6.61.0`). No `Marten.AspNetCore`. The floors follow the latest releases (*Package budget changes*,
-2026-11-03), tested and packed as *Build* says. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
+2026-11-03), tested and packed as [build/AGENTS.md](build/AGENTS.md) says. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a read-only
 browser; `marten.Capabilities = MartenCapabilities.All()` is the one-line, greppable opt-in, and a disabled control
@@ -255,41 +236,6 @@ capabilities off, a module's own `ReadOnly` (Marten, Postgres) turns off that mo
 refuses a mapping that answered none of it. The Postgres module has the same three layers with `SourceAuthorizationPolicy` (D30), the Kafka module its own (D35).
 Full text: [authorization.md](docs/maintainers/authorization.md#d5).
 
-**D6 — Reads are raw parameterised SQL, writes go through a Marten session.** Reads are built from `IDocumentType`
-metadata against `IMartenDatabase.CreateConnection(ConnectionUsage.Read)`. Writes go through a Marten session
-(`StoreObjects` / `DeleteObjects`); the studio never hand-writes document DML. Full text:
-[marten.md](docs/maintainers/marten.md#d6).
-
-**D7 — Document edit shows a round-trip diff before saving.** Saving an edited document means deserializing into the CLR
-type and serializing it back, so any property the type does not have is gone: the dialog lists dropped, changed and
-added properties before the save. An edit keeps its document's id; preview and save refuse a JSON id that differs from
-the row's. Full text: [marten.md](docs/maintainers/marten.md#d7).
-
-**D8 — Counts are `pg_class.reltuples` estimates by default, prefixed `~`.** An exact `count(*)` on a 10-million-row
-collection is a sequential scan, and a dashboard that does one per collection per refresh is a denial of service against
-the database it is supposed to help you understand. Exact counts are available on demand, under `statement_timeout`.
-
-**D9 — Document and stream ids travel in the query string.** The hand-rolled router has no catch-all segment, and Marten
-ids are frequently strings that contain `/`. Scope (`?store=&db=&tenant=`) lives in the URL for the same reason a
-document id does: a link someone pastes into a chat has to reopen the same thing. A link that names a tenant and no
-database opens the database, among those the visitor may see, that holds the tenant: a static tenancy places it from its
-configuration (the usual database included, with no tenancy enumeration, and nowhere when it is declared in more than one
-database), every other kind finds it in the databases' tenant listings (at most 32 searched, one enumeration). Where a
-static tenancy cannot place it, or is still placing it, the scope stays where it was and the pages a link opens show their
-not-found wording without reading by id; elsewhere a tenant found nowhere falls back to all tenants. A link that names
-both is reopened exactly.
-
-**D10 — No SignalR hub.** Pages poll with a `PeriodicTimer` at `DataStudioOptions.RefreshInterval`, paused on hidden tabs, through a
-single-flight snapshot cache so that N circuits cost one query per interval; there is no SignalR hub. Where the daemon
-is hosted in this process, a lazy observer on `ShardStateTracker` gives sub-second projection state. Full text:
-[architecture.md](docs/maintainers/architecture.md#d10).
-
-**D11 — Sub-path mounting is ported from Quartz.Dashboard, and the shell does it for every module.** Compile-time routes are re-rooted at
-map time, from each assembly's own root (`/postgres`, `/marten`, `/kafka`), so a module's pages are served at `{mount}/{segment}/…` and
-the shell's own (the front page, `{mount}/activity`) at the mount; and `/_blazor`, `blazor.web.js`, `opaque-redirect` and
-`_content/DataStudio` are mirrored under the mount path (`StudioEndpointMapper`). Do not rewrite it; there is no
-"integrate into the host's own Blazor app" mode. Full text: [architecture.md](docs/maintainers/architecture.md#d11).
-
 **D12 — The data seam is internal, across every assembly.** Per-area service interfaces (`IDocumentDataService`,
 `IEventDataService`, …) are internal, with `InternalsVisibleTo` for the test projects and along the references: from the shell to
 the three modules, from the engine to the Postgres and Marten modules, from the Postgres module to the Marten module, and from
@@ -299,44 +245,6 @@ module's two static classes, two classes and two records; the Kafka module's one
 `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`,
 `IPostgresCapacitySource` and their records), the D31 read model and the connection history's four types. Full text:
 [architecture.md](docs/maintainers/architecture.md#d12).
-
-**D13 — The SQL console is off by default, and its real guard is the transaction.** `RunSql` is a capability like any
-other. What makes it safe is `SET TRANSACTION READ ONLY` plus `statement_timeout` and an optional `SET LOCAL ROLE`, not
-the statement parser. Grant it to people you would give `psql` to. The console describes a statement (Parse and
-Describe, never Bind or Execute) inside the same read-only transaction before running it, so that columns Npgsql has no
-handler for - pgvector's three types among them - are requested as text; this changes neither the guard nor the audit,
-and it does not happen on a connection that auto-prepares (`Max Auto Prepare`), where the console runs as before. Full
-text: [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d13).
-
-**D14 — No live SQL tail.** It would require replacing the host's `StoreOptions.Logger`, which is exactly the
-"registration changes host behaviour" failure this project refuses, and Marten 9 defaults `DisableNpgsqlLogging=true`
-anyway. Every studio-generated grid carries a "Show SQL" disclosure instead, which answers the question people actually
-have.
-
-**D15 — Fallout's stable channel (10.5.0), CHANGELOG.md as the version authority, all four workflows generated, trusted publishing
-for nuget.org.** See *Build* and *Release engineering* below. The important half is that the version lives in one file
-that a human edits and no tool rewrites, and that the only credential anywhere in the release path lives for minutes.
-All seven packages take that one version, a prerelease suffix (`2.0.0-beta.1`) included: the CHANGELOG's header carries it.
-
-**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, eight test projects all matching `*.Tests`.**
-`tests/DataStudio.Tests` (the shell), `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Marten.Tests`, `tests/DataStudio.Kafka.Tests` (a
-Kafka-only host) and `tests/DataStudio.Kafka.Wolverine.Tests` are fast and need no Docker; the three `*.Integration.Tests` (Marten,
-Postgres, Kafka) need Testcontainers, and the Marten and Postgres ones also need Playwright. All eight match the glob in
-`ITest.TestProjects`. The pins are load-bearing — see *Package budget*. Full text: [testing.md](docs/maintainers/testing.md#d16).
-
-**D17 — The demo domain lives in `samples/DataStudio.Sample.Marten.Domain` and does not reference `DataStudio.Marten`.** The
-missing reference is deliberate and structural: the studio must work against a store that knows nothing about it. The
-demo data with no Marten in it is `samples/DataStudio.Sample.Postgres.Data`, which references no studio either. Full text:
-[architecture.md](docs/maintainers/architecture.md#d17).
-
-**D18 — The sample host starts a throwaway Postgres when no connection string is configured.** Zero-config `dotnet run`
-starts a throwaway Postgres with a loud banner and throws with guidance when Docker is absent; it must never fall back
-to `localhost` silently and appear to work against somebody's real database. The Marten sample judges a reused database
-before Marten touches it (`SampleDatabase`). Full text: [architecture.md](docs/maintainers/architecture.md#d18).
-
-**D19 — Playwright browsers are installed by a Fallout `Browsers` target; locally the browser suite skips with a reason,
-on CI a missing browser throws.** CI must never report a green run whose browser tests quietly did not happen; the skip
-message names the exact command that would install them. Full text: [testing.md](docs/maintainers/testing.md#d19).
 
 **D20 — The public API snapshot excludes `ComponentBase`-derived types.** Otherwise every markup edit is a contract
 change, the baseline becomes noise, and the one diff that mattered gets approved along with forty that did not. There is
@@ -351,68 +259,6 @@ open. Final validation is Opus: `studio-reviewer` (xhigh) reads every packet tha
 and the orchestrator reviews authorization code itself. Agents read AGENTS.md from context (CLAUDE.md imports it), never
 with a fresh Read. Then they Read only the topic document(s) the routing table names for their area. Full text:
 [build-and-release.md](docs/maintainers/build-and-release.md#d21).
-
-**D22 — `blazor.web.js` reaches the host through a `PackageReference`, not through a copy in this package.** The assets
-pack's `buildTransitive` targets make `_framework/blazor.web.js` the consuming project's own static web asset, and
-`MapStudioFrameworkScript` tries the host web root, then the host endpoint, then a normally absent packaged copy: the
-host's copy must always win. Full text: [ui.md](docs/maintainers/ui.md#d22).
-
-**D23 — The studio has no forms, so it disables antiforgery on its own endpoints.** There is no `<form>` or `<EditForm>`
-in `Components/`, so the component endpoints say `.DisableAntiforgery()` and a host that never calls
-`app.UseAntiforgery()` still serves them. A screen that grows a real form brings the token back, scoped to that
-endpoint. Full text: [ui.md](docs/maintainers/ui.md#d23).
-
-**D24 — The packages ship no Blazor JS initializer; the shell loads `js/studio.js` itself.** A file named
-`*.lib.module.js` in a package's `wwwroot` would be loaded into every Blazor app in the process (issue #2), so the shell
-document `StudioDocument.razor` loads the shell's classic `js/studio.js` itself, with a relative `src`.
-`NoJsInitializerTests` holds both halves. Full text: [ui.md](docs/maintainers/ui.md#d24).
-
-**D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.** A `<table
-class="ms-table">` is always inside `<TableScroll Label="…">` (or the documents list's own `.ms-table-wrap` carrying the
-same three attributes); `TablesAreScrollableTests` fails on a bare table. Fix a too-wide column first: the region is the
-floor, not the answer. Full text: [ui.md](docs/maintainers/ui.md#d25).
-
-**D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** Each packet's new rules
-go in a titled section appended to `src/DataStudio/wwwroot/css/studio.css`, and a section that re-declares an earlier selector wins by source order
-on purpose. Edit an existing rule in place only where the packet's report says so. Full text:
-[ui.md](docs/maintainers/ui.md#d26).
-
-**D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.** It lists the
-database's other objects by kind, gated like `RunSql`: `Capabilities.BrowseDatabase` (off by default and under
-`ReadOnly`) and `BrowsableSchemas`; every non-Marten definition and every row needs both, plus the write policy asked
-**with `TenantId = null`**. `Capabilities.ViewDefinitions` is the definitions' second way in, authorized the same way
-with its own name, and never reads a row. Marten's document and event tables and `mt_` objects are never read raw, and a
-hidden document type is absent from every list. `BrowsableSchemas` limits the screens, not `RunSql`: `SqlConsoleRole` is
-the real boundary. Every list reads `pg_catalog` and locks nothing it lists. **Reach, not scope:** an operation Marten
-runs over a whole database is authorized as `(store, database, null)` unless the database is exclusively the selected
-tenant's, never on a sharded tenancy (removing an orphaned progression row always asks `(store, database, null)`);
-the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`. Full text, with *D27 in
-the Postgres module*:
-[sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27).
-
-**D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and unconditional
-since the 9.57 floor.** It sits behind `RunLinqQueries` (off by default, authorized like a write), parsed by JasperFx's
-`DynamicQuery` under `DynamicQueryPolicy` behind a lexical screen and the studio's own walk of the parsed tree, and
-built from `BuildLinqParser()` and `BuildDiagnosticCommand`, never `ToCommand`. The adapter is reached by reflection and
-fails closed on a JasperFx shape it does not recognise. It also targets the event log through `QueryRawEvents()`, never
-passed a tenant. `docs/linq-mode.md` is the threat model. Full text:
-[marten.md](docs/maintainers/marten.md#d28).
-
-**D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep is the database's,
-once per interval under no visitor's identity; what a visitor sees of it is decided per finding and per piece of
-evidence by three gates: `None` (what the Configuration page already says), `Database` (the store policy asked with
-`TenantId = null` about the store's registered key and the resolved database's own `Id.Identity`) and `Activity`
-(`ViewDatabaseActivity`, then that store policy, then the write policy with the capability named). A withheld finding is
-counted, never described. The two deliberate exceptions: T02, T22 and T23 (and the Statements page) read
-`pg_stat_statements` as the store's own role, fenced to `userid = current_user` and this database, while every other
-health read and console statement stays under `SqlConsoleRole`; and the opt-in ASP.NET Core health check runs with no
-visitor and reports only codes, outcomes, severities and counts, never a name, a tenant, a statement or anything
-Postgres said. An accepted check (`AcceptedChecks`, #35) still runs and is shown on its check's row, out of every count
-and state; acceptance changes no gate. **Database › Connection (D33) is the `Database` gate**, as is its
-paste-to-compare; only its sessions part and the pool peak counted by application name are `Activity`, recorded
-separately, and the Overview's line asks for neither. A finding may offer an on-demand action
-(`IHealthFindingAction`, internal): one visitor's, under at least the finding's gate, audited, and kept nowhere; E06's
-reads `mt_streams` as `SqlConsoleRole`. Full text: [health-engine.md](docs/maintainers/health-engine.md#d29).
 
 **D30 — One shell, three modules, and an engine you can take alone.** `DataStudio` is the shell every module draws into;
 `DataStudio.Postgres` is the database module, Marten-free (hard rule 16), and `DataStudio.Marten` is built on it through
@@ -431,222 +277,12 @@ is deliberately unrelated to `MartenStoreResource` and `KafkaTopicResource`: a h
 module's words are its own (`MartenText`, `PostgresText`, `KafkaText`, D49), so a change in one module moves no other's; static assets live only in
 `_content/DataStudio/`. Full text: [architecture.md](docs/maintainers/architecture.md#d30).
 
-**D31 — The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the
-studio.** `IPostgresDiagnostics` (registered by `AddPostgresDiagnostics()`, or by `AddPostgres()` and `AddMarten()`) returns what the engine
-found, for the host's own code, by stable code; there are no mutes without a UI, and its studio paths are mount-relative
-strings (`postgres/health`) that mean nothing where no studio is mounted; results are
-extend-only records, and activity-grade data is returned only when the call sets `IncludeActivity = true`. The studio
-never serves it: nothing in any package puts an API result into an HTTP response, a log line above Debug, a metric,
-the Activity ring or the health check's data, and no endpoint maps one; the Health page's Snapshot download, its
-Markdown report and its compare are built from the visitor's own gated view, never from this API, and an API call is not
-audited. A code is a letter and two digits, never reused, renamed or moved to another area, and a variant is frozen
-within its code. Full text: [architecture.md](docs/maintainers/architecture.md#d31).
-
-**D32 — The studio draws every plan, plan insights judge it, and EXPLAIN ANALYZE is the console's alone.** Every plan is
-drawn through `QueryPlanReader` and `PlanView`; plan insights are pure evaluators with stable `P` codes in `codes.md`,
-never a health check; `EXPLAIN ANALYZE` runs only under `RunSql`, for a statement the guard accepts, in the read-only
-transaction; a plan reading a withheld schema is not shown. The facts Query › Plan reads beside a plan it ran
-pass each relation's schema and every ancestor's, then the row gate for values, which are never a Marten table's. The Marten
-module's own insights (P26 to P28) come through an internal seam, `IPlanInsightContributor`, that the Postgres module runs
-and the Marten module registers: pure evaluators over (plan, facts, the tables the store declares from `StoreOptions`, never a
-storage-ensuring call), for visible document types only, whose remedies are `StoreOptions` lines. Full text:
-[plan-analyzer.md](docs/maintainers/plan-analyzer.md).
-
-**D33 — The Connection page shows a data source's settings one by one, never its connection string.** A catalogue of the
-loaded Npgsql's keywords decides what is shown. A `Secret` keyword shows only "set" or "not set"; an unknown keyword's
-value is withheld; `PG*` environment values are shown on the same terms as their keyword, except `PGPASSWORD`; an
-`Options` value is shown only for real server settings; paths are shown and files are never read. The raw string and the
-meter's pool names never leave the reader, so no page, contributor, snapshot, log or audit entry can hold one, and the
-sentinel tests hold all of this. The gate is D29's `Database` (the sessions part is `Activity`), and paste-to-compare
-removes every secret before anything is read and keeps, logs and audits nothing. Full text:
-[architecture.md](docs/maintainers/architecture.md#d33).
-
-**D34 — A module joins the shell: the Kafka module is one, and so are the database modules.** `AddKafka()`, `AddPostgres()` and
-`AddMarten()` each add a module to the builder `AddDataStudio()` returned, and none maps anything: `MapDataStudio()` serves every
-module's pages, so there is no second map call to forget authorization on, and a module cannot be added without a shell. A module is
-an internal `IStudioModule` that the shell composes into its descriptor at first resolution, so what is refused does not depend on
-registration order and a host with no module is refused at map time; **modules are shown in registration order** (D49). **There is
-no root module**: every module's pages sit below a segment of its own under the mount (`{mount}/kafka/…`, `{mount}/marten/…`,
-`{mount}/postgres/…`), a page assembly's root is one unique segment and never one the shell uses, and the shell's own
-pages - the front page (one tile per module, or a redirect to its home when there is one) and Activity (`{mount}/activity`) -
-are pages of no module, with no scope selector, no header search and no scope gate. Every section title and item label on the composed rail is
-unique. On a module's page, known by the matched page's assembly and never by the address, the header draws that module's scope selector (and
-the Find box only on a database module's); on the Kafka module's pages the layout neither gates the body on a database module's scope nor reads
-or writes `?store=&db=&tenant=`, and that scope waits in memory; ids and scope travel in the query string (D9). A module's audit entries carry a
-scope kind and are judged only by the module's own gate; its words, capabilities and trademark line are its own. Full text:
-[kafka.md](docs/maintainers/kafka.md#d34).
-
-**D35 — The Kafka module is authorized on a resource of its own, by policies of its own.** `KafkaTopicResource(Cluster,
-TenantId, Topic, Capability)` is unrelated to `MartenStoreResource` and `PostgresResource`.
-`ClusterAuthorizationPolicy` is asked on every call, once per topic; `CapabilityAuthorizationPolicy` is asked for each
-capability use, once per topic, and falls back to the cluster policy. Neither ever falls back to the database modules'
-policies, which are written for their resources. The shell's `AuthorizationPolicy` decides who gets in, and
-its `ReadOnly` turns every Kafka capability off (the Kafka module has no switch of its own). `KafkaCapabilities` default to `false`, metadata needs none, and
-a startup guard refuses a capability that no policy answers. A request naming a refused topic is refused whole, never
-silently narrowed. Full text: [kafka.md](docs/maintainers/kafka.md#d35).
-
-**D36 — `DataStudio.Kafka.Core` is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake.** It holds
-the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, with no ASP.NET Core
-and no studio type, and Confluent.Kafka (floor 2.14.0) is its only client (plan K2). Every broker call goes through the
-internal `IKafkaWire`, whose only other implementation is the fast suite's hand-written fake broker; one contract suite
-runs on the fake and on real brokers (Kafka 3.9 and 4.x), so the fake cannot drift from Kafka. No Confluent type crosses
-the seam, and errors are values. Nothing connects at startup and nothing is a hosted service: one admin client per
-cluster, created on first use and disposed when idle, and one consumer per scan, on a thread of its own. Engine log events
-are 9650 to 9699. The lag read (group offsets) uses a per-cluster consumer that is never subscribed, through a dependent admin client
-drained before and after each read, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash
-(#5040) on `NOT_COORDINATOR` in `ListConsumerGroupOffsets`; remove it once the Confluent.Kafka floor contains librdkafka's fix
-(PR #5611). Full text: [kafka.md](docs/maintainers/kafka.md#d36).
-
-**D37 — In the Kafka module, a read never writes.** Every client the engine builds is a clone of the host's configuration with the
-engine's overrides: no topic auto-creation, no commit and no offset store, explicit offsets on every assign, a group id of
-its own that is never subscribed, `auto.offset.reset=error`, an explicit isolation level, the engine's own fetch and queue
-sizes, no statistics, no metrics push, and the engine's own log and error handlers. The host's builder delegates and
-handlers are never run or inherited; the one hook a host may give is OAuth token refresh, applied to the engine's own
-clients only. The engine sends no single-topic metadata request, lists no consumer groups, and has no produce, commit,
-delete or alter call at all: the seam does not have one. Live tests prove on the broker that scans created no topic,
-committed no offset and left no group. Full text: [kafka.md](docs/maintainers/kafka.md#d37).
-
-**D38 — The Kafka module's windows and negatives are truthful.** A window is `[from, to)`. Per partition, its start is
-offsets-for-times at `from`, which is exact; its end is offsets-for-times at `to` plus a margin under `CreateTime`, and at
-`to` under `LogAppendTime`; a record matches only if its own timestamp is in the window, so the margin widens the scan,
-never the window. Under `read_committed` a partition stops at its last stable offset and says so. Records lost to
-retention before or during a scan, records past the margin, undecidable records, pruned partitions and every stop are
-reported as values, so "no match" is said only of what was read. A scan stops for exactly one `KafkaScanStopReason` and
-keeps an exact per-partition cursor. Full text: [kafka.md](docs/maintainers/kafka.md#d38).
-
-**D39 — The Kafka module's search predicates are one hand-written grammar, three-valued, and compared as bytes where they can
-be.** The engine parses the grammar itself (no package and no expression escape hatch): `key`, `header.<name>`, `ce.<attribute>`
-and `any`, then, behind `ReadPayloads`, `value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`), which read a CloudEvent's
-data. A key literal is compiled to bytes through the topic's key format and compared without decoding; numbers compare as
-decimals and a type mismatch is false. A clause that needs a decode it cannot make is undecidable, never false, and
-undecidable records are counted. Clauses run cheapest first and short-circuit, which a decode counter proves. A key search
-reads only the partitions a declared partitioner maps the key to, and only after sampling the window verified the claim;
-one mismatch turns pruning off for that topic. An error names a position and never repeats a literal. Nothing is
-deserialized into a CLR type. Full text: [kafka.md](docs/maintainers/kafka.md#d39).
-
-**D40 — The Kafka module redacts inside the engine, before any sink.** A record leaves the engine only as a `KafkaMatch`, built by
-one factory after the topic's rules and the built-in header deny-list (`authorization`, `proxy-authorization`, `cookie`,
-`set-cookie`, `x-api-key`) have run; the wire record never leaves `DataStudio.Kafka.Core`. A rule that cannot be applied withholds
-the value. JSON-path and pattern rules mask parts of a value; a value they cannot be applied to is withheld, and value clauses compare
-what the visitor would see. A redacted field takes only `=` and `in`, `any` never reads one, and every text the engine writes for a sink -
-the audit's predicate, a permalink's predicate, an error - shows a literal on a redacted field as `<redacted>`. Full
-text: [kafka.md](docs/maintainers/kafka.md#d40).
-
-**D41 — The Kafka module bounds the cost of a scan in the engine.** Concurrency (two scans per process, one per owner), a byte rate
-(10 MiB/s per process, paced by consumption), per-scan bytes, records, duration and matches, and an owner's rolling
-hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per consumer (measured), and a kept match holds at most $c$ bytes of key, headers, attributes and value together, kept as UTF-16 text; about 253 MiB at the defaults, as private memory (`RssAnon` on Linux, where .NET's
-`PrivateMemorySize64` counts untouched mappings). A record read holds at most 21 matches and the value of the record asked for, up to MaxDecodeBytes; masking never grows a value past twice that. A scan above the confirmation
-threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. An export peaks at twice its file, so two in flight add $4 \cdot$ `MaxExportBytes` (D45), and a live tail holds at most $2 \cdot$ `TailCapacity` matches, its ring and one batch (D46), so the statement holds with tails counted in $S$. Full text:
-[kafka.md](docs/maintainers/kafka.md#d41).
-
-**D42 — The Kafka module correlates by declared fields, in one audited scan.** A topic's correlation fields (headers,
-CloudEvents attributes, the key, JSON paths under `ReadPayloads`) each have a kind, and fields of one kind are compared
-across topics. Wolverine's and CloudEvents' fields are the defaults. Keys come only from an anchor's literal,
-unmasked fields. Related records are one scan over the declared topics the visitor may read, each topic with its own
-predicate and grant (`KafkaTopicQuery`), estimated, confirmed, audited once with every topic's predicate, and refused
-whole when the visitor names a refused topic. Duplicates are found among the matches already held, and read nothing.
-Full text: [kafka.md](docs/maintainers/kafka.md#d42).
-
-**D43 — `DataStudio.Kafka.Wolverine` discovers configuration and nothing else.** `UseWolverineKafka()` reads the built
-`WolverineOptions` when the cluster registry is first built, through `DataStudio.Kafka.Core`'s internal `IKafkaClusterSource`
-(`InternalsVisibleTo`, an exact pin and a version guard), and its tenants once more after the host has started. It starts,
-connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
-clusters (`{cluster}/{tenant}`, `TenantId` on the resource, listed only under their listed cluster) come from a
-reflection probe of three members that fails closed. A discovered topic never replaces a host's descriptor, and
-discovery adds no redaction. Full text: [kafka.md](docs/maintainers/kafka.md#d43).
-
-**D44 — Links between modules are pure, internal and grant nothing.** `IStudioRouteLinks` (the Marten module implements it: a
-document by type and id, a stream by id or key, in the record's tenant: a static tenancy from its
-configuration, unless its rows are tenanted and it lists `KnownTenantIds`; a master-table, sharded or one-server tenancy only
-when it keeps its rows per tenant and lists no `KnownTenantIds`, so a master-table or one-server tenancy with single-tenanted
-rows gets no link) and `IStudioRecordSearchLinks` (the Kafka module implements it: "Find in Kafka") live in the shell
-beside the module seam, so neither module references the other (`IStudioLinks`, the database module's own, is in the Postgres module). A masked value never enters a URL, a value travels
-in the fragment, and the destination authorizes again. External links are host templates with no credential, opened with
-`noreferrer`. Full text: [kafka.md](docs/maintainers/kafka.md#d44).
-
-**D45 — The Kafka module exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs
-`SearchRecords`) writes the matches a search, a live tail or the record page already holds, as JSON Lines, CSV or one value, from
-`KafkaMatch` alone, so every mask is the engine's and nothing is read again; a JSON value is written compact on one line, and a CSV
-cell a spreadsheet would run is prefixed with `'`. The file is at most `MaxExportBytes`, written before it is sent, two at a time,
-and streamed to the browser with `DotNetStreamReference`: no endpoint, no token, nothing kept. The service asks the capability, the
-profile, every policy per topic and the payload grant again, refuses whole, is bound to the run on screen, and audits once however
-it ends (9606, 9609). `JsonView`'s Download stays off in the Kafka module, because a `data:` link cannot be gated or audited. Full text:
-[kafka.md](docs/maintainers/kafka.md#d45).
-
-**D46 — The Kafka module's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each
-partition's end (the last stable offset under `read_committed`), keeps the newest `TailCapacity` matches in a ring, renders at most
-four times a second, and holds a scan slot and pays the owner's budgets while it reads. It pauses by ending its segment - after
-`TailPauseAfter`, a segment's byte or record budget, an owner's budget, a hidden tab, or a cluster that stopped answering - and
-resumes from its exact cursor, the gate and the planned grant asked again. It never stops for silence and a caught-up partition is
-never stalled. A tail whose circuit loses its connection pauses (`ConnectionLost`, an ordinary pause) through the module's own
-scoped `CircuitHandler`, a no-op on a circuit with no tail and the only thing `AddKafka` adds to the host's circuits; on
-reconnect it resumes only if still paused for the drop and the browser, asked once, says the tab is shown, through the full
-gate with the identity the circuit held when the connection returned, so a changed identity takes effect at the next pause. One audit entry per tail session however it ends (9608), its start logged (9607). Full text:
-[kafka.md](docs/maintainers/kafka.md#d46).
-
-**D47 — The Kafka module's profiles lower limits per cluster, explicitly, and never grant.** `KafkaClusterBuilder.Profile(KafkaProfile.
-Development | Test | Production)` caps a cluster's per-scan limits from a fixed table, gives a profiled cluster its own byte rate
-and hourly owner budget (planning reads included), and under `Production` forbids export and live tail even when granted; the
-pages leave those controls out and Cluster settings names the setting (#74). A cluster with no profile uses the host's limits, and the Settings page says so; the profile
-is never inferred from `IHostEnvironment` or `Environment`. Concurrency and consumer sizes stay process-wide. The ceilings apply in
-the engine's plan, and tests prove no profile raises a limit or grants a capability. Full text:
-[kafka.md](docs/maintainers/kafka.md#d47).
-
-**D48 — The record-index seam narrows a search and proves nothing.** `IKafkaRecordIndex` (public, registered with
-`RecordIndex<T>()`, no implementation shipped, none in the sample: K6) is asked once per plain search for one unredacted
-equality on the key, a header or a CloudEvents attribute, about the visitor's authorized topics only. Its hints narrow each
-partition's range inside the window; every record there is still judged, a hint about another topic is dropped unseen, a failure
-reads the whole window (9679, kind only), and a negative is said only of the ranges read, with "Search the whole window" beside it.
-Full text: [kafka.md](docs/maintainers/kafka.md#d48).
-
 **D49 — One product, one wording, no 1.x.** The product is Data Studio and a module is Marten, Postgres or Kafka: no sentence,
 title, credit, tile, heading or log template says a removed product name (`ProductNamesTests`), there is no `StudioProduct`, each
 module's words are its own and are pinned in a `WordsTests` baseline of their own (one per module, and one for the engine alone), and
 each log event has one template, with its id, level and property names kept. Modules are shown in the order the host
 registered them. Nothing of 1.x is kept for compatibility: no old package id, registration call, option name, address (a 1.x
 address is a 404) or log category. Full text: [architecture.md](docs/maintainers/architecture.md#d49).
-
-## Package budget
-
-Complete. Versions are centrally pinned in `Directory.Packages.props`, with
-`CentralPackageTransitivePinningEnabled` on.
-
-| Where | Package | Version | Why it is here |
-|---|---|---|---|
-| `src/DataStudio.Marten` | `Marten` | `9.57.0` (latest tested `9.57.0`) | One of the two `PackageReference`s the shipped package makes (the other is the Postgres module, a project reference). Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Since 2026-11-03 the floor follows the latest release (the user's policy of 2026-11-02: consumers keep up with Marten): 9.57.0 fixes #5797, where compacting a stream that folds to null replaced its whole history with an empty snapshot, which `CompactStreams` exposed on every host below it, and it makes the run-time light-ups from 9.31 to 9.53 unconditional (see *Package budget changes*, 2026-11-03; the 9.39.0 security floor of 2026-10-15 is history). Both suites also run at a pinned latest-tested version, `DataStudioMartenLatest`, which equals the floor until the next Marten release; the package is packed only at the floor. JasperFx / JasperFx.Events 2.98.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.48.0 and Npgsql 9.0.4 arrive transitively at the floor. The module's own compilation drops the JasperFx source generator Marten bundles (`DataStudio.Marten.csproj`). |
-| `src/DataStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it is the shell's reference, and it reaches a Kafka host through the shell and a Marten host through the Postgres module and the shell, three hops (PS-0 measured two, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. The shell's nuspec lists it, and so do the Postgres, Marten and Kafka modules' (under `CentralPackageTransitivePinningEnabled` NuGet writes a centrally pinned transitive package into the nuspec), and `Pack` asserts each line. *Package budget changes* 2026-11-17. |
-| `src/DataStudio.Postgres.Diagnostics` | `Npgsql` | `9.0.4` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the Postgres module's: `src/DataStudio.Postgres` takes it through its `ProjectReference` to this project and does not reference it directly (*Package budget changes* 2026-11-01). The Postgres module has no Marten to bring it. A central row that only projects setting `DataStudioPostgresPinsNpgsql` see, so the Marten module keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin; 9.0.4 is Marten 9.57.0's own Npgsql, so a Marten host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`; *Package budget changes* 2026-11-03, which moved it from the 8.0.3 that PS-7 measured on 2026-10-26). `samples/DataStudio.Sample.Postgres.Data` references it directly too, and `samples/DataStudio.Sample.Postgres`, the worker sample, both Postgres test projects and `src/DataStudio.Postgres` itself set `DataStudioPostgresPinsNpgsql` so the same row pins it transitively; all of them are in `data-studio-postgres.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
-| `src/DataStudio.Postgres.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `DataStudioDiagnosticsPinsExtensions` (this one, and the worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in the Marten module and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
-| `src/DataStudio.Kafka.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | The Kafka module's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the Kafka projects reference it, and the Kafka sample transitively, for its seeder. Packed with this floor in its nuspec. *Package budget changes* 2026-11-09. |
-| `src/DataStudio.Kafka.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by `DataStudio.Kafka.Core` through `DataStudioKafkaCorePinsExtensions`: the Kafka engine has no ASP.NET Core either (D36). |
-| `tests/DataStudio.Kafka.Integration.Tests`, `samples/DataStudio.Sample.Kafka` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs; and the Kafka sample's throwaway `apache/kafka:4.4.0` (D18). |
-| `src/DataStudio.Kafka.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, `DataStudio.Kafka.Core`'s floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/DataStudio.Kafka.Wolverine.Tests` takes it through the project reference; `tests/DataStudio.Kafka.Integration.Tests` and `samples/DataStudio.Sample.Kafka` reference it for a real Wolverine host. *Package budget changes* 2026-11-12. |
-| `samples/DataStudio.Sample.Kafka` | `WolverineFx.RuntimeCompilation` | `6.61.0` | Wolverine's opt-in Roslyn code generation, for the sample's Wolverine application only (D-CORR decision 11): Wolverine 6.61 no longer ships its runtime compiler, and a host with a handler (`PlaceCheckoutHandler`, which stores a Marten document) needs it, or pre-generated code, to start. It matches `WolverineFx.Kafka` 6.61.0 and registers itself when referenced. One central row in `Directory.Packages.props`; no shipped package, no Kafka module or engine and no test project references it. *Package budget changes* 2026-11-12. |
-| the four sample hosts, `tests/DataStudio.Marten.Integration.Tests`, `tests/DataStudio.Postgres.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten, Postgres and Kafka sample hosts and the diagnostics worker), and the container each database integration suite runs against. |
-| `samples/DataStudio.Sample.Postgres.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `DataStudioDiagnosticsPinsExtensions` group: no shipped package references it directly. `DataStudio.Kafka.Wolverine`'s nuspec carries it as a minimum, through `DataStudioKafkaCorePinsExtensions` and transitive pinning; it equals WolverineFx 6.61's own net10.0 minimum and raises nothing. |
-| all eight test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
-| all eight test projects | `xunit.v3` | `3.2.2` | Held — see below. |
-| all eight test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
-| all eight test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
-| all eight test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
-| the three component suites (`tests/DataStudio.Marten.Tests`, `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Kafka.Tests`) | `bunit` | `2.13.3` | Component tests. |
-| the five fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
-| the five fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
-| `tests/DataStudio.Marten.Tests`, `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Kafka.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
-| `tests/DataStudio.Marten.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
-| `tests/DataStudio.Marten.Integration.Tests`, `tests/DataStudio.Postgres.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
-| `build/` | `Fallout.Common`, `Fallout.Components` | `10.5.0` | The orchestrator; the build project opts out of CPM. 10.5.0 brings `NuGet.Packaging` and `NuGet.Frameworks` 7.9.0 and `System.Security.Cryptography.Pkcs`/`.Xml` 10.0.13 itself, so `build/` pins nothing else (*Package budget changes* 2026-11-12). |
-
-SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
-
-### Package budget changes
-
-Every new package, floor move and latest-tested bump needs a dated entry in `docs/maintainers/package-budget-changes.md`
-first. What those entries settled, and the versions held deliberately (xunit.v3 3.2.2, Verify.XunitV3 32.0.0, Fallout
-10.5.0), are in
-[build-and-release.md](docs/maintainers/build-and-release.md#package-budget-changes). Floors follow the latest releases: at a minor
-release the Marten and Npgsql floors may move to the latest tested versions (user, 2026-11-02). Keep a Marten host on
-Marten's own Npgsql (`NpgsqlVersionTests`). Read a package's entries before changing its row.
 
 ## Layout
 
@@ -659,7 +295,7 @@ longer exists. The roots in brief:
   `src/DataStudio.Kafka/`, `src/DataStudio.Kafka.Core/` and `src/DataStudio.Kafka.Wolverine/` are the Kafka module, its engine and
   its Wolverine adapter. A module has `Components/`, `Services/` and, where it has SQL, `Internal/Sql/` (hard rule 4).
 - `samples/` holds the demo hosts and their demo data (D17, D18).
-- `tests/` holds the eight test projects (*Testing*).
+- `tests/` holds the eight test projects ([tests/AGENTS.md](tests/AGENTS.md)).
 - `build/` is the Fallout orchestrator.
 - `docs/` holds the user documentation. `docs/maintainers/` holds the layout tree, the budget's dated entries and the
   decision notes.
@@ -669,110 +305,14 @@ Outside those roots: `.github/workflows/` holds the four **generated** workflow 
 `data-studio.slnx` is the solution, `data-studio-postgres.slnf` is the solution filter the latest-Npgsql pass builds (the
 projects that set `DataStudioPostgresPinsNpgsql`, and the shell they reference, which has no Npgsql to pin), and `CHANGELOG.md` is the version authority.
 
-`docs/maintainers/` also holds the topic documents the routing table above names.
+`docs/maintainers/` also holds the topic documents the area files name.
 
-## Build
-
-The orchestrator is [Fallout](https://fallout.build) 10.5.0 (stable channel), the maintained hard fork of NUKE. The CLI
-is pinned in `.config/dotnet-tools.json` as `fallout.globaltool` (command `fallout`) and resolves `build/_build.csproj`
-by folder-name convention.
-
-**Follow the stable channel (10.x), never 11.0.x.** 11.0.x is the edge channel and sorts higher only as a versioning artifact;
-it would fail to compile (`GitHubActionsAttribute.Env`). Move to a new stable release when it ships. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#build).
+## Build, test, release
 
 ```powershell
-.\build.ps1 Test                           # restore, compile, install browsers if asked, run all eight test projects
-.\build.ps1 Test --playwright              # ... and install Chromium first (D19)
-.\build.ps1 Test --marten-version latest   # ... at the latest-tested Marten instead of the floor
-.\build.ps1 Test --npgsql-version latest   # ... and then the Postgres module's projects at the latest-tested Npgsql
-.\build.ps1 Test --confluent-version latest   # ... and the Kafka module at the latest-tested Confluent.Kafka
-.\build.ps1 Pack                           # the seven NuGet packages into artifacts/packages (always at the floors)
-.\build.ps1 Browsers                       # just the Chromium install
+.\build.ps1 Test                           # restore, compile, run all eight test projects
+.\build.ps1 Pack                           # the seven NuGet packages into artifacts/packages
+dotnet test tests\DataStudio.Marten.Tests   # one fast suite alone
 ```
 
-`CHANGELOG.md` is the **version authority**: its top section is parsed in `OnBuildInitialized` and passed to every
-compile, test and pack as `-p:Version=`. The file is never mutated by the build, and its first line must parse as a
-version header (`# 2.0.0`) — **do not add a `# Changelog` title**, it would abort the build. `Directory.Build.props`'s
-`VersionPrefix` is only the fallback for a plain `dotnet build`, and `VersionFallbackTests` holds it to the CHANGELOG's
-top version (without a prerelease suffix): a new CHANGELOG section moves it in the same pull request.
-
-Keep changelog entries as `- ` bullets with wrapped continuation lines: the GitHub Release body is built from them, and
-anything else ships it empty (*Release engineering*).
-
-The Marten version is `Directory.Packages.props`'s: `DataStudioMartenFloor` and `DataStudioMartenLatest`, chosen by
-`--marten-version` (`floor`, `latest` or an exact version, never a range). `Pack` packs at the floors only and refuses
-anything else. The Postgres module's Npgsql follows the same scheme with `--npgsql-version` (`DataStudioNpgsqlFloor`,
-`DataStudioNpgsqlLatest`); anything but its floor gets a pass of its own over `data-studio-postgres.slnf`, never the `.slnx`.
-The Kafka module's Confluent.Kafka follows it with `--confluent-version` (`DataStudioConfluentFloor`, `DataStudioConfluentLatest`).
-`Pack` packs `src/DataStudio.Postgres.Diagnostics`, then `src/DataStudio`, then `src/DataStudio.Postgres`, then
-`src/DataStudio.Marten`, all at the CHANGELOG version, each depending on exactly the ones below it
-(`DataStudio.Postgres.Diagnostics [<version>]`, `DataStudio [<version>]`, `DataStudio.Postgres [<version>]`), then
-`src/DataStudio.Kafka.Core`, `src/DataStudio.Kafka` and `src/DataStudio.Kafka.Wolverine` at the same version
-(`DataStudio.Kafka` on exactly `DataStudio [<version>]` and that `DataStudio.Kafka.Core`, `DataStudio.Kafka.Wolverine` on exactly
-that `DataStudio.Kafka.Core`), and `Publish` pushes the seven in that order. Package validation has no baseline for the new ids
-(`PackageValidationBaselineVersion` is empty for 2.0, and is set to `2.0.0` one release later). The
-build needs at least one commit. To bump the latest-tested Marten, change `DataStudioMartenLatest`, run the suites
-with `--marten-version latest` and fix or record every difference, in a pull request of its own. A project that sets
-`DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request. Full text:
-[build-and-release.md](docs/maintainers/build-and-release.md#build).
-
-## Testing
-
-```powershell
-.\build.ps1 Test                                          # everything, through the orchestrator
-.\build.ps1 Test --marten-version latest                  # everything, at the latest-tested Marten
-dotnet test tests\DataStudio.Marten.Tests                       # a fast suite alone
-$env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
-dotnet test tests\DataStudio.Marten.Integration.Tests           # needs Docker - run `docker info` first
-dotnet test tests\DataStudio.Marten.Tests -p:DataStudioMartenVersion=9.57.0   # one suite at another Marten
-dotnet test tests\DataStudio.Marten.Tests --filter "FullyQualifiedName~ApiSurface"
-dotnet test tests\DataStudio.Tests                              # the shell's fast suite
-dotnet test tests\DataStudio.Postgres.Tests                     # the Postgres module's fast suite
-dotnet test tests\DataStudio.Postgres.Integration.Tests         # its live suite - needs Docker
-dotnet test tests\DataStudio.Kafka.Tests                        # the Kafka module's fast suite: a Kafka-only host
-.\build.ps1 Test --npgsql-version latest                  # ... and then the Postgres module's projects at the latest-tested Npgsql
-dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3   # that pass alone; never the .slnx
-```
-
-**The suites run at two Marten versions** (both 9.57.0 until the next latest-tested bump): the floor (`build.yml`) and
-the pinned latest-tested 9.x (`marten-latest.yml`, which runs `dotnet fallout Test` with `MARTEN_VERSION: latest`). A
-change is green only when both are. A fix for a behavioural difference between them must hold at both ends; one that
-needs a member only the newer side has is run-time light-up behind a probe, unless the floor itself moves to that
-version (allowed since the user's 2026-11-02 policy; *Package budget changes* 2026-11-03). `PublicApiTest` must pass at
-both without a baseline edit, which is one reason `JasperFxSourceGeneratorTests` exists.
-
-Container reuse is on by default locally (a second run attaches to the same Postgres) and off on CI.
-`MARTENSTUDIO_PG_REUSE=false` is how one run opts out (the variable keeps the name the repository started with, and it governs
-every container the suites start), which every run that might overlap another — parallel agent
-packets, two terminals — must do, because schema names derive from test class names and two runs on one reused container
-drop each other's tables. `TESTCONTAINERS_REUSE_ENABLE` is **not** read by Testcontainers 4.x (verified by
-decompilation, 2026-09-14) and must not be used.
-
-There are seven kinds of test, in eight projects: unit, component, endpoint and metadata, public API snapshot,
-conventions, Marten API surface, and integration and browser. Waits are always wait-on-condition, **never
-`Task.Delay`**. Integration tests drive everything through the studio's own services, so the gating is exercised, not
-bypassed. A class that needs a server setting of its own starts a `postgres:17-alpine` of its own, never reused; a test
-that creates, grants or alters a role on the matrix takes `PostgresVersionMatrix.IsolatedServerAsync`, never
-`ServerAsync`; a live test that needs a `VACUUM` to remove rows, or resets statistics, works in a database of its own.
-Marten, JasperFx and Wolverine sources are the sibling checkouts `D:\Work\marten`, `D:\Work\jasperfx` and
-`D:\Work\wolverine` (check out the tag `Directory.Packages.props` pins); read them before decompiling, and never modify
-them. What each kind holds and the live-suite rules: [testing.md](docs/maintainers/testing.md).
-
-Run `docker info` before the integration suite. If Docker is not running, say so — a skipped Docker suite reported as a
-pass is worse than a failure.
-
-To approve a Verify baseline: run the test, open the `.received.*` next to the `.verified.*`, read the diff line by
-line, then accept it (`dotnet test` with `DiffEngine` open, or rename the file). `*.received.*` is gitignored and must
-never be committed; `*.verified.txt` is checked out LF and UTF-8 by `.gitattributes` because it is compared byte for
-byte.
-
-## Release engineering
-
-A release is cut by pushing a `v*.*.*` tag, which starts **two independent workflows**: `publish.yml` (nuget.org) and
-`release.yml` (the GitHub Release). `CHANGELOG.md` stays the version authority: land the changelog entry first, then tag
-that commit; `CreateGitHubRelease` and `Publish` both refuse unless `GITHUB_REF_NAME` equals `v{version parsed from
-CHANGELOG.md}`. The one workflow that can mint a nuget.org key (`publish.yml`, `id-token: write`) must not also hold
-repository write. Never push a release version by hand. Run the ladder locally (`dotnet fallout Pack`, then `dotnet
-fallout Publish --skip`) before any tag. The NuGet leg, the token exchange's pitfalls and the one-time setup (the one existing
-trusted-publishing policy covers every id of the repository, the seven 2.0 ids included; its owner confirms that before the first 2.0 tag):
-[build-and-release.md](docs/maintainers/build-and-release.md#release-engineering).
+`CHANGELOG.md` is the version authority, and its first line must be a version header. The orchestrator, the version switches, the package budget and how a release is cut are in [build/AGENTS.md](build/AGENTS.md); the suites, container reuse (`MARTENSTUDIO_PG_REUSE=false` for any run that might overlap another), Docker and Verify baselines are in [tests/AGENTS.md](tests/AGENTS.md).

@@ -1,0 +1,1 @@
+@../DataStudio.Postgres/AGENTS.md

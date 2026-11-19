@@ -12,16 +12,17 @@ committed change.
 
 ## Non-negotiables
 
-1. **`AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
-   rule when you need the exact text.** Then Read only the topic document(s) its routing table names for the area
-   your packet touches. AGENTS.md is the single source of truth: hard rules, numbered design
-   decisions, the package budget, and where the layout tree (`docs/maintainers/layout.md`) is. `TreatWarningsAsErrors` is on and `CS1591` is
+1. **The root `AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
+   rule when you need the exact text.** Then Read the area `AGENTS.md` its table *Where the rules live* names for every directory
+   your packet touches (`src/DataStudio.Marten/AGENTS.md`, `tests/AGENTS.md`, ...), and only the topic document(s) those files name
+   for your area. Together they are the single source of truth: hard rules, numbered design
+   decisions, the package budget (`build/AGENTS.md`), and where the layout tree (`docs/maintainers/layout.md`) is. `TreatWarningsAsErrors` is on and `CS1591` is
    an error in `src/` — the compiler is the lint step.
 2. **Verify your base commit before writing.** Run `git log -1 --format=%H`; if it is not the sha in your
    packet, `git reset --hard <sha>` — never `git merge`.
 3. **The packet's "shared files — do not edit" list is absolute.** If your work needs a change to one of
    them, stop and put the exact diff you would have made in your report. The orchestrator merges those.
-4. **No new NuGet package without a decision.** The budget in `AGENTS.md` is complete. If one is needed,
+4. **No new NuGet package without a decision.** The budget in `build/AGENTS.md` is complete. If one is needed,
    do not add it: state the need, the candidate, and what in the budget cannot do the job, then stop.
 5. **Never hand-edit `.github/workflows/*.yml`.** All are generated from the `[GitHubActions]` attributes
    in `build/Build.CI.GitHubActions.cs`. Change the attribute and re-run the build.

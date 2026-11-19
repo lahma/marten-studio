@@ -12,9 +12,9 @@ the packet says and nothing more.
 
 ## Rules
 
-1. `AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
-   rule when you need the exact text. Then Read only the topic document(s) its routing table names for the area
-   your packet touches. Follow its hard rules.
+1. The root `AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
+   rule when you need the exact text. Then Read the area `AGENTS.md` its table *Where the rules live* names for every directory
+   your packet touches, and only the topic document(s) those files name for your area. Follow their hard rules.
 2. **If any step requires a decision the packet does not make, stop and report the question instead of
    guessing.** A packet you cannot finish mechanically is a finding, not a licence to improvise.
 3. Never add a NuGet package. Never touch the packet's "shared files — do not edit". Never edit
