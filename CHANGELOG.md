@@ -7,6 +7,10 @@
   partition with a problem for one refresh, with `OffsetsProblem` empty.
 - A consumer group on Kafka 4's own consumer protocol (`group.protocol=consumer`) is described like any other: a live test
   on Kafka 4.4 now proves its state, member and partitions, at the Confluent.Kafka floor and at the latest tested version.
+- The Kafka sample and the Kafka live suite name their container's vendor, so they start on .NET 11.0.0 as well. That runtime
+  throws from `enumValue.Equals(nullableEnum)` once the code is optimised (dotnet/runtime#137270), which Testcontainers.Kafka
+  4.15.0 runs into when it reads the vendor from the image name (testcontainers-dotnet#1830). Nothing that ships uses that
+  call; the suites now also build under the .NET 11 SDK with warnings as errors.
 - For maintainers: a component test holds the SQL editor's buttons to doing nothing when the editor went away while its
   box was read; a Kafka test fails only the first-offset read; the zone tests that prove a legacy spelling in a cookie or
   a choice now run wherever the host knows the current name, which includes the CI runner.

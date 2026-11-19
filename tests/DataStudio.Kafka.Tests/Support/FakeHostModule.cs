@@ -154,7 +154,12 @@ internal sealed class FakeHostGate : ComponentBase
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
+        // Asked once, on purpose: this fake stands for a host gate that is created again each time the layout draws a page of its module, and
+        // the tests count how often its policy is asked. The .NET 11 SDK's BL0013 wants a component that reads the state to follow its
+        // changes too, which would change that count.
+#pragma warning disable BL0013
         AuthenticationState visitor = await Authentication.GetAuthenticationStateAsync();
+#pragma warning restore BL0013
         AuthorizationResult result = await Authorization.AuthorizeAsync(visitor.User, new FakeHostResource(), "host-source");
         state = result.Succeeded ? State.Allowed : State.Refused;
     }

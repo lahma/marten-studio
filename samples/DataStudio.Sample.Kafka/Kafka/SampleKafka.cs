@@ -106,6 +106,11 @@ internal sealed class SampleKafka : IAsyncDisposable
     internal static KafkaContainer CreateContainer(bool reuse, string? packet)
     {
         KafkaBuilder builder = new KafkaBuilder(Image)
+            // The vendor is named, not left for the builder to read from the image name. Testcontainers.Kafka 4.15.0 finds an unnamed
+            // vendor with `enumValue.Equals(nullableEnum)`, which .NET 11.0.0 answers with a NullReferenceException once the code is
+            // optimised (dotnet/runtime#137270): the first containers of a process build, and a later one throws. Naming the vendor
+            // keeps the nullable out of that call. Remove this line when the Testcontainers.Kafka in use has testcontainers-dotnet#1830.
+            .WithVendor(KafkaVendor.ApacheSoftwareFoundation)
 
             // Testcontainers 4.15.0's startup script ends KAFKA_ADVERTISED_LISTENERS with a comma when the container has no additional
             // advertised listener, and Kafka 4.4 refuses an empty entry ("advertised.listeners values must not be empty"). One more
