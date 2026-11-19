@@ -193,3 +193,13 @@ rendered overlay (hard rule 15). The shortcut sheet is `ShortcutSheet` in the sh
 the shell's `StudioShortcuts.Shared` plus `StudioShellDescriptor.ExtraShortcuts`, which is every module's shortcuts in module order (the SQL editor's, the JSON viewer's, a table row's and the plan view's are the Postgres and Marten modules' own), and `ShortcutSheetMatchesHandlersTests` fails when a handler
 and the list drift. `::backdrop` is the only new visual. Native `close` events may arrive late: never act on one while
 `dialog.open`.
+
+## Text kept as it is typed is bound
+
+A box whose text the server keeps on every keystroke (a typed confirmation, a filter, a search predicate) is written
+`@bind:get="field" @bind:event="oninput" @bind:set="Handler"`, never `value="@field"` beside an `@oninput` handler that
+sets the field. With the hand-written pair, the render after each keystroke sends the box the value the server had, and
+on a slow connection that arrives after later keystrokes and puts older text back: characters are lost, and a typed
+confirmation stops matching its phrase. A bind tells the renderer what the box held when the event was raised, so a
+render sends it nothing it already has. `TypedTextIsBoundTests` scans `src/` for the pair; its two exceptions (the SQL
+editor and LINQ mode's order-by box) commit on `change`, and their `@oninput` handler only clears an error.

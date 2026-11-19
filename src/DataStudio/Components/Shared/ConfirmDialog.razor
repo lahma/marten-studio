@@ -22,9 +22,10 @@
                    type="text"
                    autocomplete="off"
                    spellcheck="false"
-                   value="@typed"
+                   @bind:get="typed"
                    data-ms-dialog-focus
-                   @oninput="OnTypedAsync"
+                   @bind:event="oninput"
+                   @bind:set="OnTypedAsync"
                    @onkeydown="OnTypedKeyAsync" />
         }
 
@@ -135,9 +136,9 @@
         wasOpen = IsOpen;
     }
 
-    private Task OnTypedAsync(ChangeEventArgs args)
+    private Task OnTypedAsync(string? value)
     {
-        typed = args.Value?.ToString() ?? string.Empty;
+        typed = value ?? string.Empty;
         return Task.CompletedTask;
     }
 

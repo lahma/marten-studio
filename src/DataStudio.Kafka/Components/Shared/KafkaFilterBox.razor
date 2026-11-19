@@ -8,8 +8,9 @@
        class="ms-input ms-search-filter ms-k-filter"
        placeholder="@Placeholder"
        aria-label="@Placeholder"
-       value="@current"
-       @oninput="OnInputAsync" />
+       @bind:get="current"
+       @bind:event="oninput"
+       @bind:set="OnInputAsync" />
 
 @code {
     private CancellationTokenSource debounce = new();
@@ -48,9 +49,9 @@
         }
     }
 
-    private async Task OnInputAsync(ChangeEventArgs args)
+    private async Task OnInputAsync(string? value)
     {
-        current = args.Value?.ToString() ?? string.Empty;
+        current = value ?? string.Empty;
         string text = current;
 
         await debounce.CancelAsync();

@@ -112,6 +112,58 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         });
 
     /// <summary>
+    /// A phrase typed while the server's answers are late (g22x): every answer to a keystroke arrives after later keystrokes, and none of
+    /// them may put an older value back in the box. On a GitHub runner that happened without any help (2026-11-19, twice): the phrase in
+    /// the box no longer matched and the dialog stayed open. Here the circuit's messages are held back 150 ms and a key is typed every 40.
+    /// </summary>
+    [BrowserFact]
+    public Task A_phrase_typed_over_a_slow_connection_is_the_phrase_in_the_box() =>
+        RunAsync("uxfix-confirm-slow", async studio =>
+        {
+            IPage page = studio.Page;
+            await page.SetViewportSizeAsync(1280, 900);
+
+            // SignalR's transport sets onmessage on its socket: what the server sends is handed over 150 ms later, in order.
+            await page.AddInitScriptAsync(
+                """
+                (() => {
+                    const descriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
+                    Object.defineProperty(WebSocket.prototype, 'onmessage', {
+                        configurable: true,
+                        get() { return descriptor.get.call(this); },
+                        set(handler) {
+                            descriptor.set.call(this, typeof handler !== 'function' || !window.__msSlowCircuit
+                                ? handler
+                                : function (message) { const socket = this; setTimeout(() => handler.call(socket, message), window.__msSlowCircuit); });
+                        }
+                    });
+                    window.__msSlowCircuit = 150;
+                })();
+                """);
+
+            await studio.GoAsync(fixture.Root.StudioUrl("marten/projections"));
+
+            ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
+            await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await rebuild.ClickAsync();
+
+            await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
+            string name = await page.Locator(".ms-confirm-label code").InnerTextAsync();
+
+            await page.Keyboard.TypeAsync(name, new KeyboardTypeOptions { Delay = 40 });
+
+            // Every answer has arrived when Confirm stops saying it is disabled; the box then holds what was typed, and it held nothing else on
+            // the way that the visitor's next key would have been added to.
+            await page.WaitForFunctionAsync("() => document.querySelector('.ms-confirm-actions .ms-button-danger').getAttribute('aria-disabled') !== 'true'", null, Wait);
+            (await page.Locator("#ms-confirm-input").InputValueAsync()).Should().Be(name);
+
+            await page.Keyboard.PressAsync("Escape");
+            await page.WaitForFunctionAsync("() => document.querySelector('dialog.ms-confirm-overlay') === null", null, Wait);
+
+            studio.AssertClean("typing a confirmation's phrase over a slow connection");
+        });
+
+    /// <summary>
     /// The Overview's tiles at 1440 and 1280 px: nothing a tile draws is wider than its card (the Health tile's "N suggestions" ran out of
     /// it at 1440).
     /// </summary>
