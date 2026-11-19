@@ -199,11 +199,7 @@ version with a hyphen, so the GitHub Release of a beta is marked a prerelease, a
 The version guards compare informational versions up to the `+`, so the suffix is part of what must match:
 `KafkaWolverineVersionGuard` compares the adapter with `DataStudio.Kafka.Core`, and `KafkaCoreVersionGuard` compares the shell and
 `DataStudio.Kafka.Core` with the Kafka module's own. Package validation runs on all seven with no baseline (below). The documentation of a
-beta says so in a few marked places, each carrying the text `beta: remove at 2.0.0`: the README's note and install lines, the package READMEs' and the
-Kafka and database pages' install lines, `docs/upgrading.md`'s and `docs/stability.md`'s notes, and `SECURITY.md`'s 1.3.x row. In prose and
-tables the marker is the HTML comment `<!-- beta: remove at 2.0.0 -->`; a command block gets the same comment on the line directly above its fence,
-because inside the fence a comment would be shown, and a `#` comment after a command breaks it when pasted into `cmd.exe`. The release of `2.0.0`
-finds every place with one command, `git grep "beta: remove at 2.0.0"`, and removes what each marks (the note, the row, the `--prerelease` of an install line) together with the marker.
+beta said so in marked places (the README's note and install lines, the package READMEs' and the Kafka and database pages' install lines, the notes of `docs/upgrading.md` and `docs/stability.md`, and `SECURITY.md`'s 1.3.x row), each carrying an HTML comment that one `git grep` found; 2.0.0 removed what each marked. A later prerelease marks its places the same way: in prose and tables an HTML comment, and for a command block the comment on the line directly above its fence, because inside the fence it would be shown and a `#` comment after a command breaks it when pasted into `cmd.exe`.
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);

@@ -2,11 +2,6 @@
 
 ## 1.x → 2.0: one product, Data Studio
 
-<!-- beta: remove at 2.0.0 -->
-**2.0 is in beta** (`2.0.0-beta.4`), published for trial: names, addresses and options may still move before `2.0.0`
-([stability.md](stability.md)). Every package is a prerelease, so install with `--prerelease`, and pin the beta version
-exactly.
-
 2.0 turns Marten Studio, Postgres Studio and KStudio into one product, Data Studio, with three modules: Marten, Postgres
 and Kafka. Packages, registration, options, types, addresses, log categories and the studio's wording all changed, on
 purpose and without a bridge: no 1.x name, call or address is kept as an alias, and no redirect leads from an old address
@@ -21,8 +16,7 @@ step-by-step path through 1.3.x: go to 2.0 in one move.
 1. **Replace the packages** (the table under "Packages"). Remove `MartenStudio`, `PostgresStudio`,
    `PostgresStudio.Diagnostics`, `KStudio`, `KStudio.Core` and `KStudio.Wolverine` and add the 2.0 ids. If your repository
    keeps a central `PackageVersion` for any of them, rename it and keep every `DataStudio*` package at one version: each
-   depends on exactly its own version of the ones below it and checks that at startup. While 2.0 is in beta that version
-   is `2.0.0-beta.4` and installing needs `--prerelease`. <!-- beta: remove at 2.0.0 -->
+   depends on exactly its own version of the ones below it and checks that at startup.
 2. **Replace the registration.** One call registers the shell, and one call per module adds a module to it:
 
    ```csharp

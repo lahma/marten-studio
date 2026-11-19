@@ -2,10 +2,9 @@
 
 For a Wolverine application's clusters and topics, run the second line as well.
 
-<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Kafka --prerelease
-dotnet add package DataStudio.Kafka.Wolverine --prerelease
+dotnet add package DataStudio.Kafka
+dotnet add package DataStudio.Kafka.Wolverine
 ```
 
 The Kafka module of [Data Studio](https://github.com/lahma/marten-studio#readme): a Kafka section inside your own ASP.NET

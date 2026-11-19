@@ -256,9 +256,8 @@ Take it when the host has no UI to mount and only wants the findings:
   pulling a Blazor UI into every one of them;
 - an application that wants the **health check** (`AddHealthChecks().AddPostgresDiagnostics()`) and no pages.
 
-<!-- beta: remove at 2.0.0 -->
 ```shell
-dotnet add package DataStudio.Postgres.Diagnostics --prerelease
+dotnet add package DataStudio.Postgres.Diagnostics
 ```
 
 ```csharp
