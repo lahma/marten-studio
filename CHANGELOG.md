@@ -2,9 +2,23 @@
 
 2.0.0 is the first stable release of Data Studio: one embeddable admin UI for the Marten stores, PostgreSQL data sources and
 Kafka clusters an ASP.NET Core application already uses, as seven packages at one version. It replaces Marten Studio,
-Postgres Studio and KStudio 1.x; [docs/upgrading.md](docs/upgrading.md) is the move from 1.x, and the sections of the four
-betas below say what 2.0 is and how it changed on the way. Since 2.0.0-beta.3:
+Postgres Studio and KStudio 1.x; [docs/upgrading.md](docs/upgrading.md) is the move from 1.x, and the sections of the
+three betas below say what 2.0 is and how it changed on the way. Since 2.0.0-beta.3:
 
+- A consumer group read that timed out no longer leaves the process open to a crash when the broker returns (#97). A group
+  call (describing a group, or reading its committed offsets) that ends `Local_TimedOut` or `RequestTimedOut` now replaces the
+  client it ran on, every time; an answer of `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` still replaces it at
+  most once in 30 seconds. librdkafka keeps a timed-out group request's coordinator lookup waiting, and when a broker comes
+  back it releases the request twice (confluentinc/librdkafka#4605): an abort on Linux and macOS, an access violation or a
+  damaged heap on Windows. No Confluent.Kafka version has a fix, so upgrading it does not help; closing the client first
+  does. Before this, group reads through a broker restart ended in that crash (seen at Confluent.Kafka 2.14.0) or kept
+  timing out for about five minutes (at 2.16.0). What remains: a client that timed out stays open while another read of it is
+  still running, at most one request timeout (10 seconds, twice that for one offsets read), and a broker returning inside
+  that time can still crash the process. During an outage each timed-out group read costs one client rebuild.
+  [docs/kafka.md](docs/kafka.md#when-a-broker-goes-away) says what a host can do.
+- The Kafka module runs one read per key at a time. A read that is still running is shared by whoever asks next, however
+  long it has run, where a second read of the same thing used to start beside it after the refresh interval. An answer can
+  therefore come from a read that started up to one request timeout earlier.
 - `IKafkaDiagnostics.GetGroupAsync` lists a partition that no member owns and the group has committed nothing to only
   when its committed or end offset could not be read. When the first-offset read alone failed, beta.3 listed every such
   partition with a problem for one refresh, with `OffsetsProblem` empty.
