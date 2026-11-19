@@ -28,6 +28,20 @@ public class ConfluentErrorMappingTests
             .Should().Be(new WireError.NotAuthorized(Enum.Parse<KafkaAclOperation>(expected), KafkaResourceType.Topic, "orders"));
     }
 
+    [Theory]
+    [InlineData(ErrorCode.NotCoordinatorForGroup, "NotCoordinatorForGroup")]
+    [InlineData(ErrorCode.GroupCoordinatorNotAvailable, "GroupCoordinatorNotAvailable")]
+    [InlineData(ErrorCode.GroupLoadInProgress, null)]
+    [InlineData(ErrorCode.RequestTimedOut, null)]
+    [InlineData(ErrorCode.GroupAuthorizationFailed, null)]
+    public void A_group_call_answered_with_a_coordinator_that_moved_or_left_replaces_its_client(ErrorCode code, string? expected)
+    {
+        // D50: the client the call ran on is replaced; GroupLoadInProgress is the right coordinator, still loading, so it keeps the client.
+        ConfluentWire.StaleCoordinator(Map(code, WireCall.DescribeGroup)).Should().Be(expected);
+        ConfluentWire.StaleCoordinator(Map(code, WireCall.GroupOffsets)).Should().Be(expected);
+        ConfluentWire.StaleCoordinator(null).Should().BeNull();
+    }
+
     [Fact]
     public void A_group_authorization_failure_is_a_describe_refusal_on_the_group()
     {

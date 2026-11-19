@@ -380,6 +380,51 @@ The Settings page says what was not listed and why, without names.
 
 A policy that checks only `Cluster` admits every tenant entry of that cluster: check `TenantId` to tell tenants apart.
 
+## Diagnostics API
+
+Your own code can read what the Kafka pages read, without an admin client of its own: resolve `IKafkaDiagnostics`, which
+`AddKafka()` registers. It goes through the Kafka module's pooled clients and caches, so an answer may be up to the shell's
+`RefreshInterval` old, and it asks no visitor's policy or capability: it reads what the application's credentials may read.
+Nothing it returns is served by the studio.
+
+```csharp
+public sealed class ConsumerHealthCheck(IKafkaDiagnostics kafka) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        KafkaClusterStatus cluster = await kafka.GetClusterAsync("wolverine", ["orders"], cancellationToken);
+
+        if (cluster.Problem is { } problem || cluster.Topics.Any(static x => !x.Listed))
+        {
+            return HealthCheckResult.Unhealthy(cluster.Problem?.Sentence ?? "The orders topic is not listed.");
+        }
+
+        KafkaGroupStatus group = await kafka.GetGroupAsync("wolverine", "orders-service", ["orders"], cancellationToken);
+        KafkaMemberPlace place = group.PlaceOf("orders-service-1");
+
+        return place.HasNothingToRead || place.State == KafkaMemberState.Behind
+            ? HealthCheckResult.Healthy($"{group.TotalLag} records behind")
+            : HealthCheckResult.Degraded(place.Detail);
+    }
+}
+```
+
+- `GetClusterAsync(cluster, topics)`: whether the cluster answers, how many brokers its metadata names, and whether it lists each
+  topic you name.
+- `GetTopicAsync(cluster, topic)`: each partition's first and end offset, and `retention.ms`, `retention.bytes` and
+  `cleanup.policy`.
+- `GetGroupAsync(cluster, groupId, topics)`: the group's state, its members with their client ids, hosts and partitions, and the
+  committed offset, end offset, lag and owning member of each partition a member is assigned or the group has committed to on the
+  topics you name. Data Studio never lists every committed offset of a cluster, so name the topics the group reads: a group with
+  no member shows its position only on those.
+- `PlaceOf(clientId)` on a group says where one member stands: `Standby` (it has no partition, because the topics have fewer
+  partitions than the group has members), `CaughtUp`, `Behind`, `NotAMember` (the coordinator removed it, or it never joined) or
+  `Unknown` (the group could not be read). It tells a quiet consumer from a stuck one.
+
+A refusal, a missing topic or an unreachable cluster is a `KafkaReadProblem` on the part of the answer it withheld (its outcome,
+the client's error code and a sentence such as "Not available: needs `DESCRIBE` on group `orders-service`"), and the rest is still
+read. Only an unknown cluster key throws. The cluster keys are in `IKafkaDiagnostics.Clusters`.
+
 ## Links
 
 In a host with the Marten module, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document

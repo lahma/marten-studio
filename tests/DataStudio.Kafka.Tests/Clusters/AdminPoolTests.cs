@@ -352,4 +352,60 @@ public class AdminPoolTests
 
         rig.Created[0].Disposed.Should().BeFalse("the second lease is still held");
     }
+
+    [Fact]
+    public void A_client_answered_with_a_stale_coordinator_is_replaced_once_and_disposed_when_its_last_lease_is_released()
+    {
+        // D50: librdkafka's admin API keeps a looked-up group coordinator for as long as the client is used, so the client is replaced.
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease failed = rig.Pool.Rent(Cluster("a"));
+        KafkaAdminPool<StubClient>.Lease concurrent = rig.Pool.Rent(Cluster("a"));
+
+        failed.Retire("NotCoordinatorForGroup").Should().BeTrue();
+        concurrent.Retire("NotCoordinatorForGroup").Should().BeFalse("another call already replaced it");
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+            rig.Created.Should().HaveCount(2, "the next call builds a new client and looks the coordinator up afresh");
+        }
+
+        StubClient stale = rig.Created[0];
+        failed.Dispose();
+        stale.Disposed.Should().BeFalse("a call still holds it");
+
+        concurrent.Dispose();
+        SpinWait.SpinUntil(() => stale.Disposed, TimeSpan.FromSeconds(10)).Should().BeTrue("the last lease disposes the replaced client");
+        rig.Created[1].Disposed.Should().BeFalse("the new client stays in the pool");
+        rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9680, "the replacement is logged once, at Debug")
+            .Which.Level.Should().Be(LogLevel.Debug);
+    }
+
+    [Fact]
+    public async Task The_asynchronous_dispose_waits_for_a_client_replaced_for_a_stale_coordinator()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+        lease.Retire("GroupCoordinatorNotAvailable");
+
+        ValueTask dispose = rig.Pool.DisposeAsync();
+        dispose.IsCompleted.Should().BeFalse("the replaced client is still leased");
+
+        lease.Dispose();
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(10), TimeProvider.System, TestContext.Current.CancellationToken);
+
+        rig.Created[0].Disposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_lease_taken_after_the_pool_is_disposed_retires_nothing()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+        rig.Pool.Dispose();
+
+        lease.Retire("NotCoordinatorForGroup").Should().BeFalse("the shutdown already retired it");
+
+        lease.Dispose();
+        SpinWait.SpinUntil(() => rig.Created[0].Disposed, TimeSpan.FromSeconds(10)).Should().BeTrue();
+    }
 }

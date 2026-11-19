@@ -39,7 +39,10 @@ internal sealed class ConfluentWire(
                         topic.Error.IsError ? ConfluentErrors.Map(topic.Error, WireCall.Metadata, topic.Topic) : null)),
                 ];
 
-                return WireResult<WireMetadata>.Ok(new WireMetadata(topics));
+                return WireResult<WireMetadata>.Ok(new WireMetadata(topics)
+                {
+                    Brokers = [.. (metadata.Brokers ?? []).Select(static x => new WireNode(x.BrokerId, x.Host, x.Port))],
+                });
             },
             cancellationToken);
 
@@ -283,7 +286,17 @@ internal sealed class ConfluentWire(
                     description.GroupId,
                     description.State.ToString(),
                     description.Members?.Count ?? 0,
-                    description.PartitionAssignor));
+                    description.PartitionAssignor)
+                {
+                    Members =
+                    [
+                        .. (description.Members ?? []).Select(static member => new WireGroupMember(
+                            member.ConsumerId ?? string.Empty,
+                            member.ClientId ?? string.Empty,
+                            member.Host ?? string.Empty,
+                            [.. (member.Assignment?.TopicPartitions ?? []).Select(static x => new WirePartition(x.Topic, x.Partition.Value))])),
+                    ],
+                });
             },
             cancellationToken);
 
@@ -368,7 +381,18 @@ internal sealed class ConfluentWire(
         }
 
         _ = work.ContinueWith(
-            static (_, state) => ((IDisposable) state!).Dispose(),
+            static (done, state) =>
+            {
+                KafkaAdminPool<TClient>.Lease held = (KafkaAdminPool<TClient>.Lease) state!;
+
+                // A client that was answered with a stale coordinator is replaced before its lease goes back (D50).
+                if (done.IsCompletedSuccessfully && StaleCoordinator(done.Result.Error) is { } code)
+                {
+                    held.Retire(code);
+                }
+
+                held.Dispose();
+            },
             lease,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
@@ -399,6 +423,17 @@ internal sealed class ConfluentWire(
             return WireResult<T>.Fail(new WireError.Failed(kind, IsFatal: false));
         }
     }
+
+    /// <summary>
+    /// The code of an error that says the coordinator a client looked up for a group is no longer the group's (<c>NotCoordinatorForGroup</c>)
+    /// or no longer there (<c>GroupCoordinatorNotAvailable</c>), else <see langword="null" />. <c>GroupLoadInProgress</c> is the right
+    /// coordinator still loading, so it keeps the client.
+    /// </summary>
+    /// <param name="error">A call's error, or <see langword="null" />.</param>
+    internal static string? StaleCoordinator(WireError? error) =>
+        error is WireError.Unavailable { UnavailableCode: "NotCoordinatorForGroup" or "GroupCoordinatorNotAvailable" } unavailable
+            ? unavailable.Code
+            : null;
 
     /// <summary>A timeout after a recorded authentication failure is that failure, not an unreachable cluster.</summary>
     private WireError Classify(WireError error) =>

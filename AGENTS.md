@@ -58,7 +58,7 @@ This file holds what applies in every directory. What applies to one area is in 
 | `src/DataStudio/`, or any component, stylesheet or script | [src/DataStudio/AGENTS.md](src/DataStudio/AGENTS.md) | hard rules 3; D2, D10, D11, D22, D23, D24, D25, D26, D34, D44 |
 | `src/DataStudio.Postgres/`, `src/DataStudio.Postgres.Diagnostics/` | [src/DataStudio.Postgres/AGENTS.md](src/DataStudio.Postgres/AGENTS.md) | hard rules 4; D8, D13, D27, D29, D31, D32, D33 |
 | `src/DataStudio.Marten/` | [src/DataStudio.Marten/AGENTS.md](src/DataStudio.Marten/AGENTS.md) | hard rules 10, 11, 14, 15; D6, D7, D9, D14, D28 |
-| `src/DataStudio.Kafka/`, `src/DataStudio.Kafka.Core/`, `src/DataStudio.Kafka.Wolverine/` | [src/DataStudio.Kafka/AGENTS.md](src/DataStudio.Kafka/AGENTS.md) | hard rules 17; D35, D36, D37, D38, D39, D40, D41, D42, D43, D45, D46, D47, D48 |
+| `src/DataStudio.Kafka/`, `src/DataStudio.Kafka.Core/`, `src/DataStudio.Kafka.Wolverine/` | [src/DataStudio.Kafka/AGENTS.md](src/DataStudio.Kafka/AGENTS.md) | hard rules 17; D35, D36, D37, D38, D39, D40, D41, D42, D43, D45, D46, D47, D48, D50 |
 | `tests/` | [tests/AGENTS.md](tests/AGENTS.md) | D16, D19; Testing |
 | `samples/` | [samples/AGENTS.md](samples/AGENTS.md) | D17, D18 |
 | `build/`, `Directory.*.props`, a package reference, `.github/workflows/`, a release | [build/AGENTS.md](build/AGENTS.md) | hard rules 2, 8; D15; the package budget, Build, Release engineering |
@@ -115,7 +115,8 @@ The rules that hold in every directory are whole here. The others are in their a
    (`DataStudio.Postgres.Diagnostics`) is `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`,
    the six inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records), the D31 read model and the
    connection history's four (`AddPostgresConnectionHistory`, its options, `IPostgresConnectionHistoryStore` and
-   `PostgresConnectionSample`). `DataStudio.Kafka.Core`'s is its own, and `DataStudio.Kafka.Wolverine`'s is one static class
+   `PostgresConnectionSample`). `DataStudio.Kafka.Core`'s is its own (its registration types, its extension points, and D50's
+   `IKafkaDiagnostics` with its read model, which is extend-only like D31's), and `DataStudio.Kafka.Wolverine`'s is one static class
    and one class (`UseWolverineKafka`, `KafkaWolverineOptions`).
    Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
@@ -157,7 +158,7 @@ The rules that hold in every directory are whole here. The others are in their a
     `DataStudio.Kafka.Tests` does not reference it. A page assembly's root is one segment, unique and never one the shell
     uses (`/postgres`, `/marten`, `/kafka`), and the route table refuses a route two pages claim. Full text: hard rule 16.
 
-## Design decisions (D1–D49)
+## Design decisions (D1–D50)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the rationale is not. D1,
 D8, D9, D14, D15 and D20 are short enough to stand whole where they are; every other entry is the decision itself, with a pointer
@@ -207,6 +208,7 @@ The decisions that hold in every directory are whole here. The others are in the
 | **D46** The Kafka module's live tail is a scan with no end | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
 | **D47** The Kafka module's profiles lower limits per cluster, explicitly, and never grant | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
 | **D48** The record-index seam narrows a search and proves nothing | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
+| **D50** The Kafka diagnostics API: what the engine reads, for the host's own code, and never served by the studio | [Kafka](src/DataStudio.Kafka/AGENTS.md) |
 
 **D1 — `net10.0` only.** Marten 9 targets net9.0 and net10.0, .NET 9 is out of support, and the build template this
 repository came from is net10-only. A second target framework would double the test matrix and the
