@@ -187,7 +187,10 @@ public sealed record KafkaGroupStatus
     /// <summary>Why the committed or end offsets of a topic could not be read; a single partition's problem is on that partition.</summary>
     public KafkaReadProblem? OffsetsProblem { get; init; }
 
-    /// <summary>The sum of the known lags.</summary>
+    /// <summary>
+    /// The sum of the known lags. It is 0 when no lag is known as well as when the group has caught up: <see cref="Partitions" /> and
+    /// <see cref="OffsetsProblem" /> tell the two apart.
+    /// </summary>
     public long TotalLag
     {
         get
@@ -205,9 +208,12 @@ public sealed record KafkaGroupStatus
 
     /// <summary>
     /// Where the member with <paramref name="clientId" /> stands in the group: it waits for a partition, has read everything it owns, has
-    /// records waiting, or is not a member at all. A partition the member owns with no committed offset counts from offset 0, where a consumer
-    /// that starts at the earliest record begins. An application tells a quiet consumer from a stuck one with it: a consumer that only marks
-    /// progress when a record arrives looks the same idle for both.
+    /// records waiting, or is not a member at all. Only the partitions the member owns are judged: a problem on one of them, or an offset of
+    /// one that was not read, makes the answer <see cref="KafkaMemberState.Unknown" />, and a problem on any other partition or topic does not.
+    /// A partition the member owns with no committed offset counts from the partition's first offset, where a consumer that starts at the
+    /// earliest record begins: records that have expired are not waiting. (A consumer configured to start at the end has less waiting than
+    /// that; the group does not say which it is.) An application tells a quiet consumer from a stuck one with it: a consumer that only
+    /// marks progress when a record arrives looks the same idle for both.
     /// </summary>
     /// <param name="clientId">The member's <c>client.id</c>, which must be unique in the group for the answer to name one consumer.</param>
     public KafkaMemberPlace PlaceOf(string clientId)
@@ -241,11 +247,6 @@ public sealed record KafkaGroupStatus
             return new KafkaMemberPlace { State = KafkaMemberState.Standby };
         }
 
-        if (OffsetsProblem is { } offsets)
-        {
-            return KafkaMemberPlace.Unknown($"the offsets of consumer group {GroupId} could not be read: {offsets.Sentence}");
-        }
-
         long waiting = 0;
 
         foreach (KafkaTopicPartition owned in member.Assignment)
@@ -261,12 +262,23 @@ public sealed record KafkaGroupStatus
                 }
             }
 
+            if (row?.Problem is { } problem)
+            {
+                return KafkaMemberPlace.Unknown($"the offsets of {owned.Topic} partition {owned.Partition} could not be read: {problem.Sentence}");
+            }
+
             if (row?.EndOffset is not { } end)
             {
                 return KafkaMemberPlace.Unknown($"the end offset of {owned.Topic} partition {owned.Partition} is not known");
             }
 
-            waiting += Math.Max(0, end - (row.CommittedOffset ?? 0));
+            // Nothing committed: from the first record the partition still holds, never from offset 0, which retention may have long passed.
+            if ((row.CommittedOffset ?? row.FirstOffset) is not { } from)
+            {
+                return KafkaMemberPlace.Unknown($"the first offset of {owned.Topic} partition {owned.Partition} is not known, and the group has committed none");
+            }
+
+            waiting += Math.Max(0, end - from);
         }
 
         return waiting > 0
@@ -311,13 +323,16 @@ public sealed record KafkaGroupPartition
     /// <summary>The partition's high watermark, or <see langword="null" /> when it was not read.</summary>
     public long? EndOffset { get; init; }
 
+    /// <summary>The offset of the first record the partition still holds (its log start), or <see langword="null" /> when it was not read.</summary>
+    public long? FirstOffset { get; init; }
+
     /// <summary>The end minus the committed offset (0 when the committed offset is past the end), or <see langword="null" /> when either is unknown.</summary>
     public long? Lag { get; init; }
 
     /// <summary>The <c>client.id</c> of the member assigned this partition, or <see langword="null" /> when none is.</summary>
     public string? MemberClientId { get; init; }
 
-    /// <summary>Why this partition's committed or end offset could not be read.</summary>
+    /// <summary>Why this partition's committed, first or end offset could not be read: the partition's own problem, or its topic's.</summary>
     public KafkaReadProblem? Problem { get; init; }
 }
 

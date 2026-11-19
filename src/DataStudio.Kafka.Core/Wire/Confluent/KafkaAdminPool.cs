@@ -165,12 +165,17 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>The least time between two replacements of one cluster's client.</summary>
+    internal static readonly TimeSpan RetireCooldown = TimeSpan.FromSeconds(30);
+
+    private readonly Dictionary<string, DateTimeOffset> retiredAt = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Takes the client a lease holds out of the pool, so that the next <see cref="Rent" /> builds a new one (D50). librdkafka's admin API
     /// keeps a group coordinator it looked up for as long as the client is used, and every lookup renews it, so a client that was answered
     /// <c>NOT_COORDINATOR</c> would keep asking the broker that no longer coordinates the group until it sat idle. The client is disposed
     /// when its last lease is released, as a client leased at shutdown is; one another call already replaced is left alone, so concurrent
-    /// failures replace it once.
+    /// failures replace it once. A cluster's client is replaced at most once per <see cref="RetireCooldown" />.
     /// </summary>
     /// <param name="lease">The lease whose call was answered with a stale coordinator.</param>
     /// <param name="code">The error code that said so, for the log.</param>
@@ -186,6 +191,16 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 return false;
             }
 
+            // A coordinator that keeps answering "not available" (an election that does not end) would otherwise cost a new client for
+            // every failing group at every refresh. A client is replaced at most once per cooldown; the next stale answer after it does it again.
+            DateTimeOffset now = timeProvider.GetUtcNow();
+
+            if (retiredAt.TryGetValue(lease.Cluster, out DateTimeOffset last) && now - last < RetireCooldown)
+            {
+                return false;
+            }
+
+            retiredAt[lease.Cluster] = now;
             slots.Remove(lease.Cluster);
             current.Retired = true;
             retiredPending++;

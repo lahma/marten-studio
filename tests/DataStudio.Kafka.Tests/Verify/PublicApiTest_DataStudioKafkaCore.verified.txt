@@ -96,6 +96,7 @@ namespace DataStudio.Kafka
         public KafkaGroupPartition() { }
         public long? CommittedOffset { get; init; }
         public long? EndOffset { get; init; }
+        public long? FirstOffset { get; init; }
         public long? Lag { get; init; }
         public string? MemberClientId { get; init; }
         public int Partition { get; init; }

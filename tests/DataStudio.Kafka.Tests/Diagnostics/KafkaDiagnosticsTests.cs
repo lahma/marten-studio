@@ -193,6 +193,7 @@ public class KafkaDiagnosticsTests
             Partition = 1,
             CommittedOffset = 1,
             EndOffset = 4,
+            FirstOffset = 0,
             Lag = 3,
         });
     }
@@ -267,6 +268,72 @@ public class KafkaDiagnosticsTests
         place.State.Should().Be(expected);
         place.RecordsWaiting.Should().Be(waiting);
         place.HasNothingToRead.Should().Be(expected == KafkaMemberState.CaughtUp);
+    }
+
+    /// <summary>
+    /// v249: a partition with nothing committed is counted from the first record it still holds, never from offset 0. A quiet member
+    /// whose topic's records have all expired has nothing to read, and one with some left has those waiting.
+    /// </summary>
+    [Theory]
+    [InlineData(5, 5L, KafkaMemberState.CaughtUp, 0L)]
+    [InlineData(5, 3L, KafkaMemberState.Behind, 2L)]
+    public async Task A_member_that_has_committed_nothing_is_counted_from_the_partitions_first_offset(
+        int produced, long firstOffset, KafkaMemberState expected, long waiting)
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 1);
+        rig.Produce("orders", 0, produced);
+        rig.Fake.DeleteRecords("orders", 0, firstOffset);
+        rig.Fake.SetGroupMembers("billing", "Stable", Member("billing-a", new WirePartition("orders", 0)));
+
+        KafkaGroupStatus status = await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders"], Token);
+        KafkaMemberPlace place = status.PlaceOf("billing-a");
+
+        status.Partitions.Should().ContainSingle().Which.FirstOffset.Should().Be(firstOffset);
+        place.State.Should().Be(expected, "records that have expired are not waiting");
+        place.RecordsWaiting.Should().Be(waiting);
+    }
+
+    /// <summary>
+    /// v249: only the member's own partitions are judged. A topic the host named that cannot be read is a problem on the status, and
+    /// says nothing about a member that owns no partition of it.
+    /// </summary>
+    [Fact]
+    public async Task A_topic_that_could_not_be_read_does_not_make_a_member_of_another_topic_unknown()
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 1);
+        rig.Produce("orders", 0, 4);
+        rig.Fake.SetGroupMembers("billing", "Stable", Member("billing-a", new WirePartition("orders", 0)));
+        rig.Fake.Commit("billing", "orders", 0, 4);
+
+        KafkaGroupStatus status = await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders", "not-a-topic"], Token);
+
+        status.OffsetsProblem.Should().NotBeNull("the topic that is not listed is still reported");
+        status.OffsetsProblem!.Topic.Should().Be("not-a-topic");
+        status.PlaceOf("billing-a").State.Should().Be(KafkaMemberState.CaughtUp);
+    }
+
+    /// <summary>
+    /// v249: a topic whose offsets were withheld as a whole is a problem on each partition the member owns of it, so the member is
+    /// unknown and a committed offset that was not read is never taken for "none committed".
+    /// </summary>
+    [Fact]
+    public async Task A_member_whose_own_topic_could_not_be_read_is_unknown_and_never_behind()
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 1);
+        rig.Produce("orders", 0, 4);
+        rig.Fake.SetGroupMembers("billing", "Stable", Member("billing-a", new WirePartition("orders", 0)));
+        rig.Fake.Commit("billing", "orders", 0, 4);
+        rig.Fake.FailNext(WireCall.ListOffsets, new WireError.Unavailable("RequestTimedOut", Retriable: true));
+
+        KafkaGroupStatus status = await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders"], Token);
+        KafkaMemberPlace place = status.PlaceOf("billing-a");
+
+        status.Partitions.Should().ContainSingle().Which.Problem.Should().NotBeNull("the topic's problem is on the partition the member owns");
+        place.State.Should().Be(KafkaMemberState.Unknown);
+        place.Detail.Should().StartWith("the offsets of orders partition 0 could not be read:");
     }
 
     [Fact]

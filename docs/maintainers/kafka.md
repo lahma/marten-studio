@@ -1109,9 +1109,9 @@ plain admin client, the coordinator a client never forgets, the native handle fr
 whether it lists each topic asked about); `GetTopicAsync` (each partition's first and end offset, `retention.ms`, `retention.bytes` and `cleanup.policy`); and
 `GetGroupAsync` (the group's state, its members with client id, host and assignment, and the committed offset, end offset, lag and owning member of every partition a
 member is assigned or the group has committed to on the topics asked about). `KafkaGroupStatus.PlaceOf(clientId)` says where one member stands: `Standby` (no
-partition), `CaughtUp`, `Behind` (with the records waiting), `NotAMember`, or `Unknown` (the group or its offsets could not be read). It tells a quiet consumer from a
-stuck one, which a consumer that marks progress only when a record arrives cannot. A partition a member owns with no committed offset counts from offset 0, where a
-consumer that starts at the earliest record begins.
+partition), `CaughtUp`, `Behind` (with the records waiting), `NotAMember`, or `Unknown` (the group, or the offsets of a partition the member owns, could not be read: only the member's own partitions are judged, and a topic's problem is on each of its rows). It tells a quiet consumer from a
+stuck one, which a consumer that marks progress only when a record arrives cannot. A partition a member owns with no committed offset counts from the partition's first offset (`FirstOffset`, the same cached read the topic status makes), where a
+consumer that starts at the earliest record begins: records that have expired are not waiting. A cluster's client is retired at most once per 30 seconds (`KafkaAdminPool.RetireCooldown`), so a coordinator that keeps answering "not available" does not cost a client per refresh.
 
 *Reads, not seams.* As D31 says of the Postgres API, it is results: no wire, catalog, cache or client crosses it, and a host cannot add a read or change a cache. Every
 call goes through `KafkaWireReads`, so it shares the pages' single-flight caches (an answer is up to the shell's `RefreshInterval` old) and pooled clients, and the
