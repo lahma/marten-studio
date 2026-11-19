@@ -213,8 +213,8 @@ public sealed record KafkaGroupStatus
     /// Where the member with <paramref name="clientId" /> stands in the group: it waits for a partition, has read everything it owns, has
     /// records waiting, or is not a member at all. Only the partitions the member owns are judged: a problem on one of them, or an offset of
     /// one that was not read, makes the answer <see cref="KafkaMemberState.Unknown" />, and a problem on any other partition or topic does not.
-    /// A partition the member owns with no committed offset counts from the partition's first offset, where a consumer that starts at the
-    /// earliest record begins: records that have expired are not waiting. (A consumer configured to start at the end has less waiting than
+    /// A partition the member owns with no committed offset, or whose committed offset retention has passed, counts from the partition's
+    /// first offset, where a consumer that starts at the earliest record begins: records that have expired are not waiting. (A consumer configured to start at the end has less waiting than
     /// that; the group does not say which it is.) An application tells a quiet consumer from a stuck one with it: a consumer that only
     /// marks progress when a record arrives looks the same idle for both.
     /// </summary>

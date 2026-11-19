@@ -176,7 +176,10 @@ internal sealed class KafkaDiagnostics(
                 // The union of the assigned partitions and the committed ones: an owned partition is shown even before its first commit.
                 // A row of a topic whose offsets were withheld as a whole carries that problem, so whoever judges one partition
                 // (PlaceOf) finds it there and does not read a missing offset as "none committed".
-                if (owners.TryGetValue(key, out string? owner) || row.CommittedOffset is not null || row.Problem is not null)
+                // A first offset that could not be read is a problem only for whoever owns the partition: by itself it lists no row.
+                if (owners.TryGetValue(key, out string? owner)
+                    || row.CommittedOffset is not null
+                    || (row.Problem is not null && !topic.FirstOffsetOnly.Contains(row.Partition)))
                 {
                     rows[key] = row with { MemberClientId = owner, Problem = row.Problem ?? topicProblem };
                 }
@@ -216,7 +219,7 @@ internal sealed class KafkaDiagnostics(
     {
         if (Partitions(metadata, topic, out WireError? missing) is not { } partitions)
         {
-            return new TopicPositions(topic, [], missing);
+            return new TopicPositions(topic, [], missing, new HashSet<int>());
         }
 
         Task<WireResult<IReadOnlyList<WireGroupOffset>>> committing = reads.GroupOffsetsAsync(cluster, groupId, topic, partitions, cancellationToken);
@@ -232,6 +235,8 @@ internal sealed class KafkaDiagnostics(
         WireResult<IReadOnlyList<WireOffset>> ends = await ending.ConfigureAwait(false);
         WireResult<IReadOnlyList<WireOffset>> starts = await starting.ConfigureAwait(false);
 
+        HashSet<int> firstOffsetOnly = [];
+
         KafkaGroupPartition[] rows =
         [
             .. partitions.Select(partition =>
@@ -246,6 +251,11 @@ internal sealed class KafkaDiagnostics(
                     ? position?.Error ?? endError ?? (at is null ? firstError : null)
                     : null;
 
+                if (partitionError is not null && ReferenceEquals(partitionError, firstError) && position?.Error is null && endError is null)
+                {
+                    firstOffsetOnly.Add(partition.Partition);
+                }
+
                 return new KafkaGroupPartition
                 {
                     Topic = topic,
@@ -259,7 +269,7 @@ internal sealed class KafkaDiagnostics(
             }),
         ];
 
-        return new TopicPositions(topic, rows, committed.Error ?? ends.Error);
+        return new TopicPositions(topic, rows, committed.Error ?? ends.Error, firstOffsetOnly);
     }
 
     /// <summary>A topic's partitions from the metadata, or <see langword="null" /> with the error that withheld them.</summary>
@@ -368,6 +378,9 @@ internal sealed class KafkaDiagnostics(
         KafkaEngineLog.DiagnosticsRead(loggers.Catalog, read, key, outcome);
     }
 
-    /// <summary>One topic's rows, and the error that withheld its committed or end offsets as a whole.</summary>
-    private sealed record TopicPositions(string Topic, IReadOnlyList<KafkaGroupPartition> Rows, WireError? Error);
+    /// <summary>
+    /// One topic's rows, the error that withheld its committed or end offsets as a whole, and the partitions whose only problem is a
+    /// first offset that could not be read.
+    /// </summary>
+    private sealed record TopicPositions(string Topic, IReadOnlyList<KafkaGroupPartition> Rows, WireError? Error, IReadOnlySet<int> FirstOffsetOnly);
 }

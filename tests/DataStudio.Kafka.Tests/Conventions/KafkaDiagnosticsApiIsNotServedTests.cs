@@ -28,7 +28,7 @@ public class KafkaDiagnosticsApiIsNotServedTests
         .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "DataStudio.Kafka.Core", "Diagnostics"), "*.cs")
             .SelectMany(static file => Regex.Matches(
                 SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)),
-                @"\b(?:class|record|enum|interface|struct)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                @"\b(?:class|record\s+struct|record\s+class|record|enum|interface|struct)\s+([A-Za-z_][A-Za-z0-9_]*)",
                 RegexOptions.CultureInvariant,
                 RegexTimeout))
             .Select(static match => match.Groups[1].Value)

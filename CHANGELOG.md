@@ -1,3 +1,14 @@
+# 2.0.0-beta.4
+
+2.0.0-beta.4 is the fourth beta of 2.0. All seven packages are at 2.0.0-beta.4. Nothing a host writes changes.
+
+- `IKafkaDiagnostics.GetGroupAsync` lists a partition that no member owns and the group has committed nothing to only
+  when its committed or end offset could not be read. When the first-offset read alone failed, beta.3 listed every such
+  partition with a problem for one refresh, with `OffsetsProblem` empty.
+- For maintainers: a component test holds the SQL editor's buttons to doing nothing when the editor went away while its
+  box was read; a Kafka test fails only the first-offset read; the zone tests that prove a legacy spelling in a cookie or
+  a choice now run wherever the host knows the current name, which includes the CI runner.
+
 # 2.0.0-beta.3
 
 2.0.0-beta.3 is the third beta of 2.0: it adds the Kafka engine's diagnostics API, fixes a fault that lost typed text on a

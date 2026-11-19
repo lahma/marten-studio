@@ -109,7 +109,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
         cancellationToken.ThrowIfCancellationRequested();
         Cluster.Record(new FakeCall(WireCall.ListOffsets, [.. partitions], spec, isolation, string.Empty));
 
-        if (Cluster.TakeFailure(WireCall.ListOffsets) is { } failure)
+        if ((Cluster.TakeOffsetsFailure(spec) ?? Cluster.TakeFailure(WireCall.ListOffsets)) is { } failure)
         {
             return Task.FromResult(WireResult<IReadOnlyList<WireOffset>>.Fail(failure));
         }

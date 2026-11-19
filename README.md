@@ -1,7 +1,7 @@
 # Data Studio
 
 <!-- beta: remove at 2.0.0 -->
-> **Data Studio 2.0 is in beta** (`2.0.0-beta.3`), published for trial: names, addresses and options may still move before
+> **Data Studio 2.0 is in beta** (`2.0.0-beta.4`), published for trial: names, addresses and options may still move before
 > 2.0.0, and every package is installed with `--prerelease`. What is promised meanwhile is in [docs/stability.md](https://github.com/lahma/marten-studio/blob/main/docs/stability.md).
 
 An admin UI for the data stores your ASP.NET Core application already uses, **embedded in the application itself**. Add
