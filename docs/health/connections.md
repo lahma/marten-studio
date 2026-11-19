@@ -737,6 +737,16 @@ source was given a `Name`). Each name is parsed in memory and compared, and **on
 pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool per tenant
 database, or per login, is a different database or login and is not counted.
 
+**What the title and the sum say.** The title counts the pools the studio identified as this database and this login, and, when
+there are named pools it could not identify, says how many: *"2 Npgsql pools in this process connect to this database as the same
+login, and 2 more named pools could not be identified"*. An unidentified pool may connect anywhere, so it never makes the finding
+appear by itself and is never said to connect here; it is said to be a pool of this process whose database and login the studio
+could not read, which may add to the connections the process holds on the same server. *Maximum Pool Size, added up* adds the
+ceilings of the identified pools that reported one and says how many it could include: *"200 connections at most from 2 pools"*,
+*"100 connections at most from 1 pool; 1 pool did not report its ceiling"*, or *"not reported by any pool"*. Npgsql's meter reports
+the ceiling of every pooling data source, so a pool lacks one only when its usage was observed and its ceiling was not in the same
+pass, or when the loaded Npgsql does not publish it.
+
 **Named data sources.** A data source built with `NpgsqlDataSourceBuilder.Name` reports that name to Npgsql's meter instead of
 its connection string, so the name alone says nothing about the database. (`AddNpgsqlDataSource` and Aspire's Npgsql integration
 set no name of their own; a host sets one directly or in the builder callback they take.) The studio identifies such a pool through
@@ -759,7 +769,7 @@ an unnamed pool, **when exactly one data source reports under the name**. Severa
 tenant's data source alike, a multi-host data source whose every per-host pool reports its name - cannot be told apart and are not
 judged. **A named pool the studio does not resolve is not judged:** the check is still quiet, but it says *"Not judged for N named
 pool(s) of this process that the studio cannot identify"* instead of "nothing found", naming the reasons that apply, and when it
-fires the evidence row *Named pools not identified, left out* counts them. The walk over the sources is bounded: it stops at
+fires the title and the evidence row *Named pools not identified* count them. The walk over the sources is bounded: it stops at
 `QueryTimeout` or after 256 sources, and the pools it did not reach are then said to be "not judged because the studio could not
 identify them in time". A pool name that is a connection string naming no `Host` is not judged either (Npgsql does not read
 `PGHOST`).

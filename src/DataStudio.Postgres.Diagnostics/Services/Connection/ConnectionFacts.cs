@@ -36,7 +36,10 @@ internal sealed record ConnectionSessionStatistics(long? Sessions, double? Sessi
 /// studio cannot identify is counted in <paramref name="UnparsedNames" /> and judged by nobody.
 /// </remarks>
 /// <param name="Pools">How many pools share the data source's identity, this one included.</param>
-/// <param name="SumMaxPoolSize">The sum of their <c>Maximum Pool Size</c>, or <see langword="null" /> when one did not report it.</param>
+/// <param name="SumMaxPoolSize">
+/// The sum of the <c>Maximum Pool Size</c> of those of them whose ceiling is known (issue #91), or <see langword="null" /> when none
+/// reported one: a pool without a ceiling is counted in <paramref name="PoolsWithoutCeiling" />, never made to hide the sum of the rest.
+/// </param>
 /// <param name="UnparsedNames">
 /// How many <b>pools</b> stay unidentified and are not judged: the name is not a connection string and no data source the studio
 /// resolves has it (a data source named with <c>NpgsqlDataSourceBuilder.Name</c> that the studio does not know), or several data
@@ -44,7 +47,13 @@ internal sealed record ConnectionSessionStatistics(long? Sessions, double? Sessi
 /// </param>
 /// <param name="NoHost">Of those, how many have a name that is a connection string naming no host (Npgsql does not read <c>PGHOST</c>).</param>
 /// <param name="CutOff">Of those, how many the studio might have identified had its walk not been cut off by its time bound or its cap.</param>
-internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, int UnparsedNames, int NoHost = 0, int CutOff = 0)
+/// <param name="PoolsWithoutCeiling">
+/// Of <paramref name="Pools" />, how many reported no <c>Maximum Pool Size</c> to the meter in the pass that read them, so that
+/// <paramref name="SumMaxPoolSize" /> does not include them. Npgsql's meter reports every pooling data source's ceiling, so a pool lacks
+/// one only when its usage was observed and its ceiling was not in the same pass (a data source created between the meter's two
+/// callbacks), or the loaded Npgsql does not publish the ceiling at all.
+/// </param>
+internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, int UnparsedNames, int NoHost = 0, int CutOff = 0, int PoolsWithoutCeiling = 0)
 {
     /// <summary>
     /// The identity two pools must share to be one database's pools: the sorted, lower-cased <c>host:port</c> list, the database
@@ -113,7 +122,7 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
         int noHost = 0;
         int notInTime = 0;
         int sum = 0;
-        bool sumKnown = true;
+        int withoutCeiling = 0;
 
         foreach (NpgsqlPoolReading reading in readings)
         {
@@ -158,12 +167,12 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
                 }
                 else
                 {
-                    sumKnown = false;
+                    withoutCeiling += reading.Reporters;
                 }
             }
         }
 
-        return new ConnectionPoolSiblings(pools, pools > 0 && sumKnown ? sum : null, unparsed, noHost, notInTime);
+        return new ConnectionPoolSiblings(pools, pools > withoutCeiling ? sum : null, unparsed, noHost, notInTime, withoutCeiling);
     }
 }
 

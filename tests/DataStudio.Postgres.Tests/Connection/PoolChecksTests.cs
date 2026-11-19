@@ -1,4 +1,5 @@
 using DataStudio.Postgres.Services.Connection;
+using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
 
@@ -318,19 +319,79 @@ public sealed class PoolChecksTests
 
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == "3");
-        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "250 connections at most");
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "250 connections at most from 3 pools");
         finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Named pools", StringComparison.Ordinal), "no named pool was left out");
+        finding.Title.Should().Be("3 Npgsql pools in this process connect to this database as the same login", "with no pool unidentified the title is as it was");
         finding.Link!.Route.Should().Be(SessionEvidence.HoldersLink.Route);
     }
 
     [Fact]
     public void Named_pools_the_studio_could_not_identify_are_counted_in_the_evidence_and_a_missing_ceiling_says_so()
     {
-        HealthFinding finding = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, null, 4))).Findings.Single();
+        HealthFinding finding = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, null, 4, PoolsWithoutCeiling: 2))).Findings.Single();
 
-        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified, left out" && x.Value == "4");
-        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "not reported by every pool");
+        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified" && x.Value == "4");
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "not reported by any pool");
         finding.Caveat.Should().Contain("(4 here)");
+    }
+
+    /// <summary>
+    /// Issue #91: the title counts the identified pools and says how many named pools it could not identify; the sum adds up the
+    /// ceilings that are known and says how many pools it could not include; and nothing says the unidentified pools connect here.
+    /// </summary>
+    [Theory]
+    [InlineData(2, 0, 2, "2 Npgsql pools in this process connect to this database as the same login", "200 connections at most from 2 pools")]
+    [InlineData(2, 0, 1, "2 Npgsql pools in this process connect to this database as the same login", "100 connections at most from 1 pool; 1 pool did not report its ceiling")]
+    [InlineData(2, 0, 0, "2 Npgsql pools in this process connect to this database as the same login", "not reported by any pool")]
+    [InlineData(2, 2, 2, "2 Npgsql pools in this process connect to this database as the same login, and 2 more named pools could not be identified", "200 connections at most from 2 pools")]
+    [InlineData(2, 2, 1, "2 Npgsql pools in this process connect to this database as the same login, and 2 more named pools could not be identified", "100 connections at most from 1 pool; 1 pool did not report its ceiling")]
+    [InlineData(2, 2, 0, "2 Npgsql pools in this process connect to this database as the same login, and 2 more named pools could not be identified", "not reported by any pool")]
+    [InlineData(2, 1, 2, "2 Npgsql pools in this process connect to this database as the same login, and 1 more named pool could not be identified", "200 connections at most from 2 pools")]
+    [InlineData(2, 1, 1, "2 Npgsql pools in this process connect to this database as the same login, and 1 more named pool could not be identified", "100 connections at most from 1 pool; 1 pool did not report its ceiling")]
+    [InlineData(2, 1, 0, "2 Npgsql pools in this process connect to this database as the same login, and 1 more named pool could not be identified", "not reported by any pool")]
+    [InlineData(3, 0, 1, "3 Npgsql pools in this process connect to this database as the same login", "100 connections at most from 1 pool; 2 pools did not report their ceiling")]
+    public void The_title_and_the_sum_count_every_pool_the_studio_saw(int identified, int unidentified, int withCeiling, string title, string sum)
+    {
+        ConnectionPoolSiblings siblings = new(identified, withCeiling == 0 ? null : withCeiling * 100, unidentified, PoolsWithoutCeiling: identified - withCeiling);
+
+        HealthFinding finding = C18(Facts("Host=db.example", siblings: siblings)).Findings.Should().ContainSingle().Subject;
+
+        finding.Title.Should().Be(title);
+        finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == identified.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == sum);
+
+        if (unidentified == 0)
+        {
+            finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Named pools", StringComparison.Ordinal));
+            finding.WhyItMatters.Should().NotContain("could not be identified");
+        }
+        else
+        {
+            finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified" && x.Value == unidentified.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            finding.WhyItMatters.Should().Contain("whose database and login the studio could not read").And.Contain("may add to the connections this process holds on the same server");
+        }
+
+        string said = Everything(finding);
+        said.Should().NotContain("left out").And.NotContain("not reported by every pool");
+    }
+
+    /// <summary>A pool with no ceiling no longer hides the others' sum, and the facts carry how many it could not include.</summary>
+    [Fact]
+    public void A_pool_that_reported_no_ceiling_is_counted_apart_and_the_rest_are_still_added_up()
+    {
+        string identity = ConnectionPoolSiblings.IdentityOf("Host=db.example;Database=app;Username=app")!;
+        NpgsqlPoolReading[] readings =
+        [
+            new("Host=db.example;Database=app;Username=app", 0, 0, 100),
+            new("Host=db.example;Database=app;Username=app", 0, 0, null),
+            new("Host=db.example;Database=app;Username=app", 0, 0, 50, Reporters: 2),
+        ];
+
+        ConnectionPoolSiblings.Count(identity, readings).Should().Be(
+            new ConnectionPoolSiblings(4, 200, 0, PoolsWithoutCeiling: 1),
+            "three pools reported 100 + 50 + 50, and the one without a ceiling is counted, not allowed to hide the sum");
+
+        ConnectionPoolSiblings.Count(identity, [readings[1], readings[1]]).Should().Be(new ConnectionPoolSiblings(2, null, 0, PoolsWithoutCeiling: 2));
     }
 
     [Theory]

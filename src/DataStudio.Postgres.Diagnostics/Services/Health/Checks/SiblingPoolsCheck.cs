@@ -75,44 +75,79 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
         }
 
         string pools = siblings.Pools.ToString(CultureInfo.InvariantCulture);
-        List<HealthEvidence> evidence =
-        [
-            new("Pools to this database as this login", pools),
-            new(
-                "Maximum Pool Size, added up",
-                siblings.SumMaxPoolSize is { } sum
-                    ? sum.ToString("N0", CultureInfo.InvariantCulture) + " connections at most"
-                    : "not reported by every pool"),
-        ];
 
-        if (siblings.UnparsedNames > 0)
+        // Issue #91: a named pool the studio cannot identify may connect anywhere, so it never makes the finding appear, and it is never
+        // said to connect here; but the title says how many there are, so "2" is not read as all the pools this process holds.
+        int named = siblings.UnparsedNames - siblings.NoHost;
+
+        List<HealthEvidence> evidence = [new("Pools to this database as this login", pools)];
+
+        if (named > 0)
         {
-            evidence.Add(new(
-                "Named pools not identified, left out",
-                siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture)));
+            evidence.Add(new("Named pools not identified", named.ToString(CultureInfo.InvariantCulture)));
         }
+
+        if (siblings.NoHost > 0)
+        {
+            evidence.Add(new("Pools named by a connection string with no host, not identified", siblings.NoHost.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        evidence.Add(new("Maximum Pool Size, added up", Ceilings(siblings)));
 
         return HealthVerdict.Of(new HealthFinding
         {
             Code = "C18",
             Severity = HealthSeverity.Info,
-            Title = pools + " Npgsql pools in this process connect to this database as the same login",
+            Title = pools + " Npgsql pools in this process connect to this database as the same login"
+                + (named > 0
+                    ? ", and " + named.ToString(CultureInfo.InvariantCulture) + " more named " + (named == 1 ? "pool" : "pools") + " could not be identified"
+                    : string.Empty),
             WhyItMatters =
                 "Every NpgsqlDataSource has a pool of its own, and each may open up to its own Maximum Pool Size. Several pools to one "
                 + "database add up: the process can hold the sum of their ceilings, more than any one of them says, so C01's saturation "
                 + "and C03's headroom, which judge one pool at a time, understate what this process can ask of the server. They also "
-                + "idle and retire separately, so the server holds more idle connections than one shared pool would.",
+                + "idle and retire separately, so the server holds more idle connections than one shared pool would."
+                + (siblings.UnparsedNames > 0
+                    ? " The pools that could not be identified are pools of this process whose database and login the studio could not "
+                        + "read, so they may add to the connections this process holds on the same server; they are not in the count of "
+                        + "pools above or in the sum."
+                    : string.Empty),
             Evidence = evidence,
             Caveat =
                 "Counted from the pool names Npgsql reports to its meter, compared by host, port, database and login. A pool per "
                 + "tenant database is a different database and is not counted. A data source given a Name of its own is counted when "
                 + "the studio resolves it (the one it reads, or one registered with the studio) and no other data source shares the name; "
-                + "one it does not resolve cannot be compared and is left out" + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
+                + "one it does not resolve cannot be compared, and is counted apart as not identified"
+                + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
                 + ". Several pools are sometimes deliberate - a separate pool for a long-running job - in which case the check can be "
                 + "accepted with AcceptedChecks.",
             Remedy = new HealthRemedy(evaluation.Text.SharedDataSourceRemedyCode, evaluation.Text.SharedDataSourceRemedyExplanation),
             Link = SessionEvidence.HoldersLink,
         });
+    }
+
+    /// <summary>
+    /// The ceilings of the identified pools, added up over those that reported one, with how many that is and how many did not
+    /// (issue #91): one pool's missing ceiling no longer hides the sum of the others'.
+    /// </summary>
+    private static string Ceilings(ConnectionPoolSiblings siblings)
+    {
+        if (siblings.SumMaxPoolSize is not { } sum)
+        {
+            return "not reported by any pool";
+        }
+
+        int reported = siblings.Pools - siblings.PoolsWithoutCeiling;
+        string text = sum.ToString("N0", CultureInfo.InvariantCulture) + " connections at most from "
+            + reported.ToString(CultureInfo.InvariantCulture) + (reported == 1 ? " pool" : " pools");
+
+        if (siblings.PoolsWithoutCeiling > 0)
+        {
+            text += "; " + siblings.PoolsWithoutCeiling.ToString(CultureInfo.InvariantCulture)
+                + (siblings.PoolsWithoutCeiling == 1 ? " pool did not report its ceiling" : " pools did not report their ceiling");
+        }
+
+        return text;
     }
 
     /// <summary>
