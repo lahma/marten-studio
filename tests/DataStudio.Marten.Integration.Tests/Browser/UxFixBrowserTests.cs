@@ -134,7 +134,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
                         set(handler) {
                             descriptor.set.call(this, typeof handler !== 'function' || !window.__msSlowCircuit
                                 ? handler
-                                : function (message) { const socket = this; setTimeout(() => handler.call(socket, message), window.__msSlowCircuit); });
+                                : function (message) { const socket = this; window.__msHeldBack = (window.__msHeldBack || 0) + 1; setTimeout(() => handler.call(socket, message), window.__msSlowCircuit); });
                         }
                     });
                     window.__msSlowCircuit = 150;
@@ -156,6 +156,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
             // the way that the visitor's next key would have been added to.
             await page.WaitForFunctionAsync("() => document.querySelector('.ms-confirm-actions .ms-button-danger').getAttribute('aria-disabled') !== 'true'", null, Wait);
             (await page.Locator("#ms-confirm-input").InputValueAsync()).Should().Be(name);
+            (await page.EvaluateAsync<int>("() => window.__msHeldBack || 0")).Should().BeGreaterThan(name.Length, "the circuit's answers were held back: a transport this wrapper does not reach would prove nothing");
 
             await page.Keyboard.PressAsync("Escape");
             await page.WaitForFunctionAsync("() => document.querySelector('dialog.ms-confirm-overlay') === null", null, Wait);

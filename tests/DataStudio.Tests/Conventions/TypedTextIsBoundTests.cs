@@ -30,6 +30,10 @@ public class TypedTextIsBoundTests
         "src/DataStudio.Marten/Components/Pages/Query/LinqQueryPanel.razor",
     ];
 
+    /// <summary>The exception is the box, not its file: a listed file's box that is not committed on <c>change</c> is an offender like any other.</summary>
+    private static bool IsCommittedOnChange(string relative, string element) =>
+        CommittedOnChange.Contains(relative) && element.Contains("@onchange=", StringComparison.Ordinal);
+
     internal static bool IsUnboundTypedText(string element) =>
         element.Contains("@oninput=", StringComparison.Ordinal) && Regex.IsMatch(element, @"(?<![\w:-])value=""@");
 
@@ -51,7 +55,7 @@ public class TypedTextIsBoundTests
             foreach (Match match in Element.Matches(File.ReadAllText(file)))
             {
                 boxes++;
-                if (IsUnboundTypedText(match.Value) && !CommittedOnChange.Contains(relative))
+                if (IsUnboundTypedText(match.Value) && !IsCommittedOnChange(relative, match.Value))
                 {
                     offenders.Add(relative);
                 }
