@@ -425,4 +425,59 @@ public class LinqQueryPanelTests
         shown.Should().NotContain("hunter2").And.NotContain("db.internal.example").And.NotContain("LinqSecretType");
         panel.Markup.Should().NotContain("hunter2");
     }
+
+    private const string ReadValue = "martenStudio.query.readValue";
+
+    /// <summary>
+    /// The handler for the browser's read of the Order-by box, answering nothing yet. The Run's one read of the script is this one
+    /// (the predicate arrives from the editor's own event), so a test holds every read and releases it with a result.
+    /// </summary>
+    private static JSRuntimeInvocationHandler<string?> HoldOrderByRead(StudioComponentContext context) =>
+        context.JSInterop.Setup<string?>(ReadValue, _ => true);
+
+    /// <summary>
+    /// A Run reads the Order-by box from the browser first (jzpn), a round trip: a visitor who leaves the page within it has disposed
+    /// the panel, and running on it would throw and end the circuit. The Run then does nothing, as the SQL editor's does
+    /// (<c>QueryEditorLiveTextTests</c>).
+    /// </summary>
+    [Fact]
+    public async Task A_Run_whose_panel_went_away_while_the_Order_by_box_was_read_runs_nothing()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-where").Change("Total > 5");
+        JSRuntimeInvocationHandler<string?> reading = HoldOrderByRead(context);
+
+        Task click = panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+        reading.Invocations.Should().ContainSingle("the Run is waiting for the Order-by box's text");
+
+        await panel.Instance.DisposeAsync();
+        reading.SetResult("Total desc");
+        await click;
+
+        linq.Requests.Should().BeEmpty("the panel is gone: nothing runs on it");
+        context.Renderer.UnhandledException.IsCompleted.Should().BeFalse("a run on a disposed panel throws (its token source is disposed) and ends the circuit");
+    }
+
+    /// <summary>The Run takes the box's own text, not the copy the server holds, which a change event may never have updated.</summary>
+    [Fact]
+    public async Task A_Run_uses_the_Order_by_text_the_browser_returned()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-where").Change("Total > 5");
+        await panel.Find("#ms-query-linq-orderby").ChangeAsync(new ChangeEventArgs { Value = "Name" });
+        JSRuntimeInvocationHandler<string?> reading = HoldOrderByRead(context);
+
+        Task click = panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+        reading.Invocations.Should().ContainSingle();
+        reading.SetResult("Total desc");
+        await click;
+
+        linq.Requests.Should().ContainSingle().Which.OrderBy.Should().Be("Total desc", "the box held that text when the visitor pressed Run");
+    }
 }
