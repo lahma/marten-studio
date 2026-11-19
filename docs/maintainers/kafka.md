@@ -121,6 +121,25 @@ client, because an admin handle has no consumer group and librdkafka 2.16.0 and 
 `__consumer_offsets` or whenever a group's coordinator moves). Remove it once the Confluent.Kafka floor contains librdkafka's fix
 (PR #5611, merged 2026-10-14; no release has it as of 2.16.0). Every other admin call stays on the plain admin client.
 
+**A group read that timed out replaces its client.** The same family, a different trigger (issue #97). #5040 is an *answer* (`NOT_COORDINATOR`) that
+meets a NULL `rk_cgrp`; this is *no answer*: a group request (`DescribeConsumerGroups` on the admin client, `ListConsumerGroupOffsets` on the offsets reader)
+that is still waiting while the broker is away ends `Local_TimedOut` after the request timeout, and the client it ran on is then unsafe. Measured on
+`apache/kafka` 4.4, a broker stopped for 15 seconds and started again (`BrokerRestartGroupReadLiveTests`): at the Confluent.Kafka floor (2.14.0, Windows) the
+test host died with an access violation (`0xC0000005`) four to nine seconds after the broker answered metadata again, each call alone and both together,
+and not when nothing read a group during the outage; at 2.16.0 (Windows) it did not die, and both calls returned `Local_TimedOut` on every read for the
+whole four minutes the test waits (the issue suspects librdkafka's own metadata refresh interval, 300 000 ms, for the five minutes it saw; not measured), while a fresh
+client's metadata request answered at once. So a group call that ended `Local_TimedOut` or `RequestTimedOut` retires the client it ran on, every time and with no
+cooldown (`KafkaAdminPool.RetireAfterTimeout`, decided in `ConfluentWire.Release`, for the two group calls and no other); the next read builds a new
+client (about 1 to 8 ms to build and about 6 native threads for each of the two, measured on loopback, all gone when the retired one is disposed), and both
+reads answer a value within about ten seconds of the broker answering metadata. A stale coordinator keeps its once-per-30-seconds cooldown (D50). **Open:** a caller that gives up on a read
+leaves its call running on the client, and a read a second later runs beside it on the same client; the client the first call timed out on is replaced
+at once but disposed only when the second call ends, which can be after the broker is back, and the host died in two of five such runs at the floor.
+Upstream, issue confluentinc/librdkafka #4605 (open; `DescribeConsumerGroups` and `ListConsumerGroupOffsets` on a long-lived admin client abort in
+`rd_kafka_enq_once_del_source_return` when the broker restarts or is stopped for minutes; reported on Linux, Go and .NET, still at librdkafka 2.16.0) has the
+same calls and the same trigger. Whether our access violation is that assertion on Windows, where a release build has no assert, is not established: no native
+stack was taken. No fix of it is merged as of 2.16.0. Remove the retire, with the lag read's consumer, once the Confluent.Kafka floor has a librdkafka that
+passes `BrokerRestartGroupReadLiveTests` with it switched off.
+
 **The wire seam.** Every broker call goes through `IKafkaWire` (`DataStudio.Kafka.Core.Wire`): metadata for all topics, describe
 topics with their authorized operations, describe cluster, list offsets (earliest, latest, max timestamp, for a timestamp;
 one kind per call, each partition once), describe a topic's configs, a declared group's offsets and description, and a
@@ -1111,7 +1130,7 @@ whether it lists each topic asked about); `GetTopicAsync` (each partition's firs
 member is assigned or the group has committed to on the topics asked about). `KafkaGroupStatus.PlaceOf(clientId)` says where one member stands: `Standby` (no
 partition), `CaughtUp`, `Behind` (with the records waiting), `NotAMember`, or `Unknown` (the group, or the offsets of a partition the member owns, could not be read: only the member's own partitions are judged, and a topic's problem is on each of its rows). It tells a quiet consumer from a
 stuck one, which a consumer that marks progress only when a record arrives cannot. A committed offset that retention has passed, and a partition a member owns with no committed offset, count from the partition's first offset (`FirstOffset`, the same cached read the topic status makes), where a
-consumer that starts at the earliest record begins: records that have expired are not waiting. A cluster's client is retired at most once per 30 seconds (`KafkaAdminPool.RetireCooldown`), so a coordinator that keeps answering "not available" does not cost a client per refresh.
+consumer that starts at the earliest record begins: records that have expired are not waiting. A client is replaced for a stale coordinator at most once per 30 seconds per cluster (`KafkaAdminPool.RetireCooldown`), so a coordinator that keeps answering "not available" does not cost a client per refresh; a timed-out group call replaces it every time (below).
 
 *Reads, not seams.* As D31 says of the Postgres API, it is results: no wire, catalog, cache or client crosses it, and a host cannot add a read or change a cache. Every
 call goes through `KafkaWireReads`, so it shares the pages' single-flight caches (an answer is up to the shell's `RefreshInterval` old) and pooled clients, and the
@@ -1133,12 +1152,23 @@ holds it.
 *Never served.* No page, endpoint, log line above Debug, metric or audit entry carries a result; a call is event **9681** (Debug: the read, the cluster and the outcome's
 code, nothing else), and it is not audited, as host code is not a visitor.
 
-*The coordinator a client never forgets.* librdkafka's admin API caches the coordinator it looked up for a group and renews the entry with every lookup, so a client
-used more often than its idle timeout keeps asking a broker that no longer coordinates the group (`NotCoordinatorForGroup`) for as long as it lives. A group call (the
-description, or the committed offsets on the offsets reader) that is answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` therefore retires the client it
-ran on (`KafkaAdminPool.Retire`): the next call builds a new one and looks the coordinator up afresh, the retired client is disposed when its last lease is released (as
-at shutdown, and a shutdown waits for it), concurrent failures replace it once, and event **9680** (Debug) names the pool, the cluster and the code.
-`GroupLoadInProgress` is the right coordinator still loading and keeps the client. A group on Kafka 4's own consumer protocol (KIP-848, `group.protocol=consumer`) is described by the same call, with its member and partitions, at the Confluent.Kafka floor and at the latest tested version: `WireContractLiveTests4.A_group_on_the_consumer_protocol_is_described_with_its_member_and_its_partitions` proves it on `apache/kafka` 4.x, live only, because the fake has one kind of group. `AdminPoolTests` holds the pool, the cooldown and the wire's return of a lease (`ConfluentWire.Release`, where the retire is), `ConfluentErrorMappingTests` which codes mean a stale coordinator, and `KafkaDiagnosticsApiIsNotServedTests` that nothing outside the API's folder and its registration names the API or its read model.
+*The coordinator a client never forgets, and the client that timed out.* Two rules, one place (`ConfluentWire.Release`), for the two group calls (the description, and
+the committed offsets on the offsets reader) and no other call: a timed-out metadata, offsets or configuration read keeps its client. **Stale coordinator:**
+librdkafka's admin API caches the coordinator it looked up for a group and renews the entry with every lookup, so a client used more often than its idle timeout keeps asking a
+broker that no longer coordinates the group (`NotCoordinatorForGroup`) for as long as it lives; a group call answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable`
+therefore retires the client it ran on (`KafkaAdminPool.RetireStaleCoordinator`), at most once per cluster per `RetireCooldown`: the answer is a reply, so the broker is
+there, and a coordinator that never settles must not cost a client per refresh. **Timed out:** a group call that ended `Local_TimedOut` or `RequestTimedOut` retires its client every
+time, with no cooldown (`KafkaAdminPool.RetireAfterTimeout`), because a client whose group request timed out while the broker was away crashes the process when the broker
+returns (`0xC0000005` at the Confluent.Kafka floor on Windows, four to nine seconds after, each call alone) or keeps timing out until its own metadata refresh (2.16.0), and a
+cooldown would keep the replacement when it times out too (D36). *What a cluster that is down costs:* every group read goes through `KafkaWireReads`, which is single-flight and
+cached per key (cluster, group and, for offsets, topic) for the shell's `RefreshInterval` (5 seconds by default), a failure being cached as a value like any answer, and
+the entry counts from the start of the read, so a read that timed out after 10 seconds is already stale and the next caller starts one at once: at most one new read per key per
+interval, each ending in at most one rebuild of the client it ran on (concurrent timeouts on one client replace it once). A rebuild is the construction of one admin
+client or one consumer with its dependent admin client, about 1 to 8 ms and about 6 native threads each, measured on loopback, and a connection when the next call is made (about 60 ms
+with SASL on loopback); it is the same factory, with the same overrides, as the first client (D37). Several (group, topic) keys multiply the rate by their number, and no path
+reads a group outside this cache. In both rules the retired client is disposed when its last lease is released (as at shutdown, and a shutdown waits for it), concurrent failures
+replace it once, and event **9680** (Debug) names the pool, the cluster and the code (the stale coordinator's or the timeout's).
+`GroupLoadInProgress` is the right coordinator still loading and keeps the client. A group on Kafka 4's own consumer protocol (KIP-848, `group.protocol=consumer`) is described by the same call, with its member and partitions, at the Confluent.Kafka floor and at the latest tested version: `WireContractLiveTests4.A_group_on_the_consumer_protocol_is_described_with_its_member_and_its_partitions` proves it on `apache/kafka` 4.x, live only, because the fake has one kind of group. `AdminPoolTests` holds the pool, the two rules and the wire's return of a lease (`ConfluentWire.Release`, where the retire is), `ConfluentErrorMappingTests` which codes mean a stale coordinator or a timeout, `BrokerRestartGroupReadLiveTests` the restart on a broker of its own, and `KafkaDiagnosticsApiIsNotServedTests` that nothing outside the API's folder and its registration names the API or its read model.
 
 *Proved on Kafka.* The member list and the broker list come from the wire (`WireGroupDescription.Members`, `WireMetadata.Brokers`), so the fake models them only as
 far as `WireContract` proves them on `apache/kafka` 3.9 and 4.x: a described group lists a joined member with its client id, host and partitions, and metadata names

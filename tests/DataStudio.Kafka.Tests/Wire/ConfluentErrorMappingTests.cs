@@ -126,6 +126,25 @@ public class ConfluentErrorMappingTests
         Map(code, WireCall.Metadata).Should().Be(new WireError.Unavailable(code.ToString(), Retriable: true));
     }
 
+    /// <summary>
+    /// Issue #97 (D50): the decision to replace the client of a group call that timed out reads the mapped code, so the two codes it names
+    /// are the Confluent <c>ErrorCode</c> names the mapping gives, and no neighbouring unavailable code is one of them.
+    /// </summary>
+    [Theory]
+    [InlineData(ErrorCode.Local_TimedOut, "Local_TimedOut")]
+    [InlineData(ErrorCode.RequestTimedOut, "RequestTimedOut")]
+    [InlineData(ErrorCode.Local_TimedOutQueue, null)]
+    [InlineData(ErrorCode.Local_Transport, null)]
+    [InlineData(ErrorCode.Local_AllBrokersDown, null)]
+    [InlineData(ErrorCode.GroupLoadInProgress, null)]
+    [InlineData(ErrorCode.NotCoordinatorForGroup, null)]
+    public void A_group_call_that_ended_without_an_answer_is_told_by_the_two_timeout_codes_and_no_other(ErrorCode code, string? expected)
+    {
+        ConfluentWire.GroupCallTimedOut(Map(code, WireCall.DescribeGroup)).Should().Be(expected);
+        ConfluentWire.GroupCallTimedOut(Map(code, WireCall.GroupOffsets)).Should().Be(expected);
+        ConfluentWire.GroupCallTimedOut(null).Should().BeNull();
+    }
+
     [Fact]
     public void Anything_else_is_a_failure_named_by_its_code()
     {

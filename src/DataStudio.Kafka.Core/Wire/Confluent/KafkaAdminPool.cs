@@ -165,22 +165,40 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <summary>The least time between two replacements of one cluster's client.</summary>
+    /// <summary>The least time between two replacements of one cluster's client for a stale coordinator (D50); a timed-out group call has no cooldown.</summary>
     internal static readonly TimeSpan RetireCooldown = TimeSpan.FromSeconds(30);
 
     private readonly Dictionary<string, DateTimeOffset> retiredAt = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Takes the client a lease holds out of the pool, so that the next <see cref="Rent" /> builds a new one (D50). librdkafka's admin API
-    /// keeps a group coordinator it looked up for as long as the client is used, and every lookup renews it, so a client that was answered
-    /// <c>NOT_COORDINATOR</c> would keep asking the broker that no longer coordinates the group until it sat idle. The client is disposed
-    /// when its last lease is released, as a client leased at shutdown is; one another call already replaced is left alone, so concurrent
-    /// failures replace it once. A cluster's client is replaced at most once per <see cref="RetireCooldown" />.
+    /// Takes the client a lease holds out of the pool, because the group coordinator it looked up is no longer the group's (D50), so that the
+    /// next <see cref="Rent" /> builds a new one. librdkafka's admin API keeps a group coordinator it looked up for as long as the client is
+    /// used, and every lookup renews it, so a client that was answered <c>NOT_COORDINATOR</c> would keep asking the broker that no longer
+    /// coordinates the group until it sat idle. The client is disposed when its last lease is released, as a client leased at shutdown is; one
+    /// another call already replaced is left alone, so concurrent failures replace it once. <b>A cluster's client is replaced for this reason at
+    /// most once per <see cref="RetireCooldown" />:</b> the answer is a reply, so the broker is there, and a coordinator that keeps answering "not
+    /// available" (an election that does not end) would otherwise cost a new client for every failing group at every refresh. A group call that
+    /// timed out is the other rule (<see cref="RetireAfterTimeout" />).
     /// </summary>
     /// <param name="lease">The lease whose call was answered with a stale coordinator.</param>
     /// <param name="code">The error code that said so, for the log.</param>
     /// <returns>Whether this call took the client out.</returns>
-    public bool Retire(Lease lease, string code)
+    public bool RetireStaleCoordinator(Lease lease, string code) => Retire(lease, code, applyCooldown: true);
+
+    /// <summary>
+    /// Takes the client a lease holds out of the pool, because a group call on it ended without an answer (<c>Local_TimedOut</c> or
+    /// <c>RequestTimedOut</c>), <b>every time and with no cooldown</b> (D50). A client whose group request timed out while the broker was away
+    /// crashes the whole process (<c>0xC0000005</c>) a few seconds after the broker is back, and the only safe client is a new one; the
+    /// cooldown of <see cref="RetireStaleCoordinator" /> would keep the replacement when it times out too, and that one is the one that kills
+    /// the process. A cluster that is really down costs one rebuild per timed-out group read, and such a read takes the request timeout. One
+    /// another call already replaced is left alone, so concurrent timeouts on one client replace it once.
+    /// </summary>
+    /// <param name="lease">The lease whose group call timed out.</param>
+    /// <param name="code">The error code that said so, for the log.</param>
+    /// <returns>Whether this call took the client out.</returns>
+    public bool RetireAfterTimeout(Lease lease, string code) => Retire(lease, code, applyCooldown: false);
+
+    private bool Retire(Lease lease, string code, bool applyCooldown)
     {
         ArgumentNullException.ThrowIfNull(lease);
 
@@ -191,16 +209,18 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 return false;
             }
 
-            // A coordinator that keeps answering "not available" (an election that does not end) would otherwise cost a new client for
-            // every failing group at every refresh. A client is replaced at most once per cooldown; the next stale answer after it does it again.
-            DateTimeOffset now = timeProvider.GetUtcNow();
-
-            if (retiredAt.TryGetValue(lease.Cluster, out DateTimeOffset last) && now - last < RetireCooldown)
+            if (applyCooldown)
             {
-                return false;
+                DateTimeOffset now = timeProvider.GetUtcNow();
+
+                if (retiredAt.TryGetValue(lease.Cluster, out DateTimeOffset last) && now - last < RetireCooldown)
+                {
+                    return false;
+                }
+
+                retiredAt[lease.Cluster] = now;
             }
 
-            retiredAt[lease.Cluster] = now;
             slots.Remove(lease.Cluster);
             current.Retired = true;
             retiredPending++;
@@ -356,12 +376,16 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         /// <summary>The client; valid until the lease is disposed.</summary>
         public TClient Client => slot.Client;
 
-        /// <summary>The slot this lease holds, so that <see cref="KafkaAdminPool{TClient}.Retire" /> retires only the client the call ran on.</summary>
+        /// <summary>The slot this lease holds, so that a retire retires only the client the call ran on.</summary>
         internal Slot Held => slot;
 
-        /// <summary>Takes this lease's client out of the pool (see <see cref="KafkaAdminPool{TClient}.Retire" />).</summary>
+        /// <summary>Takes this lease's client out of the pool for a stale coordinator, at most once per cooldown (see <see cref="KafkaAdminPool{TClient}.RetireStaleCoordinator" />).</summary>
         /// <param name="code">The error code that said the client's coordinator is stale.</param>
-        public bool Retire(string code) => pool.Retire(this, code);
+        public bool RetireStaleCoordinator(string code) => pool.RetireStaleCoordinator(this, code);
+
+        /// <summary>Takes this lease's client out of the pool because a group call on it timed out, with no cooldown (see <see cref="KafkaAdminPool{TClient}.RetireAfterTimeout" />).</summary>
+        /// <param name="code">The timeout's error code.</param>
+        public bool RetireAfterTimeout(string code) => pool.RetireAfterTimeout(this, code);
 
         /// <inheritdoc />
         public void Dispose()

@@ -348,17 +348,30 @@ internal sealed class ConfluentWire(
         Leased(pool, call, resource, run, cancellationToken);
 
     /// <summary>
-    /// Gives a call's lease back when the call has ended: a client that was answered with a stale coordinator is retired first, so the
-    /// next call builds one that looks the coordinator up afresh (D50). A method of its own so that a test holds the retire to this place.
+    /// Gives a call's lease back when the call has ended, and decides here, for the two group calls (<see cref="WireCall.DescribeGroup" /> and
+    /// <see cref="WireCall.GroupOffsets" />) and no other, whether the client the call ran on is replaced (D50), so that the next call builds one
+    /// that looks the coordinator up afresh. A method of its own so that a test holds the retire to this place. A group call answered a stale
+    /// coordinator (<see cref="StaleCoordinator" />) replaces its client at most once per <see cref="KafkaAdminPool{TClient}.RetireCooldown" />; a
+    /// group call that ended without an answer (<see cref="GroupCallTimedOut" />) replaces it every time.
     /// </summary>
     /// <param name="done">The call, completed.</param>
     /// <param name="held">The lease the call ran on.</param>
-    internal static void Release<TClient, T>(Task<WireResult<T>> done, KafkaAdminPool<TClient>.Lease held)
+    /// <param name="call">Which call it was: a call that is not a group call never replaces its client.</param>
+    internal static void Release<TClient, T>(Task<WireResult<T>> done, KafkaAdminPool<TClient>.Lease held, WireCall call)
         where TClient : class, IDisposable
     {
-        if (done.IsCompletedSuccessfully && StaleCoordinator(done.Result.Error) is { } code)
+        if (call is WireCall.DescribeGroup or WireCall.GroupOffsets && done.IsCompletedSuccessfully)
         {
-            held.Retire(code);
+            WireError? error = done.Result.Error;
+
+            if (StaleCoordinator(error) is { } stale)
+            {
+                held.RetireStaleCoordinator(stale);
+            }
+            else if (GroupCallTimedOut(error) is { } timedOut)
+            {
+                held.RetireAfterTimeout(timedOut);
+            }
         }
 
         held.Dispose();
@@ -398,7 +411,7 @@ internal sealed class ConfluentWire(
         }
 
         _ = work.ContinueWith(
-            static (done, state) => Release(done, (KafkaAdminPool<TClient>.Lease) state!),
+            (done, state) => Release(done, (KafkaAdminPool<TClient>.Lease) state!, call),
             lease,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
@@ -438,6 +451,18 @@ internal sealed class ConfluentWire(
     /// <param name="error">A call's error, or <see langword="null" />.</param>
     internal static string? StaleCoordinator(WireError? error) =>
         error is WireError.Unavailable { UnavailableCode: "NotCoordinatorForGroup" or "GroupCoordinatorNotAvailable" } unavailable
+            ? unavailable.Code
+            : null;
+
+    /// <summary>
+    /// The code of an error that says a call ended without an answer (<c>Local_TimedOut</c>, the client's own request timeout, or
+    /// <c>RequestTimedOut</c>, the broker's), else <see langword="null" />. On a group call it means the client may be in the state that crashes
+    /// the process when the broker returns (D36, D50), so <see cref="Release{TClient, T}" /> replaces it at once. Only that method applies it, and only to the
+    /// two group calls: a timed-out metadata, offsets or configuration read keeps its client.
+    /// </summary>
+    /// <param name="error">A call's error, or <see langword="null" />.</param>
+    internal static string? GroupCallTimedOut(WireError? error) =>
+        error is WireError.Unavailable { UnavailableCode: "Local_TimedOut" or "RequestTimedOut" } unavailable
             ? unavailable.Code
             : null;
 
