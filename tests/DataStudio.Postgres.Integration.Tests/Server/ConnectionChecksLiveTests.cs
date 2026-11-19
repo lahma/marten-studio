@@ -148,7 +148,7 @@ public class ConnectionChecksLiveTests(PostgresVersionMatrix matrix)
         HealthFinding finding = result.Findings.Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == "2");
-        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "200 connections at most");
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "200 connections at most from 2 pools");
 
         string everything = string.Join('\n', finding.Title, finding.WhyItMatters, finding.Caveat, finding.Remedy!.Code, string.Join('\n', finding.Evidence.Select(static x => x.Value)));
         everything.Should().NotContain("np2-second-pool").And.NotContain("ms-matrix-host-").And.NotContain("Host=").And.NotContain("Password");
@@ -196,7 +196,7 @@ public class ConnectionChecksLiveTests(PostgresVersionMatrix matrix)
         counted.Outcome.Should().Be(HealthCheckOutcome.Checked, counted.Problem?.Reason);
         HealthFinding finding = counted.Findings.Should().ContainSingle().Subject;
         finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == "2");
-        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "200 connections at most");
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "200 connections at most from 2 pools");
         finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Named pools", StringComparison.Ordinal));
 
         string everything = string.Join('\n', finding.Title, finding.WhyItMatters, finding.Caveat, finding.Remedy!.Code, string.Join('\n', finding.Evidence.Select(static x => x.Label + x.Value)));

@@ -150,7 +150,7 @@ public sealed class NamedPoolSiblingsTests
     {
         HealthFinding finding = Verdict(ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, 200, 1))).Findings.Single();
 
-        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified, left out" && x.Value == "1");
+        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified" && x.Value == "1");
         finding.Caveat.Should().Contain("counted when the studio resolves it").And.Contain("(1 here)");
     }
 
@@ -264,7 +264,7 @@ public sealed class NamedPoolSiblingsTests
         read.Facts.Siblings.Should().Be(new ConnectionPoolSiblings(2, 200, 1));
 
         HealthFinding finding = Verdict(read.Facts).Findings.Should().ContainSingle().Subject;
-        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified, left out" && x.Value == "1");
+        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified" && x.Value == "1");
     }
 
     [Fact]
