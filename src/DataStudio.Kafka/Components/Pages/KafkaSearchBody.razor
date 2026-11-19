@@ -117,8 +117,8 @@
                     @* The type is not written as a literal: the compiler binds a literal datetime-local as a DateTime, and these boxes keep the text the
                        browser gives, which is parsed in the zone the visitor chose. *@
                     <div class="ms-k-absolute">
-                        <label>From <input type="@DateTimeLocal" class="ms-input" @bind:get="absoluteFrom" @bind:event="onchange" @bind:set="value => absoluteFrom = value ?? string.Empty" /></label>
-                        <label>To <input type="@DateTimeLocal" class="ms-input" @bind:get="absoluteTo" @bind:event="onchange" @bind:set="value => absoluteTo = value ?? string.Empty" /></label>
+                        <label>From <input type="@DateTimeLocal" class="ms-input" @bind:get="absoluteFrom" @bind:event="onchange" @bind:set="value => absoluteFrom = KafkaLocalInput.Minutes(value)" /></label>
+                        <label>To <input type="@DateTimeLocal" class="ms-input" @bind:get="absoluteTo" @bind:event="onchange" @bind:set="value => absoluteTo = KafkaLocalInput.Minutes(value)" /></label>
                         <label>
                             Zone
                             <select class="ms-input" @onchange="e => SetZone(e.Value?.ToString())">

@@ -8,7 +8,10 @@ round of use found (#90 to #92). All seven packages are at 2.0.0-beta.3. Nothing
   filter or a Kafka search predicate lost characters. The confirmation box, the filter boxes, the stream stepper's path
   and the Kafka predicates now tell the server what they hold with each keystroke, and a late answer changes nothing.
 - Keys typed right after Ctrl+Enter or Ctrl+S stay too, in the SQL editor, LINQ mode's order-by box and the JSON
-  editor; the Kafka window's four date-and-time boxes are committed the same way.
+  editor.
+- The Kafka window's date-and-time boxes keep the value as the browser holds it, to the minute. The custom window of
+  Related records is read again: with both boxes filled it said "Enter both times of the window." and Search stayed
+  off until a preset was picked.
 - The documents list applies the scope of its address once. An address naming a tenant that was found nowhere made
   every redraw of the page, a time zone change among them, search the databases' tenants again.
 - The README is short and shows every module, with pictures of the Kafka and Postgres modules. Its reference sections
