@@ -1,3 +1,24 @@
+# 2.0.0-beta.3
+
+2.0.0-beta.3 is the third beta of 2.0: it fixes a fault that lost typed text on a slow connection, and what the second
+round of use found (#90 to #92). All seven packages are at 2.0.0-beta.3. Nothing a host writes changes.
+
+- Text typed on a slow connection stays as typed. The answer to a keystroke could arrive after later keystrokes and put
+  older text back in the box, so a typed confirmation stopped matching its phrase and its dialog stayed open, and a
+  filter or a Kafka search predicate lost characters. The confirmation box, the filter boxes, the stream stepper's path
+  and the Kafka predicates now tell the server what they hold with each keystroke, and a late answer changes nothing.
+- Keys typed right after Ctrl+Enter or Ctrl+S stay too, in the SQL editor, LINQ mode's order-by box and the JSON
+  editor; the Kafka window's four date-and-time boxes are committed the same way.
+- The documents list applies the scope of its address once. An address naming a tenant that was found nowhere made
+  every redraw of the page, a time zone change among them, search the databases' tenants again.
+- The README is short and shows every module, with pictures of the Kafka and Postgres modules. Its reference sections
+  are documents of their own, unchanged: `docs/setup.md` (packages, registration, options, tenancy, hosting),
+  `docs/authorization.md`, `docs/screens.md`, `docs/sample.md`, `docs/limits.md` and `docs/building.md`. A link into the
+  old README's `#options` or `#hosting-notes` now belongs in `docs/setup.md`.
+- For maintainers: two browser tests type over a circuit whose answers are held back; `TypedTextIsBoundTests` keeps a
+  hand-written `value` with `@oninput` out of `src/`; the display-version scan reads code files, any receiver and a
+  time inside quotes; the Rebuild dialog tests type the phrase the dialog asks for.
+
 # 2.0.0-beta.2
 
 2.0.0-beta.2 is the second beta of 2.0: it fixes what the first days of use found in beta.1 (#83 to #88) and two reports
