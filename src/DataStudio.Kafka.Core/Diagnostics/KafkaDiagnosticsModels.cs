@@ -181,7 +181,10 @@ public sealed record KafkaGroupStatus
     /// <summary>The group's live members, with their assignments.</summary>
     public IReadOnlyList<KafkaGroupMember> Members { get; init; } = [];
 
-    /// <summary>Every partition a member is assigned or the group has committed to on the topics asked about, in topic and partition order.</summary>
+    /// <summary>
+    /// Every partition a member is assigned or the group has committed to on the topics asked about, in topic and partition order, and
+    /// any other partition of those topics whose committed or end offset could not be read, with its problem.
+    /// </summary>
     public IReadOnlyList<KafkaGroupPartition> Partitions { get; init; } = [];
 
     /// <summary>
@@ -211,11 +214,13 @@ public sealed record KafkaGroupStatus
 
     /// <summary>
     /// Where the member with <paramref name="clientId" /> stands in the group: it waits for a partition, has read everything it owns, has
-    /// records waiting, or is not a member at all. Only the partitions the member owns are judged: a problem on one of them, or an offset of
-    /// one that was not read, makes the answer <see cref="KafkaMemberState.Unknown" />, and a problem on any other partition or topic does not.
+    /// records waiting, or is not a member at all. Only the partitions the member owns are judged: a committed or end offset of one that
+    /// could not be read makes the answer <see cref="KafkaMemberState.Unknown" />, and a problem on any other partition or topic does not.
     /// A partition the member owns with no committed offset, or whose committed offset retention has passed, counts from the partition's
-    /// first offset, where a consumer that starts at the earliest record begins: records that have expired are not waiting. (A consumer configured to start at the end has less waiting than
-    /// that; the group does not say which it is.) An application tells a quiet consumer from a stuck one with it: a consumer that only
+    /// first offset, where a consumer that starts at the earliest record begins: records that have expired are not waiting. Where the
+    /// first offset could not be read, a partition with a commit counts from the commit (which may count expired records for one
+    /// refresh), and one with none is <see cref="KafkaMemberState.Unknown" />. (A consumer configured to start at the end has less
+    /// waiting than that; the group does not say which it is.) An application tells a quiet consumer from a stuck one with it: a consumer that only
     /// marks progress when a record arrives looks the same idle for both.
     /// </summary>
     /// <param name="clientId">The member's <c>client.id</c>, which must be unique in the group for the answer to name one consumer.</param>
