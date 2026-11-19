@@ -84,7 +84,12 @@ public class UnhealthySwitchesSampleHostTests(PostgresFixture postgres)
                 ("name", application))).Should().Be(0, "{0} leaves no session working or in a transaction", slug);
         }
 
-        (await SessionsAsync(connectionString, Sessions[2].Application)).Should().Be(0, "the pool hog's connections are closed, not left idle in the pool");
+        // A backend is still listed for a moment after its client closed the connection, so this waits for the list to empty (it failed
+        // on CI on 2026-11-19 with one left). A connection left idle in the pool would stay for minutes, far past the bound.
+        await LiveWait.UntilAsync(
+            async () => await SessionsAsync(connectionString, Sessions[2].Application) == 0,
+            TimeSpan.FromSeconds(15),
+            "the pool hog's connections are closed, not left idle in the pool");
 
         await FlipAsync(admin, token, "bloated-table", on: true);
         (await ReloptionsAsync(connectionString)).Should().Contain("autovacuum_enabled=false");
