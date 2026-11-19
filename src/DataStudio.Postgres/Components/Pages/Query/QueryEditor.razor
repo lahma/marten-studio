@@ -323,16 +323,43 @@
 
     private async Task RunClickAsync()
     {
-        // A click blurs the textarea first, so `change` has already delivered the text; the live value is
-        // only fetched for the keyboard path.
+        await CommitLiveAsync();
         await OnRun.InvokeAsync(Value ?? string.Empty);
     }
 
-    private async Task SaveClickAsync() => await OnSave.InvokeAsync(Value ?? string.Empty);
+    private async Task SaveClickAsync()
+    {
+        await CommitLiveAsync();
+        await OnSave.InvokeAsync(Value ?? string.Empty);
+    }
 
-    private async Task ExplainClickAsync() => await OnExplain.InvokeAsync(Value ?? string.Empty);
+    private async Task ExplainClickAsync()
+    {
+        await CommitLiveAsync();
+        await OnExplain.InvokeAsync(Value ?? string.Empty);
+    }
 
-    private async Task ExplainAnalyzeClickAsync() => await OnExplainAnalyze.InvokeAsync(Value ?? string.Empty);
+    private async Task ExplainAnalyzeClickAsync()
+    {
+        await CommitLiveAsync();
+        await OnExplainAnalyze.InvokeAsync(Value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Takes the text the box holds before a button acts on it (jzpn). A click leaves the box, and the browser raises <c>change</c> only
+    /// when the text differs from what the box held when it was entered; after a chord ran other text and the visitor put the first text
+    /// back, it does not, and the copy held here is the chord's. Without the script or the circuit, the copy held here stands.
+    /// </summary>
+    private async Task CommitLiveAsync()
+    {
+        try
+        {
+            await CommitAsync(await JsRuntime.InvokeAsync<string?>("martenStudio.query.readValue", new object?[] { textArea }));
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+        }
+    }
 
     private async Task CommitAsync(string? value)
     {

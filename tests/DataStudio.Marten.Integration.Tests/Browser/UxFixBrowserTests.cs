@@ -211,6 +211,47 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         });
 
     /// <summary>
+    /// Run runs what the editor shows (jzpn). After Ctrl+Enter the server holds the statement of the chord; a visitor who then puts the
+    /// text back to what the box held when they entered it gets no <c>change</c> from the browser on leaving it, so a button that ran the
+    /// server's copy ran a statement that was no longer on screen. The buttons read the box.
+    /// </summary>
+    [BrowserFact]
+    public Task Run_runs_the_statement_on_screen_after_a_chord_and_a_change_back() =>
+        RunAsync("uxfix-run-live", async studio =>
+        {
+            IPage page = studio.Page;
+            await page.SetViewportSizeAsync(1280, 900);
+            await studio.GoAsync(fixture.Root.StudioUrl("postgres/query?mode=sql"));
+
+            ILocator editor = page.Locator(".ms-query-editor-input").First;
+            await editor.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            // Committed by leaving the box: what the browser remembers the box as holding.
+            await editor.FillAsync("select 11 as first_statement");
+            await editor.BlurAsync();
+
+            // Typed over and run by the chord.
+            await editor.ClickAsync();
+            await page.Keyboard.PressAsync("Control+A");
+            await page.Keyboard.TypeAsync("select 22 as second_statement");
+            await page.Keyboard.PressAsync("Control+Enter");
+            await page.WaitForFunctionAsync("() => [...document.querySelectorAll('.ms-query-grid-name')].some(x => x.textContent.trim() === 'second_statement')", null, Wait);
+
+            // Put back, without leaving the box in between: on leaving it the browser sees the text it saw on entering, and says nothing.
+            await page.Keyboard.PressAsync("Control+A");
+            await page.Keyboard.TypeAsync("select 11 as first_statement");
+            await page.Locator(".ms-query-run").First.ClickAsync();
+
+            await page.WaitForFunctionAsync(
+                "() => [...document.querySelectorAll('.ms-query-grid-name')].some(x => x.textContent.trim() === 'first_statement')",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 15_000 });
+            (await editor.InputValueAsync()).Should().Be("select 11 as first_statement");
+
+            studio.AssertClean("running the statement on screen after a chord");
+        });
+
+    /// <summary>
     /// The Overview's tiles at 1440 and 1280 px: nothing a tile draws is wider than its card (the Health tile's "N suggestions" ran out of
     /// it at 1440).
     /// </summary>

@@ -873,9 +873,29 @@
         }
     }
 
+    /// <summary>
+    /// Takes the Order-by box's own text before a run (jzpn): after its chord ran other text and the visitor put the first text back, the
+    /// browser raises no <c>change</c> on leaving the box, and the copy held here is the chord's. Without the script or the circuit, the copy
+    /// held here stands.
+    /// </summary>
+    private async Task ReadOrderByAsync()
+    {
+        try
+        {
+            if (await JsRuntime.InvokeAsync<string?>("martenStudio.query.readValue", new object?[] { orderByInput }) is { } live)
+            {
+                orderBy = live;
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+        }
+    }
+
     private async Task RunAsync(string text)
     {
         where = text;
+        await ReadOrderByAsync();
         await NotifyAsync();
         await ExecuteAsync(offset: 0);
     }
