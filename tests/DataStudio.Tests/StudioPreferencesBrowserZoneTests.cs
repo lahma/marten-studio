@@ -81,9 +81,6 @@ public class StudioPreferencesBrowserZoneTests
 
     private static bool Finds(string id) => TimeZoneInfo.TryFindSystemTimeZoneById(id, out _);
 
-    /// <summary>A host that finds both spellings of a zone (every Linux with tzdata, and Windows with ICU); on one that does not there is nothing to alias.</summary>
-    private static bool HostKnowsBothSpellings => Finds("Asia/Calcutta") && Finds("Asia/Kolkata");
-
     private static StudioPreferences PreferencesWithCookie(string zone)
     {
         DefaultHttpContext context = new();
@@ -92,14 +89,17 @@ public class StudioPreferencesBrowserZoneTests
         return new StudioPreferences(new HttpContextAccessor { HttpContext = context });
     }
 
-    private const string BothSpellingsReason =
-        "This host's zone data does not have both Asia/Calcutta and Asia/Kolkata, so there is no alias to prove here; the table's own answer is proved where the resolver is given.";
+    /// <summary>
+    /// Only the current name has to be known: a legacy spelling is looked for under it, so a host whose zone data has no legacy spellings
+    /// (where this used to fail) proves these as well as one that has both.
+    /// </summary>
+    private const string KolkataReason = "This host's zone data does not have Asia/Kolkata.";
 
     [Fact]
     public void A_browser_that_reports_a_legacy_spelling_selects_and_marks_the_current_name_and_stores_nothing()
     {
         // Only the current name has to be known: a host whose zone data has no legacy spellings is where this used to fail.
-        Assert.SkipUnless(Finds("Asia/Kolkata"), "This host's zone data does not have Asia/Kolkata.");
+        Assert.SkipUnless(Finds("Asia/Kolkata"), KolkataReason);
 
         StudioPreferences preferences = Preferences();
         long version = preferences.PreferenceVersion;
@@ -114,7 +114,7 @@ public class StudioPreferencesBrowserZoneTests
     [Fact]
     public void A_stored_legacy_spelling_is_read_as_the_current_name_and_a_browser_answer_in_either_spelling_changes_nothing()
     {
-        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
+        Assert.SkipUnless(Finds("Asia/Kolkata"), KolkataReason);
 
         StudioPreferences preferences = PreferencesWithCookie("Asia/Calcutta");
 
@@ -136,7 +136,7 @@ public class StudioPreferencesBrowserZoneTests
     [Fact]
     public void Choosing_the_current_name_stores_the_current_name_and_a_legacy_value_is_the_same_choice()
     {
-        Assert.SkipUnless(HostKnowsBothSpellings, BothSpellingsReason);
+        Assert.SkipUnless(Finds("Asia/Kolkata"), KolkataReason);
 
         StudioPreferences preferences = Preferences();
 

@@ -329,6 +329,25 @@ internal sealed class FakeKafkaCluster(TimeProvider clock)
         }
     }
 
+    /// <summary>Makes the next list-offsets call for <paramref name="spec" /> fail with <paramref name="error" />, and no other.</summary>
+    public void FailNextOffsets(WireOffsetSpec spec, WireError error)
+    {
+        lock (gate)
+        {
+            offsetFailures[spec] = error;
+        }
+    }
+
+    public WireError? TakeOffsetsFailure(WireOffsetSpec spec)
+    {
+        lock (gate)
+        {
+            return offsetFailures.Remove(spec, out WireError? error) ? error : null;
+        }
+    }
+
+    private readonly Dictionary<WireOffsetSpec, WireError> offsetFailures = [];
+
     public WireError? TakeFailure(WireCall call)
     {
         lock (gate)

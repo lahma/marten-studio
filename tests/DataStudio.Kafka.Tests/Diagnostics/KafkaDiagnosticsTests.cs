@@ -315,6 +315,35 @@ public class KafkaDiagnosticsTests
     }
 
     /// <summary>
+    /// mxxh: the first offset matters only where nothing is committed. When that read alone fails, a member with a commit is judged
+    /// as it was read, one with none is unknown, and a partition nobody owns and nothing is committed to is not listed for it.
+    /// </summary>
+    [Fact]
+    public async Task A_first_offset_that_could_not_be_read_matters_only_where_nothing_is_committed_and_lists_no_row_of_its_own()
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 3);
+        rig.Produce("orders", 0, 4);
+        rig.Produce("orders", 1, 4);
+        rig.Fake.SetGroupMembers(
+            "billing",
+            "Stable",
+            Member("billing-a", new WirePartition("orders", 0)),
+            Member("billing-b", new WirePartition("orders", 1)));
+        rig.Fake.Commit("billing", "orders", 0, 4);
+        rig.Fake.FailNextOffsets(WireOffsetSpec.Earliest, new WireError.Unavailable("RequestTimedOut", Retriable: true));
+
+        KafkaGroupStatus status = await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders"], Token);
+
+        status.OffsetsProblem.Should().BeNull("the committed and end offsets were read");
+        status.Partitions.Select(static x => x.Partition).Should().Equal([0, 1], "partition 2 has no owner and no commit, and a first offset alone lists no row");
+        status.Partitions[0].Problem.Should().BeNull("a partition with a commit does not need its first offset");
+        status.Partitions[1].Problem.Should().NotBeNull();
+        status.PlaceOf("billing-a").State.Should().Be(KafkaMemberState.CaughtUp);
+        status.PlaceOf("billing-b").State.Should().Be(KafkaMemberState.Unknown);
+    }
+
+    /// <summary>
     /// v249: only the member's own partitions are judged. A topic the host named that cannot be read is a problem on the status, and
     /// says nothing about a member that owns no partition of it.
     /// </summary>
