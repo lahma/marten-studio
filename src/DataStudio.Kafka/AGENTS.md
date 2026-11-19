@@ -33,7 +33,7 @@ are 9650 to 9699. The lag read (group offsets) uses a per-cluster consumer that 
 drained before and after each read, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash
 (#5040) on `NOT_COORDINATOR` in `ListConsumerGroupOffsets`; remove it once the Confluent.Kafka floor contains librdkafka's fix
 (PR #5611). A group call that timed out while the broker was away leaves its client unsafe too (an access violation at the floor on Windows, or reads that
-keep timing out at 2.16.0; issue #97, upstream #4605), so it is replaced (D50). Full text: [kafka.md](../../docs/maintainers/kafka.md#d36).
+keep timing out at 2.16.0; issue #97, upstream #4605), so it is replaced (D50), and the snapshot cache shares a read that is still running instead of doubling it (one read per key at a time). Full text: [kafka.md](../../docs/maintainers/kafka.md#d36).
 
 **D37 — In the Kafka module, a read never writes.** Every client the engine builds is a clone of the host's configuration with the
 engine's overrides: no topic auto-creation, no commit and no offset store, explicit offsets on every assign, a group id of

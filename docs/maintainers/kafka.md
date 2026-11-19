@@ -131,9 +131,11 @@ whole four minutes the test waits (the issue suspects librdkafka's own metadata 
 client's metadata request answered at once. So a group call that ended `Local_TimedOut` or `RequestTimedOut` retires the client it ran on, every time and with no
 cooldown (`KafkaAdminPool.RetireAfterTimeout`, decided in `ConfluentWire.Release`, for the two group calls and no other); the next read builds a new
 client (about 1 to 8 ms to build and about 6 native threads for each of the two, measured on loopback, all gone when the retired one is disposed), and both
-reads answer a value within about ten seconds of the broker answering metadata. A stale coordinator keeps its once-per-30-seconds cooldown (D50). **Open:** a caller that gives up on a read
-leaves its call running on the client, and a read a second later runs beside it on the same client; the client the first call timed out on is replaced
-at once but disposed only when the second call ends, which can be after the broker is back, and the host died in two of five such runs at the floor.
+reads answer a value within about ten seconds of the broker answering metadata. A stale coordinator keeps its once-per-30-seconds cooldown (D50). A caller that gives up on a read (a host that allows 8 seconds, below the request timeout) leaves its call running on the
+client, and the snapshot cache shares that read with the next caller of the key instead of starting a second beside it, so the client a call timed out on is disposed
+when that one call ends, before the broker is back (one read per key at a time, below; a test that read the wire directly, with two reads of the key side by side, killed the host in two of five runs at the floor).
+**Still open, not fixed:** reads of *different* keys on one client (another group, another topic's offsets) that start a few seconds apart overlap, so a client that has timed
+out can live up to one request timeout (10 seconds) after its first timeout, held by the other key's call; if the broker returns inside that window the crash is still possible.
 Upstream, issue confluentinc/librdkafka #4605 (open; `DescribeConsumerGroups` and `ListConsumerGroupOffsets` on a long-lived admin client abort in
 `rd_kafka_enq_once_del_source_return` when the broker restarts or is stopped for minutes; reported on Linux, Go and .NET, still at librdkafka 2.16.0) has the
 same calls and the same trigger. Whether our access violation is that assertion on Windows, where a release build has no assert, is not established: no native
@@ -178,7 +180,10 @@ and error events from piling up. The reader commits nothing, joins no group and 
 Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
-the shell's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
+the shell's `RefreshInterval` (configs, authorized operations and the cluster description for a minute); **one read per key at a time**: an entry whose read is
+still running is shared until it completes, whatever its age, and the time-to-live (counted from the entry's creation) decides only how long a completed value is reused, so a slow
+read is shared and never doubled (D36, D50). A read that never completed would hold its key, so every caller of `KafkaSnapshotCache` is a wire call bounded by the request timeout
+(a list-offsets read that has to look the topic up in metadata, twice that), and a new caller must be bounded too.
 
 **Logging.** Engine events are 9650 to 9699, under the `DataStudio.Kafka.Core.*` categories; librdkafka's own log lines go to
 9656 at Debug, never to stderr. An event carries cluster keys, topic names, partitions, offsets, counts, codes and
@@ -1161,8 +1166,9 @@ there, and a coordinator that never settles must not cost a client per refresh. 
 time, with no cooldown (`KafkaAdminPool.RetireAfterTimeout`), because a client whose group request timed out while the broker was away crashes the process when the broker
 returns (`0xC0000005` at the Confluent.Kafka floor on Windows, four to nine seconds after, each call alone) or keeps timing out until its own metadata refresh (2.16.0), and a
 cooldown would keep the replacement when it times out too (D36). *What a cluster that is down costs:* every group read goes through `KafkaWireReads`, which is single-flight and
-cached per key (cluster, group and, for offsets, topic) for the shell's `RefreshInterval` (5 seconds by default), a failure being cached as a value like any answer, and
-the entry counts from the start of the read, so a read that timed out after 10 seconds is already stale and the next caller starts one at once: at most one new read per key per
+cached per key (cluster, group and, for offsets, topic) for the shell's `RefreshInterval` (5 seconds by default), a failure being cached as a value like any answer. **One read per key at a time:** a read
+that is still running is shared with every caller of its key, however old (`KafkaSnapshotCache`), and the time-to-live, counted from when the entry was created, decides only how long a
+completed value is reused, so a read that timed out after 10 seconds is already stale when it ends and the next caller starts one at once: at most one read per key at a time and one new one per
 interval, each ending in at most one rebuild of the client it ran on (concurrent timeouts on one client replace it once). A rebuild is the construction of one admin
 client or one consumer with its dependent admin client, about 1 to 8 ms and about 6 native threads each, measured on loopback, and a connection when the next call is made (about 60 ms
 with SASL on loopback); it is the same factory, with the same overrides, as the first client (D37). Several (group, topic) keys multiply the rate by their number, and no path
