@@ -399,11 +399,9 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task A_legacy_spelling_stored_or_reported_is_the_current_names_one_entry_and_keeps_the_browser_mark()
     {
-        if (!TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Calcutta", out _) || !TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out _))
-        {
-            // A host that cannot find both spellings has nothing to alias; the table's own answer for it is tested where the resolver is given.
-            return;
-        }
+        Assert.SkipUnless(
+            TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Calcutta", out _) && TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out _),
+            "This host's zone data does not have both Asia/Calcutta and Asia/Kolkata, so there is no alias to prove here; the table's own answer is proved where the resolver is given.");
 
         using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();

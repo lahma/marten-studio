@@ -108,9 +108,9 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
                 + "and C03's headroom, which judge one pool at a time, understate what this process can ask of the server. They also "
                 + "idle and retire separately, so the server holds more idle connections than one shared pool would."
                 + (siblings.UnparsedNames > 0
-                    ? " The pools that could not be identified are pools of this process whose database and login the studio could not "
-                        + "read, so they may add to the connections this process holds on the same server; they are not in the count of "
-                        + "pools above or in the sum."
+                    ? " The pools that could not be identified are pools of this process that the studio could not compare with this one - a "
+                        + "data source it does not resolve, or a connection string that names no host - so they may add to the connections "
+                        + "this process holds on the same server; they are not in the count of pools above or in the sum."
                     : string.Empty),
             Evidence = evidence,
             Caveat =
@@ -118,7 +118,11 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
                 + "tenant database is a different database and is not counted. A data source given a Name of its own is counted when "
                 + "the studio resolves it (the one it reads, or one registered with the studio) and no other data source shares the name; "
                 + "one it does not resolve cannot be compared, and is counted apart as not identified"
-                + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
+                + (named > 0 ? " (" + named.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
+                + (siblings.NoHost > 0
+                    ? ". A pool named by a connection string with no host cannot be compared either ("
+                        + siblings.NoHost.ToString(CultureInfo.InvariantCulture) + " here)"
+                    : string.Empty)
                 + ". Several pools are sometimes deliberate - a separate pool for a long-running job - in which case the check can be "
                 + "accepted with AcceptedChecks.",
             Remedy = new HealthRemedy(evaluation.Text.SharedDataSourceRemedyCode, evaluation.Text.SharedDataSourceRemedyExplanation),

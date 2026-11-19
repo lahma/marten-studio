@@ -325,6 +325,27 @@ public sealed class PoolChecksTests
         finding.Link!.Route.Should().Be(SessionEvidence.HoldersLink.Route);
     }
 
+    /// <summary>
+    /// ffm6 (REVIEW-B3-A F4): a pool named by a connection string with no host is not a named data source. The title and the caveat
+    /// count the named pools alike, and the hostless ones are counted in a row and a sentence of their own.
+    /// </summary>
+    [Fact]
+    public void A_pool_with_no_host_is_counted_apart_from_the_named_pools_in_the_title_the_rows_and_the_caveat()
+    {
+        HealthFinding finding = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, 200, 3, NoHost: 1))).Findings.Single();
+
+        finding.Title.Should().Be("2 Npgsql pools in this process connect to this database as the same login, and 2 more named pools could not be identified");
+        finding.Evidence.Should().Contain(new HealthEvidence("Named pools not identified", "2"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Pools named by a connection string with no host, not identified", "1"));
+        finding.Caveat.Should().Contain("counted apart as not identified (2 here). A pool named by a connection string with no host cannot be compared either (1 here).");
+        finding.WhyItMatters.Should().Contain("a data source it does not resolve, or a connection string that names no host");
+
+        HealthFinding hostlessOnly = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, 200, 1, NoHost: 1))).Findings.Single();
+
+        hostlessOnly.Title.Should().Be("2 Npgsql pools in this process connect to this database as the same login");
+        hostlessOnly.Caveat.Should().Contain("counted apart as not identified. A pool named by a connection string with no host cannot be compared either (1 here).");
+    }
+
     [Fact]
     public void Named_pools_the_studio_could_not_identify_are_counted_in_the_evidence_and_a_missing_ceiling_says_so()
     {
@@ -368,7 +389,7 @@ public sealed class PoolChecksTests
         else
         {
             finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified" && x.Value == unidentified.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            finding.WhyItMatters.Should().Contain("whose database and login the studio could not read").And.Contain("may add to the connections this process holds on the same server");
+            finding.WhyItMatters.Should().Contain("that the studio could not compare with this one").And.Contain("may add to the connections this process holds on the same server");
         }
 
         string said = Everything(finding);
