@@ -186,8 +186,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     public bool RetireStaleCoordinator(Lease lease, string code) => Retire(lease, code, applyCooldown: true);
 
     /// <summary>
-    /// Takes the client a lease holds out of the pool, because a group call on it ended without an answer (<c>Local_TimedOut</c> or
-    /// <c>RequestTimedOut</c>), <b>every time and with no cooldown</b> (D50). A client whose group request timed out while the broker was away
+    /// Takes the client a lease holds out of the pool, because a group call on it ended without an answer (<c>Local_TimedOut</c>), <b>every time and with no cooldown</b> (D50). A client whose group request timed out while the broker was away
     /// crashes the whole process (<c>0xC0000005</c>) a few seconds after the broker is back, and the only safe client is a new one; the
     /// cooldown of <see cref="RetireStaleCoordinator" /> would keep the replacement when it times out too, and that one is the one that kills
     /// the process. A cluster that is really down costs one rebuild per timed-out group read, and such a read takes the request timeout. One

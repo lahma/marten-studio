@@ -131,12 +131,26 @@ internal sealed class KafkaDiagnostics(
         ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
         ArgumentNullException.ThrowIfNull(topics);
 
-        Task<WireResult<WireGroupDescription>> describing = reads.GroupAsync(cluster, groupId, cancellationToken);
-        Task<WireResult<WireMetadata>> listing = reads.MetadataAsync(cluster, cancellationToken);
-        await Task.WhenAll(describing, listing).ConfigureAwait(false);
+        // The metadata first, as the topic page reads it (D50): a group call made while the cluster is away times out, and a timed-out group
+        // call is what librdkafka crashes on when the broker returns (D36). No metadata, no group call.
+        WireResult<WireMetadata> metadata = await reads.MetadataAsync(cluster, cancellationToken).ConfigureAwait(false);
 
-        WireResult<WireGroupDescription> description = await describing.ConfigureAwait(false);
-        WireResult<WireMetadata> metadata = await listing.ConfigureAwait(false);
+        if (metadata.Error is { } metadataError)
+        {
+            KafkaReadProblem problem = Problem(metadataError);
+            Log("group", cluster, problem);
+
+            return new KafkaGroupStatus
+            {
+                Cluster = cluster,
+                GroupId = groupId,
+                ReadAt = Now(),
+                Problem = problem,
+                OffsetsProblem = problem,
+            };
+        }
+
+        WireResult<WireGroupDescription> description = await reads.GroupAsync(cluster, groupId, cancellationToken).ConfigureAwait(false);
 
         // A group Kafka does not know is "Dead" with no member, as Kafka itself describes one, never a problem.
         bool unknown = description.Error is WireError.NotFound;

@@ -437,6 +437,11 @@ request that times out leaves work behind inside the client, and when a broker c
 and on Windows it dies with an access violation or carries on with a damaged heap. No Confluent.Kafka release fixes it, so a
 newer client does not help. It concerns the group reads only: `GetGroupAsync`, and the lag on a topic's page.
 
+Both read the cluster's metadata first and read no group while it does not answer: `GetGroupAsync` then returns the
+metadata's problem as the group's `Problem`, with no state, member or partition. So once an outage is under way no group
+read is started, and what is exposed is a group read that was running when the broker went, or that started before the
+next metadata read (one `RefreshInterval`) found it gone.
+
 Data Studio closes the client a group read timed out on, at once, and builds another for the next read; closing it first is
 what avoids the fault. What remains is the time a timed-out client stays open because another read on it is still running:
 at most one request timeout, 10 seconds (20 for one kind of offsets read). A broker that returns inside that time can still
@@ -444,8 +449,6 @@ bring the process down.
 
 A host that polls groups can make that time rarer still:
 
-- Ask `GetClusterAsync` first, and skip the group reads while it reports a problem. The pages do the same: a topic's page
-  reads no lag while the cluster's metadata does not answer.
 - Read all the groups you watch at one cadence, in one pass, so that their reads start and end together.
 - Give a read the engine's own time. A caller that gives up early and asks again is answered from the read already
   running, not from a second one.

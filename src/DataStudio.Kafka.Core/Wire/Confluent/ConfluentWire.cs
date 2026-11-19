@@ -352,7 +352,8 @@ internal sealed class ConfluentWire(
     /// <see cref="WireCall.GroupOffsets" />) and no other, whether the client the call ran on is replaced (D50), so that the next call builds one
     /// that looks the coordinator up afresh. A method of its own so that a test holds the retire to this place. A group call answered a stale
     /// coordinator (<see cref="StaleCoordinator" />) replaces its client at most once per <see cref="KafkaAdminPool{TClient}.RetireCooldown" />; a
-    /// group call that ended without an answer (<see cref="GroupCallTimedOut" />) replaces it every time.
+    /// group call that ended without an answer (<see cref="GroupCallTimedOut" />) replaces it every time. It reads the call's own error, before
+    /// <see cref="Classify" /> renames a timeout after an authentication failure: that client holds the same waiting request.
     /// </summary>
     /// <param name="done">The call, completed.</param>
     /// <param name="held">The lease the call ran on.</param>
@@ -417,7 +418,10 @@ internal sealed class ConfluentWire(
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-        return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        WireResult<T> result = await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return result.Error is { } error && Classify(error) is var classified && !ReferenceEquals(classified, error)
+            ? WireResult<T>.Fail(classified)
+            : result;
     }
 
     private async Task<WireResult<T>> Guard<TClient, T>(
@@ -432,7 +436,7 @@ internal sealed class ConfluentWire(
         }
         catch (KafkaException exception)
         {
-            return WireResult<T>.Fail(Classify(ConfluentErrors.Map(exception.Error, call, resource)));
+            return WireResult<T>.Fail(ConfluentErrors.Map(exception.Error, call, resource));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -455,14 +459,16 @@ internal sealed class ConfluentWire(
             : null;
 
     /// <summary>
-    /// The code of an error that says a call ended without an answer (<c>Local_TimedOut</c>, the client's own request timeout, or
-    /// <c>RequestTimedOut</c>, the broker's), else <see langword="null" />. On a group call it means the client may be in the state that crashes
-    /// the process when the broker returns (D36, D50), so <see cref="Release{TClient, T}" /> replaces it at once. Only that method applies it, and only to the
-    /// two group calls: a timed-out metadata, offsets or configuration read keeps its client.
+    /// The code of an error that says a call ended without an answer (<c>Local_TimedOut</c>, the client's own request timeout), else
+    /// <see langword="null" />. On a group call it means the client may be in the state that crashes the process when the broker returns
+    /// (D36, D50), so <see cref="Release{TClient, T}" /> replaces it at once. Only that method applies it, and only to the two group calls: a
+    /// timed-out metadata, offsets or configuration read keeps its client. <c>RequestTimedOut</c> is not one: it is the broker's own reply, so
+    /// the request was answered and nothing of it waits in the client, and with no cooldown a broker that keeps sending it would cost a client
+    /// per read.
     /// </summary>
     /// <param name="error">A call's error, or <see langword="null" />.</param>
     internal static string? GroupCallTimedOut(WireError? error) =>
-        error is WireError.Unavailable { UnavailableCode: "Local_TimedOut" or "RequestTimedOut" } unavailable
+        error is WireError.Unavailable { UnavailableCode: "Local_TimedOut" } unavailable
             ? unavailable.Code
             : null;
 

@@ -395,8 +395,8 @@ public class AdminPoolTests
     /// <summary>
     /// 66sw (REVIEW-PR95 F4), and issue #97: the wire's own return of a lease is where a group call retires the client it ran on (D50). A
     /// group call answered "not coordinator" or "coordinator not available", or one that timed out, leaves the cluster a new client for the next
-    /// call; any other answer keeps it. The row <c>RequestTimedOut</c> once stood for "an answer that is not a stale coordinator keeps the client"; a
-    /// timeout is now the second rule, so that row says the opposite and a refusal and a not-found stand for the answers that keep it.
+    /// call; any other answer keeps it. <c>RequestTimedOut</c> is such an answer (review F7): it is the broker's own reply, so the request is
+    /// done and nothing of it waits in the client.
     /// </summary>
     [Theory]
     [InlineData("DescribeGroup", "NotCoordinatorForGroup", 2)]
@@ -404,9 +404,9 @@ public class AdminPoolTests
     [InlineData("GroupOffsets", "NotCoordinatorForGroup", 2)]
     [InlineData("GroupOffsets", "GroupCoordinatorNotAvailable", 2)]
     [InlineData("DescribeGroup", "Local_TimedOut", 2)]
-    [InlineData("DescribeGroup", "RequestTimedOut", 2)]
+    [InlineData("DescribeGroup", "RequestTimedOut", 1)]
     [InlineData("GroupOffsets", "Local_TimedOut", 2)]
-    [InlineData("GroupOffsets", "RequestTimedOut", 2)]
+    [InlineData("GroupOffsets", "RequestTimedOut", 1)]
     [InlineData("DescribeGroup", "GroupLoadInProgress", 1)]
     [InlineData("GroupOffsets", "GroupLoadInProgress", 1)]
     [InlineData("DescribeGroup", "Local_Transport", 1)]
