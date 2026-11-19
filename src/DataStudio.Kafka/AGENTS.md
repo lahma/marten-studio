@@ -32,8 +32,11 @@ cluster, created on first use and disposed when idle, and one consumer per scan,
 are 9650 to 9699. The lag read (group offsets) uses a per-cluster consumer that is never subscribed, through a dependent admin client
 drained before and after each read, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash
 (#5040) on `NOT_COORDINATOR` in `ListConsumerGroupOffsets`; remove it once the Confluent.Kafka floor contains librdkafka's fix
-(PR #5611). A group call that timed out while the broker was away leaves its client unsafe too (an access violation at the floor on Windows, or reads that
-keep timing out at 2.16.0; issue #97, upstream #4605), so it is replaced (D50), and the snapshot cache shares a read that is still running instead of doubling it (one read per key at a time). Full text: [kafka.md](../../docs/maintainers/kafka.md#d36).
+(PR #5611). A group call that timed out while the broker was away is a different bug, not fixed by any librdkafka release or merged change (issue #97, upstream
+#4605: a double release on the timeout path, read from librdkafka's source: an assertion on Linux and macOS, a use-after-free on Windows, where 2.14.0 died with `0xC0000005` and
+2.16.0 kept timing out); the engine replaces the client it ran on (D50) and the snapshot cache shares a read that is still running instead of doubling it (one read per key at
+a time). That narrows the window and does not close it: a timed-out client stays open up to one request timeout (two for a list-offsets read that falls back to metadata).
+Remove the retire only once the floor has upstream's fix of the timeout path. Full text: [kafka.md](../../docs/maintainers/kafka.md#d36).
 
 **D37 — In the Kafka module, a read never writes.** Every client the engine builds is a clone of the host's configuration with the
 engine's overrides: no topic auto-creation, no commit and no offset store, explicit offsets on every assign, a group id of
