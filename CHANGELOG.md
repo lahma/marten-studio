@@ -9,6 +9,9 @@ round of use found (#90 to #92). All seven packages are at 2.0.0-beta.3. Nothing
   and the Kafka predicates now tell the server what they hold with each keystroke, and a late answer changes nothing.
 - Keys typed right after Ctrl+Enter or Ctrl+S stay too, in the SQL editor, LINQ mode's order-by box and the JSON
   editor.
+- Run, Explain, Explain analyze and Save in the SQL editor act on the text the editor shows. After Ctrl+Enter, a visitor
+  who put the earlier text back and clicked Run got the statement of the chord again, because the browser reports no
+  change for a box that holds what it held when it was entered; LINQ mode's order-by box had the same fault.
 - The Kafka window's date-and-time boxes keep the value as the browser holds it, to the minute. The custom window of
   Related records is read again: with both boxes filled it said "Enter both times of the window." and Search stayed
   off until a preset was picked.
