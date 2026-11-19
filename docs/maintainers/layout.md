@@ -419,6 +419,8 @@ src/DataStudio.Kafka.Core/Export/                 The export writer (D45): rows 
                                          name; pure
 src/DataStudio.Kafka.Core/Index/                  The record-index seam (D48): the host's interface, its query and hints, the narrower and the
                                          planner that asks it
+src/DataStudio.Kafka.Core/Diagnostics/            The diagnostics API (D50): IKafkaDiagnostics, its read model and the implementation over the
+                                         engine's cached reads
 tests/DataStudio.Kafka.Tests/Conventions/         The Kafka fences and convention scans
 tests/DataStudio.Kafka.Tests/Registration/        AddKafka, the version guard, the startup guard
 tests/DataStudio.Kafka.Tests/Endpoints/           Mounting, endpoint authorization and the shell's front page, on a Kafka-only host and beside a test-defined module
@@ -435,6 +437,7 @@ tests/DataStudio.Kafka.Tests/Contract/            WireContract and WindowContrac
                                          the harness they run over
 tests/DataStudio.Kafka.Tests/Wire/                The overrides, the role filter, the error table, the forbidden-call IL scan and the reader
 tests/DataStudio.Kafka.Tests/Clusters/            Registration, key formats and the admin pool
+tests/DataStudio.Kafka.Tests/Diagnostics/         The diagnostics API on the fake: cluster, topic and group reads, their problems and PlaceOf
 tests/DataStudio.Kafka.Tests/Catalog/             The overview reads, the ACL table, the snapshot cache and the throughput samples
 tests/DataStudio.Kafka.Tests/Windows/             Window resolution on the fake
 tests/DataStudio.Kafka.Tests/Logging/             The engine's log events (the parity of its log values with the diagnostics engine's is the live project's Composition)
