@@ -36,7 +36,16 @@ public class DisplayVersionConventionTests
         "src/DataStudio.Postgres/Services/Live/SinceMarkTime.cs",
     ];
 
-    private static bool SpellsATimeIn(string text) => SpellsATime.IsMatch(SourceScanner.StripCommentsAndStrings(text));
+    /// <summary>
+    /// Comments only: a time spelt inside quotes (<c>title="@Preferences.FormatInSelectedTimeZone(at)"</c>, an interpolated string) is a time
+    /// on screen, and removing strings would hide it.
+    /// </summary>
+    private static readonly Regex Comment = new(
+        @"@\*.*?\*@|<!--.*?-->|/\*.*?\*/|(?<![:\w""'])//[^\n]*",
+        RegexOptions.Compiled | RegexOptions.Singleline,
+        TimeSpan.FromSeconds(5));
+
+    private static bool SpellsATimeIn(string text) => SpellsATime.IsMatch(Comment.Replace(text, " "));
 
     /// <summary>Whether a component's markup takes the version: the <c>@inherits</c> line is read with comments removed, so one in a comment does not count.</summary>
     private static bool TakesTheVersion(string razor) => SourceScanner.StripCommentsAndStrings(razor).Contains(Base, StringComparison.Ordinal);
@@ -114,6 +123,8 @@ public class DisplayVersionConventionTests
         SpellsATimeIn("<td>@Prefs.ConvertToSelectedTimeZone(at)</td>").Should().BeTrue("the preferences injected under another name");
         SpellsATimeIn("// Preferences.FormatInSelectedTimeZone is what pages call").Should().BeFalse();
         SpellsATimeIn("public string FormatInSelectedTimeZone(DateTimeOffset moment) => string.Empty;").Should().BeFalse("the declaration is not a use");
+        SpellsATimeIn("<td title=\"@Preferences.FormatInSelectedTimeZone(at)\">x</td>").Should().BeTrue("a time inside an attribute's quotes is a time on screen");
+        SpellsATimeIn("@* Preferences.FormatInSelectedTimeZone *@ <!-- Prefs.ConvertToSelectedTimeZone --> /* x.SelectedTimeZoneId */").Should().BeFalse();
     }
 
     [Fact]
