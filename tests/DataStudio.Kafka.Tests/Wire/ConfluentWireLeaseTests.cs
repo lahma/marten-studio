@@ -35,6 +35,7 @@ public class ConfluentWireLeaseTests
             ConfluentClientEvents events = new(loggers, new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
             Cluster = cluster;
+            Events = events;
             Admin = new KafkaAdminPool<IAdminClient>(
                 _ =>
                 {
@@ -60,6 +61,8 @@ public class ConfluentWireLeaseTests
         public KafkaClusterDefinition Cluster { get; }
 
         public KafkaAdminPool<IAdminClient> Admin { get; }
+
+        public ConfluentClientEvents Events { get; }
 
         public List<IAdminClient> Created { get; } = [];
 
@@ -105,6 +108,24 @@ public class ConfluentWireLeaseTests
 
         rig.TakeNextClient();
         rig.Created.Should().HaveCount(2, "the group call is the one that retires");
+    }
+
+    /// <summary>
+    /// Review F6: a timeout within 30 seconds of an authentication failure is reported as that failure, and the client it ran on holds the
+    /// same waiting group request as any other that timed out. The retire reads the call's own error, so it is replaced all the same.
+    /// </summary>
+    [Fact]
+    public async Task A_group_description_that_timed_out_after_an_authentication_failure_is_reported_as_that_failure_and_still_replaces_its_client()
+    {
+        Rig rig = new();
+        rig.Events.OnError(rig.Cluster.Key, "admin", new Error(ErrorCode.SaslAuthenticationFailed));
+
+        WireResult<WireGroupDescription> result = await rig.Wire.DescribeGroupAsync("orders", TestContext.Current.CancellationToken);
+
+        result.Error.Should().Be(new WireError.AuthenticationFailed("SaslAuthenticationFailed"));
+
+        rig.TakeNextClient();
+        rig.Created.Should().HaveCount(2, "the call itself ended Local_TimedOut, whatever it is reported as");
     }
 
     [Fact]

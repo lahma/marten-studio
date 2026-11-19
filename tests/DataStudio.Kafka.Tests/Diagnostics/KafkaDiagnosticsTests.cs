@@ -416,6 +416,36 @@ public class KafkaDiagnosticsTests
         place.HasNothingToRead.Should().BeFalse();
     }
 
+    /// <summary>
+    /// D50 (REVIEW-97-GA F5): the metadata is read first, and while it does not answer no group call is made, neither the description nor the
+    /// committed offsets. A group call made while the cluster is away times out, and that is the call librdkafka crashes on (D36).
+    /// </summary>
+    [Fact]
+    public async Task A_cluster_whose_metadata_does_not_answer_is_the_group_s_problem_and_no_group_call_is_made()
+    {
+        await using Rig rig = new();
+        rig.Fake.CreateTopic("orders", 1);
+        rig.Fake.FailNext(WireCall.Metadata, new WireError.Unavailable("Local_AllBrokersDown", Retriable: true));
+
+        KafkaGroupStatus status = await rig.Diagnostics.GetGroupAsync(Cluster, "billing", ["orders"], Token);
+
+        KafkaReadProblem expected = new()
+        {
+            Outcome = KafkaReadOutcome.Unavailable,
+            Code = "Local_AllBrokersDown",
+            Sentence = "Not available: the cluster did not answer (Local_AllBrokersDown)",
+        };
+
+        status.Problem.Should().BeEquivalentTo(expected);
+        status.OffsetsProblem.Should().BeEquivalentTo(expected);
+        status.State.Should().BeEmpty();
+        status.Members.Should().BeEmpty();
+        status.Partitions.Should().BeEmpty();
+        status.PlaceOf("billing-a").State.Should().Be(KafkaMemberState.Unknown);
+
+        rig.Fake.Calls.Select(static x => x.Call).Should().Equal([WireCall.Metadata], "nothing is read of a cluster that does not answer");
+    }
+
     [Fact]
     public async Task Each_read_logs_event_9681_at_debug_with_its_outcome_code_only()
     {

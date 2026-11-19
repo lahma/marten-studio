@@ -134,5 +134,5 @@ Full text: [kafka.md](../../docs/maintainers/kafka.md#d48).
 **D50 — The Kafka diagnostics API: what the engine reads, for the host's own code, and never served by the studio.** `IKafkaDiagnostics`
 (public, in `DataStudio.Kafka.Core`, registered by `AddKafka()`) answers a cluster's broker count and listed topics, a topic's offsets and retention, and a group's
 members, assignments, committed and end offsets and lag (`PlaceOf` says where one member stands), through the pages' cached reads and pooled clients, with every
-refusal a value and no visitor's policy asked. Of the two group calls, one answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` retires the client it ran on at most once per 30 seconds, and one that timed out (`Local_TimedOut`, `RequestTimedOut`) retires it every time (9680); a
+refusal a value and no visitor's policy asked. `GetGroupAsync` reads the metadata first and makes no group call while it does not answer. Of the two group calls, one answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` retires the client it ran on at most once per 30 seconds, and one that timed out (`Local_TimedOut`, the client's own timeout, not the broker's `RequestTimedOut` reply) retires it every time (9680); a
 call is event 9681 at Debug and is never audited or served. Full text: [kafka.md](../../docs/maintainers/kafka.md#d50).

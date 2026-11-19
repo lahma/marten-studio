@@ -6,9 +6,11 @@ Postgres Studio and KStudio 1.x; [docs/upgrading.md](docs/upgrading.md) is the m
 three betas below say what 2.0 is and how it changed on the way. Since 2.0.0-beta.3:
 
 - A consumer group read that timed out no longer leaves the process open to a crash when the broker returns (#97). A group
-  call (describing a group, or reading its committed offsets) that ends `Local_TimedOut` or `RequestTimedOut` now replaces the
-  client it ran on, every time; an answer of `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` still replaces it at
-  most once in 30 seconds. librdkafka keeps a timed-out group request's coordinator lookup waiting, and when a broker comes
+  call (describing a group, or reading its committed offsets) that ends `Local_TimedOut` now replaces the client it ran on,
+  every time; an answer of `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable` still replaces it at most once in
+  30 seconds. `IKafkaDiagnostics.GetGroupAsync` now reads the cluster's metadata first, as the topic page does, and reads no
+  group while it does not answer: the group's `Problem` is then the metadata's, with no state, member or partition, so
+  polling a group through an outage starts no read that would time out. librdkafka keeps a timed-out group request's coordinator lookup waiting, and when a broker comes
   back it releases the request twice (confluentinc/librdkafka#4605): an abort on Linux and macOS, an access violation or a
   damaged heap on Windows. No Confluent.Kafka version has a fix, so upgrading it does not help; closing the client first
   does. Before this, group reads through a broker restart ended in that crash (seen at Confluent.Kafka 2.14.0) or kept

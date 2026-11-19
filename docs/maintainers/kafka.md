@@ -133,7 +133,7 @@ time on freed memory. That is an assertion (`eonce->refcnt > 0`) on Linux and ma
 admin client, from .NET, Go and Python, still at 2.16.0, 5 aborts in 7 broker restarts on Linux), and a use-after-free on Windows, where a release build has no assert:
 an access violation or silent heap damage. **No released version and no merged change fixes it.** 2.16.0 not dying in our Windows runs is not a fix (its reads
 kept timing out, and #4605 reports aborts at 2.16.0 on Linux); librdkafka PR #5397 (open) is the path where sending the request fails and #5679 (open) a reply queue
-released twice, both other paths; #5611 is #5040's fix and is not this. So a group call that ended `Local_TimedOut` or `RequestTimedOut` retires the client it ran on,
+released twice, both other paths; #5611 is #5040's fix and is not this. So a group call that ended `Local_TimedOut` retires the client it ran on,
 every time and with no cooldown (`KafkaAdminPool.RetireAfterTimeout`, decided in `ConfluentWire.Release`, for the two group calls and no other): the next read builds a new
 client (about 1 to 8 ms to build and about 6 native threads for each of the two, measured on loopback, all gone when the retired one is disposed), and both reads answered a
 value within about ten seconds of the broker answering metadata. A stale coordinator keeps its once-per-30-seconds cooldown (D50). **It is a mitigation, not a fix:** the retired
@@ -1146,7 +1146,9 @@ consumer that starts at the earliest record begins: records that have expired ar
 *Reads, not seams.* As D31 says of the Postgres API, it is results: no wire, catalog, cache or client crosses it, and a host cannot add a read or change a cache. Every
 call goes through `KafkaWireReads`, so it shares the pages' single-flight caches (an answer is up to the shell's `RefreshInterval` old) and pooled clients, and the
 group offsets go through the offsets reader (D36). The engine never lists every group or every committed offset (D37), so `GetGroupAsync` reads committed offsets
-only on the topics the host names and the topics its members are assigned: a group with no member shows its position only on the topics named.
+only on the topics the host names and the topics its members are assigned: a group with no member shows its position only on the topics named. `GetGroupAsync` reads the
+metadata first, as the topic page does, and makes no group call while it does not answer: the metadata's problem is then the group's `Problem` and `OffsetsProblem`, with no
+state, member or partition, so a host that polls groups through an outage starts no group read that would time out (D36).
 
 *No visitor, so no visitor's gates.* The API answers host code, which already holds the cluster's credentials, so it asks neither Kafka policy nor any capability (D35)
 and reads exactly what the application's principal may read. A read never writes (D37).
@@ -1168,10 +1170,12 @@ the committed offsets on the offsets reader) and no other call: a timed-out meta
 librdkafka's admin API caches the coordinator it looked up for a group and renews the entry with every lookup, so a client used more often than its idle timeout keeps asking a
 broker that no longer coordinates the group (`NotCoordinatorForGroup`) for as long as it lives; a group call answered `NotCoordinatorForGroup` or `GroupCoordinatorNotAvailable`
 therefore retires the client it ran on (`KafkaAdminPool.RetireStaleCoordinator`), at most once per cluster per `RetireCooldown`: the answer is a reply, so the broker is
-there, and a coordinator that never settles must not cost a client per refresh. **Timed out:** a group call that ended `Local_TimedOut` or `RequestTimedOut` retires its client every
-time, with no cooldown (`KafkaAdminPool.RetireAfterTimeout`), because a client whose group request timed out while the broker was away crashes the process when the broker
+there, and a coordinator that never settles must not cost a client per refresh. **Timed out:** a group call that ended `Local_TimedOut` retires its client every
+time, with no cooldown (`KafkaAdminPool.RetireAfterTimeout`), whatever the call is reported as (a timeout within 30 seconds of an authentication failure is reported as that
+failure, and its client holds the same waiting request), because a client whose group request timed out while the broker was away crashes the process when the broker
 returns (`0xC0000005` at the Confluent.Kafka floor on Windows, four to nine seconds after, each call alone; the cause is a double release in librdkafka's timeout path,
-read from its source, and no release or merged change fixes it, D36), and a cooldown would keep the replacement when it times out too. What this leaves open is the time a
+read from its source, and no release or merged change fixes it, D36), and a cooldown would keep the replacement when it times out too. `RequestTimedOut` keeps the client: it is the broker's own reply, so the request was answered and
+nothing of it waits in the client, and with no cooldown a broker that keeps sending it would cost a client per read. What this leaves open is the time a
 timed-out client stays open: up to one request timeout, and up to two for a list-offsets read that falls back to a metadata read (D36). *What a cluster that is down costs:* every group read goes through `KafkaWireReads`, which is single-flight and
 cached per key (cluster, group and, for offsets, topic) for the shell's `RefreshInterval` (5 seconds by default), a failure being cached as a value like any answer. **One read per key at a time** (except a scan's fresh metadata read, which
 replaces a running one: D36; metadata retires nothing): a read
