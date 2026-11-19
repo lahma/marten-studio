@@ -465,7 +465,7 @@
     private string? DateHintTitle(Dictionary<int, DateHintUnit> hints, int column) =>
         hints.TryGetValue(column, out DateHintUnit unit)
             ? "Read as " + SqlCellFormat.UnitLabel(unit) + " because of the column's name and every value on this page - a guess, shown in " +
-              Preferences.SelectedTimeZoneId + ". The number is the stored value."
+              Preferences.SelectedTimeZoneName + ". The number is the stored value."
             : null;
 
     private async Task ToggleDateHintsAsync() => await OnToggleDateHints.InvokeAsync();

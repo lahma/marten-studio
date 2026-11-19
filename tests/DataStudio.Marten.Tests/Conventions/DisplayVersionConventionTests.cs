@@ -17,7 +17,7 @@ public class DisplayVersionConventionTests
     /// member is what is matched, not its receiver.
     /// </summary>
     private static readonly Regex SpellsATime = new(
-        @"\.(FormatInSelectedTimeZone|ConvertToSelectedTimeZone|SelectedTimeZoneId)\b|\bSinceMarkTime\.When\b",
+        @"\.(FormatInSelectedTimeZone|ConvertToSelectedTimeZone|SelectedTimeZoneId|SelectedTimeZoneName)\b|\bSinceMarkTime\.When\b",
         RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 

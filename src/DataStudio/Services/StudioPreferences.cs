@@ -189,6 +189,12 @@ internal sealed class StudioPreferences
     /// <summary>The clock a page takes "now" and "today" from: the host's <see cref="TimeProvider" /> if one is registered, else the system's.</summary>
     public TimeProvider Clock => clock;
 
+    /// <summary>
+    /// The selected zone as a sentence names it: its IANA name, or the display name of a Windows zone that has none, never a raw Windows
+    /// id where a name can be had (<see cref="StudioTimeZones.NameOf(TimeZoneInfo, string?)" />).
+    /// </summary>
+    public string SelectedTimeZoneName => StudioTimeZones.NameOf(ResolveSelectedTimeZone(), StudioTimeZones.CurrentRegion);
+
     /// <summary><paramref name="value" /> in the selected time zone.</summary>
     public DateTimeOffset ConvertToSelectedTimeZone(DateTimeOffset value) =>
         TimeZoneInfo.ConvertTime(value, ResolveSelectedTimeZone());

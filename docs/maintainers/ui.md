@@ -161,6 +161,9 @@ zone with no IANA name (`British Columbia Standard Time`, which Windows hosts ha
 ids, named by its display name without the system's `(UTC-07:00) ` prefix and followed by the studio's own offset ("Pacific Time
 (British Columbia) (UTC-07:00)"), with its id as the option's value, which the host reads back; a zone with no display name is named
 by its id. A host with no such zone lists as it did.
+The same name is used wherever a sentence names a zone (`StudioTimeZones.NameOf`): the Kafka window's zone label
+(`KafkaSearchText.ZoneLabel`, which keeps the offset alone only for a zone whose one name is its id) and the tooltips that say which
+zone a time is shown in (`StudioPreferences.SelectedTimeZoneName`), never a raw Windows id where a name can be had.
 
 **A zone change is a display change, never a scope change, and it draws every time on screen in one render pass.** However the
 circuit's zone moves (a choice in Preferences, a stored zone read once the circuit has started, the browser's own),
