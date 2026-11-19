@@ -85,6 +85,7 @@ internal static class PostgresText
             "Only what is named like Marten's own (mt_): a Marten store's objects, whose rows are read on the Marten pages",
         OwnerFilterOtherTitle = "Everything not named like Marten's own: this application's objects, and other libraries'",
         RunSqlUnavailable = "Running SQL is not available here.",
+        PlanUnavailable = "Planning a statement is not available here.",
 
         StudioCostCovers =
             "health checks, the SQL console, the database browser, Sessions, Maintenance, Storage, Replication, Server and the "

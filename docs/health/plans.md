@@ -408,8 +408,9 @@ Plain plans are listed as not judged (the filter's discards are printed only by 
 
 The **Plan** page (`/studio/postgres/plan`, below Query in the rail, in a Postgres host and a Marten host alike) is the console's Explain buttons as a page of
 its own. Running a plan is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the
-console is; with `RunSql` off (or `ReadOnly` on) the page shows the console's own disabled state, naming the property, in place of
-the editor. **Pasting a plan is every visitor's** (1.0): it reads nothing and runs nothing, so it needs only what opening the
+console is; with `RunSql` off (or `ReadOnly` on) the page says in one sentence that planning a statement is not available here
+(no option or capability is named, and the SQL console's warning is not drawn: the capability chip lists what is off for the host's
+developer), its introduction speaks only of pasting a plan, and the paste box takes the editor's place. **Pasting a plan is every visitor's** (1.0): it reads nothing and runs nothing, so it needs only what opening the
 studio needs, and the page - and its entry in the rail - is there for every visitor.
 
 **Three ways to plan.** *Explain* plans the statement and runs nothing. *Explain analyze* runs it, only through the console's

@@ -63,20 +63,89 @@ public class PlanPageTests
 
     // ---- The gate ------------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Issue #90, as #88 settled it for Query: with <c>RunSql</c> off the page says in one sentence that planning a statement is not
+    /// available here, names no option, capability or call, draws no warning about the console, and speaks only of pasting a plan.
+    /// </summary>
     [Fact]
-    public async Task Without_RunSql_the_page_shows_the_consoles_disabled_state_naming_the_property_and_offers_only_the_paste_box()
+    public async Task Without_RunSql_the_page_says_one_sentence_names_no_option_and_offers_only_the_paste_box()
     {
         await using PostgresComponentContext context = await ReadyAsync(runSql: false);
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("Planning a statement is not enabled").And.Contain("PostgresOptions.Capabilities.RunSql");
-        page.Find(".ms-query-sql-warning").TextContent.Should().Be(SqlConsolePanel.RunSqlWarning);
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Planning a statement is not available here.");
+        page.FindAll(".ms-query-sql-warning").Should().BeEmpty("the console's warning is not drawn where there is no console");
         page.Find(".ms-plan-paste-only").TextContent.Should().Be(PlanPage.PasteOnlyNote);
-        page.FindAll("#ms-plan-sql, .ms-plan-modes, .ms-plan-options").Should().BeEmpty("running a plan is the console's gate");
+        page.FindAll("#ms-plan-sql, .ms-plan-modes, .ms-plan-options, .ms-plan-timeout, .ms-plan-compose").Should().BeEmpty("running a plan is the console's gate");
         page.FindAll("#ms-plan-paste").Should().ContainSingle("pasting a plan reads nothing and is every visitor's (1.0-P3A)");
         page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeFalse();
         context.SqlConsole.Plans.Should().BeEmpty();
+
+        AssertSpeaksOnlyOfPasting(page);
+    }
+
+    /// <summary>What a visitor reads of the page with <c>RunSql</c> off: no option, no capability, no console and nothing that only a run offers.</summary>
+    private static void AssertSpeaksOnlyOfPasting(IRenderedComponent<PlanPage> page)
+    {
+        string text = page.Markup;
+
+        foreach (string forbidden in new[] { "PostgresOptions", "MartenOptions", "Capabilities", "RunSql", "psql", "Explain analyze", "Generic plan" })
+        {
+            text.Should().NotContain(forbidden, "with RunSql off the page names nothing that only a run offers");
+        }
+
+        page.Find(".ms-plan-page-lead").TextContent.Should().Contain("plan Postgres printed").And.NotContain("Write a statement");
+    }
+
+    /// <summary>The paste box, the drawing of a pasted plan and its insights are unchanged by the sentence, and still name nothing that only a run offers.</summary>
+    [Fact]
+    public async Task Without_RunSql_a_pasted_plan_is_drawn_and_the_page_still_names_no_option()
+    {
+        await using PostgresComponentContext context = await ReadyAsync(runSql: false);
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        await PasteAsync(context, page, PlanFixtures.Get(Join));
+
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
+        page.FindAll(".ms-plan-node").Should().HaveCount(5);
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Planning a statement is not available here.");
+        page.FindAll(".ms-plan-whatif-settings, .ms-whatif").Should().BeEmpty("a pasted plan has no statement to plan again");
+
+        AssertSpeaksOnlyOfPasting(page);
+    }
+
+    /// <summary>With <c>RunSql</c> on nothing changes: the editor, the modes and the long intro are drawn, and no sentence of the disabled state.</summary>
+    [Fact]
+    public async Task With_RunSql_on_the_editor_and_the_long_intro_are_drawn_and_the_one_sentence_is_not()
+    {
+        await using PostgresComponentContext context = await ReadyAsync();
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        page.FindAll("#ms-plan-sql").Should().ContainSingle();
+        page.FindAll(".ms-plan-modes").Should().ContainSingle();
+        page.FindAll(".ms-capability-disabled, .ms-plan-paste-only").Should().BeEmpty();
+        page.Find(".ms-plan-page-lead").TextContent.Should().Contain("Write a statement").And.Contain("Explain analyze");
+    }
+
+    /// <summary>Each read-only switch - the shell's and this module's - turns <c>RunSql</c> off, so a console configured on says the same sentence.</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Under_either_read_only_switch_the_page_says_the_same_sentence(bool moduleReadOnly, bool shellReadOnly)
+    {
+        await using PostgresComponentContext context = new PostgresComponentContext().WithAllCapabilities();
+        context.Options.ReadOnly = moduleReadOnly;
+        context.ShellOptions.ReadOnly = shellReadOnly;
+        await context.ReadyAsync();
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Planning a statement is not available here.");
+        page.FindAll("#ms-plan-sql").Should().BeEmpty();
+        page.FindAll("#ms-plan-paste").Should().ContainSingle();
+        AssertSpeaksOnlyOfPasting(page);
     }
 
     [Fact]
@@ -114,20 +183,6 @@ public class PlanPageTests
     }
 
     [Fact]
-    public async Task ReadOnly_says_so_in_the_disabled_state()
-    {
-        await using PostgresComponentContext context = new();
-        context.WithAllCapabilities();
-        context.Options.ReadOnly = true;
-        await context.ReadyAsync();
-
-        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
-
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("ReadOnly");
-        page.FindAll("#ms-plan-sql").Should().BeEmpty();
-    }
-
-    [Fact]
     public async Task A_write_policy_that_refuses_the_visitor_says_so_beside_the_editor_and_disables_it()
     {
         await using PostgresComponentContext context = new();
@@ -141,6 +196,8 @@ public class PlanPageTests
         page.WaitForAssertion(() => page.Find(".ms-write-refusal").TextContent.Should().NotBeEmpty(), Wait);
         page.Find(".ms-query-run").HasAttribute("disabled").Should().BeTrue();
         page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeFalse("pasting a plan reads nothing and is every visitor's (1.0-P3A)");
+        page.FindAll(".ms-capability-disabled").Should().BeEmpty("issue #90 changes only the page with RunSql off: a refused visitor still has the editor, and the refusal beside it");
+        page.Find(".ms-plan-page-lead").TextContent.Should().Contain("Write a statement");
     }
 
     // ---- The editor, the modes and the options -------------------------------------------------------------------------

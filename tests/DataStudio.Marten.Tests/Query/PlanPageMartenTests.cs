@@ -64,8 +64,9 @@ public class PlanPageMartenTests
         page.Find(".ms-plan-caption").TextContent.Should().Contain("Planned with EXPLAIN (FORMAT JSON)");
     }
 
+    /// <summary>Issue #90: Marten Studio's words are the same one sentence, with no option named - and a pasted plan is still drawn.</summary>
     [Fact]
-    public void Without_RunSql_the_disabled_state_names_Marten_Studios_own_option()
+    public void Without_RunSql_the_page_says_one_sentence_names_no_option_and_keeps_the_paste_box()
     {
         using StudioComponentContext context = new();
         context.WithStores("default");
@@ -74,7 +75,37 @@ public class PlanPageMartenTests
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.RunSql");
-        page.FindAll("#ms-plan-sql").Should().BeEmpty();
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Planning a statement is not available here.");
+        page.FindAll("#ms-plan-sql, .ms-query-sql-warning").Should().BeEmpty();
+        page.FindAll("#ms-plan-paste").Should().ContainSingle();
+        page.Find(".ms-plan-paste-only").TextContent.Should().Be(PlanPage.PasteOnlyNote);
+
+        foreach (string forbidden in new[] { "PostgresOptions", "MartenOptions", "Capabilities", "RunSql", "psql", "Explain analyze" })
+        {
+            page.Markup.Should().NotContain(forbidden);
+        }
+    }
+
+    /// <summary>The Marten module's paste box draws a pasted plan with RunSql off, and the page still names nothing that only a run offers.</summary>
+    [Fact]
+    public async Task Without_RunSql_a_pasted_plan_is_drawn()
+    {
+        using StudioComponentContext context = new();
+        context.WithStores("default");
+        context.Options.Capabilities.RunSql = false;
+        context.Services.AddFallbackServiceProvider(new Services(new FakeQueryService()));
+        JSRuntimeInvocationHandler<int> sending = context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true);
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        PlanPaste paste = page.FindComponent<PlanPaste>().Instance;
+        page.Find(".ms-plan-paste-draw").Click();
+        await page.InvokeAsync(() => paste.BeginPaste());
+        await page.InvokeAsync(() => paste.PasteChunk(Plan));
+        sending.SetResult(Plan.Length);
+
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), TimeSpan.FromSeconds(10));
+        page.Find(".ms-capability-disabled").TextContent.Trim().Should().Be("Planning a statement is not available here.");
+        page.Markup.Should().NotContain("Explain analyze").And.NotContain("MartenOptions").And.NotContain("Capabilities");
     }
 }

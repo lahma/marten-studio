@@ -38,7 +38,7 @@
 
     <p id="@(InputId + "-help")" class="ms-muted ms-plan-paste-help">
         What <code>EXPLAIN</code> printed - its default text format, or the JSON of <code>EXPLAIN (FORMAT JSON)</code> - from
-        <code>auto_explain</code>, a log, <code>psql</code> or another server. It is drawn from the text alone: nothing is sent to the database and nothing is audited, so the database's own facts - its
+        <code>auto_explain</code>, a log, a SQL client or another server. It is drawn from the text alone: nothing is sent to the database and nothing is audited, so the database's own facts - its
         statistics, indexes and settings - are not available for it. At most @QueryPlanReader.MaxNodes.ToString("N0", CultureInfo.InvariantCulture)
         nodes, @QueryPlanReader.MaxDepth.ToString(CultureInfo.InvariantCulture) levels and @(QueryPlanReader.MaxCharacters / (1024 * 1024)) MB are read.
     </p>
