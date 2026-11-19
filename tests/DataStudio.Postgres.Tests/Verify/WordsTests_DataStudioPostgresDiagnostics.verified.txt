@@ -233,6 +233,9 @@ A btree index can serve a pattern only by the fixed text it starts with, so one 
 [PlanReadsNoneOfTheTables]
 The plan reads none of the tables the studio judges directly
 
+[PlanUnavailable]
+Planning a statement is not available here.
+
 [PoolBorrowers]
 Every command this process sends through the data source
 

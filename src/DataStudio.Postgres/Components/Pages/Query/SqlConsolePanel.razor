@@ -135,12 +135,6 @@
 </div>
 
 @code {
-    /// <summary>What the README says about the SQL console, repeated where the capability is refused for a visitor who could use it (the Plan page).</summary>
-    internal const string RunSqlWarning =
-        "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
-        "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
-        "you would give psql to.";
-
     /// <summary>What the Plan tab says when the statement was not an <c>EXPLAIN (FORMAT JSON)</c>.</summary>
     internal const string NoPlan =
         "Explain or Explain analyze draws this statement's plan here - as does an EXPLAIN you type with FORMAT JSON among its options.";

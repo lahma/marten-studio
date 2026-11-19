@@ -210,6 +210,12 @@ internal sealed class StudioText
     /// </summary>
     public required string RunSqlUnavailable { get; init; }
 
+    /// <summary>
+    /// What Query › Plan says, while <c>RunSql</c> is off, of planning a statement (issue #90): the Plan page's twin of
+    /// <see cref="RunSqlUnavailable" />, in one sentence with no option, capability or call in it. Pasting a plan stays on offer.
+    /// </summary>
+    public required string PlanUnavailable { get; init; }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Database › Sessions.
 

@@ -198,7 +198,8 @@ read that is authorized like a write, because each reads beyond structure:
 
 Most disabled controls name the property that would enable it (`PostgresOptions.Capabilities.RunSql`). The Query page
 reached by address while `RunSql` is off does not: it says in one sentence that running SQL is not available here, and
-draws no Saved, Recent, Export or Import panel - the person who arrives there is not the one who sets an option, and the
+draws no Saved, Recent, Export or Import panel; the Plan page does the same, saying that planning a statement is not
+available here and offering only the paste box - the person who arrives there is not the one who sets an option, and the
 capability chip lists what is off for the host's developer. The refusal itself lives in the service layer and is audited.
 
 ## The database browser and its gate
