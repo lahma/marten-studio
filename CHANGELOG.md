@@ -5,8 +5,8 @@
 - `IKafkaDiagnostics.GetGroupAsync` lists a partition that no member owns and the group has committed nothing to only
   when its committed or end offset could not be read. When the first-offset read alone failed, beta.3 listed every such
   partition with a problem for one refresh, with `OffsetsProblem` empty.
-- A consumer group on Kafka 4's own consumer protocol (`group.protocol=consumer`) is read like any other: a live test on
-  Kafka 4.4 now proves its state, member and partitions, at the Confluent.Kafka floor and at the latest tested version.
+- A consumer group on Kafka 4's own consumer protocol (`group.protocol=consumer`) is described like any other: a live test
+  on Kafka 4.4 now proves its state, member and partitions, at the Confluent.Kafka floor and at the latest tested version.
 - For maintainers: a component test holds the SQL editor's buttons to doing nothing when the editor went away while its
   box was read; a Kafka test fails only the first-offset read; the zone tests that prove a legacy spelling in a cookie or
   a choice now run wherever the host knows the current name, which includes the CI runner.
