@@ -239,7 +239,9 @@ public class LongestStreamsActionLiveTests(PostgresFixture postgres)
 
         string everything = string.Join('\n', result.Rows.SelectMany(static x => x.Cells).Select(static x => x.Text))
             + result.Summary + string.Join('\n', result.Notes) + string.Join('\n', result.Remedies.Select(static x => x.Code)) + result.AuditMessage;
-        everything.Should().NotContainEquivalentOf("secret").And.NotContainEquivalentOf("ghost").And.NotContain("900").And.NotContain("800");
+        // The two hidden streams' lengths as numbers of their own: a visible stream's id is a random uuid, and its digits may hold "800" or "900"
+        // by chance (2026-11-18 on CI: "…193d37800188").
+        everything.Should().NotContainEquivalentOf("secret").And.NotContainEquivalentOf("ghost").And.NotMatchRegex(@"\b(900|800)\b");
         result.Statements[0].Sql.Should().Contain("= any(@shown)");
     }
 
