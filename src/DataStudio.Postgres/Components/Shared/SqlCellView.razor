@@ -61,7 +61,7 @@ else if (Rich && Vector is PgVectorColumn vector && PgVector.Preview(Text, IsTru
 }
 else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithZone(Type) && SqlCellFormat.ParseInstant(Text) is { } instant)
 {
-    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - shown in {Preferences.SelectedTimeZoneId}")">@Preferences.FormatInSelectedTimeZone(instant, SqlCellFormat.TimeFormat)</span>
+    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - shown in {Preferences.SelectedTimeZoneName}")">@Preferences.FormatInSelectedTimeZone(instant, SqlCellFormat.TimeFormat)</span>
 }
 else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithoutZone(Type) && SqlCellFormat.FormatWithoutZone(Text) is { } local)
 {

@@ -69,6 +69,21 @@ public class StudioTimeZonesTests
         StudioTimeZones.Label(TimeZoneInfo.Utc, At, "FI").Should().Be("UTC");
     }
 
+    /// <summary>zn52: one name for a zone wherever a sentence names it. Custom zones, so the host's zone data and region play no part.</summary>
+    [Fact]
+    public void A_zone_is_named_by_its_IANA_id_or_its_display_name_and_by_its_id_only_when_it_has_no_other()
+    {
+        TimeZoneInfo iana = TimeZoneInfo.CreateCustomTimeZone("Studio/Testville", TimeSpan.FromHours(3), "(UTC+03:00) Testville", "Studio/Testville");
+        TimeZoneInfo windows = TimeZoneInfo.CreateCustomTimeZone("Studio Test Standard Time", TimeSpan.FromHours(-8), "(UTC-08:00) Testland", "Studio Test Standard Time");
+        TimeZoneInfo bare = TimeZoneInfo.CreateCustomTimeZone("Studio Bare Standard Time", TimeSpan.FromHours(1), string.Empty, "Studio Bare Standard Time");
+
+        StudioTimeZones.NameOf(iana, "FI").Should().Be("Studio/Testville", "an id with a slash is a name already");
+        StudioTimeZones.NameOf(windows, "FI").Should().Be("Testland", "the display name, without the offset the system writes in front of it");
+        StudioTimeZones.NameOf(windows, null).Should().Be("Testland");
+        StudioTimeZones.NameOf(bare, "FI").Should().Be("Studio Bare Standard Time", "with no display name the id is all there is");
+        StudioTimeZones.NameOf(TimeZoneInfo.Utc, "FI").Should().Be("UTC");
+    }
+
     [Fact]
     public void A_label_of_a_name_already_held_converts_nothing_again()
     {

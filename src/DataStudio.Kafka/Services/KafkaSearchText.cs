@@ -96,7 +96,7 @@ internal static class KafkaSearchText
 
     /// <summary>
     /// How a time zone is named beside a time (#77): an IANA id with the UTC offset at <paramref name="at" /> (<c>Europe/Helsinki (UTC+02:00)</c>), otherwise the
-    /// offset alone (<c>UTC+02:00</c>, or <c>UTC</c> at no offset). Never a Windows id such as <c>FLE Standard Time</c>, which reads as a display name it is not.
+    /// display name of a Windows zone that has no IANA name (<c>Alberta (UTC-06:00)</c>), otherwise the offset alone (<c>UTC+02:00</c>, or <c>UTC</c> at no offset). Never a Windows id such as <c>FLE Standard Time</c>, which reads as a display name it is not.
     /// </summary>
     /// <param name="zone">The zone.</param>
     /// <param name="at">The time the offset is read at.</param>
@@ -104,7 +104,7 @@ internal static class KafkaSearchText
 
     /// <summary>
     /// <see cref="ZoneLabel(TimeZoneInfo, DateTimeOffset)" /> with the region a Windows id is converted for named: a Windows host's <c>FLE Standard Time</c> in Finland
-    /// reads <c>Europe/Helsinki (UTC+02:00)</c> (#80), and one that has no IANA id here reads as its offset alone.
+    /// reads <c>Europe/Helsinki (UTC+02:00)</c> (#80), and one that has no IANA id here reads as its display name and offset.
     /// </summary>
     /// <param name="zone">The zone.</param>
     /// <param name="at">The time the offset is read at.</param>
@@ -116,7 +116,16 @@ internal static class KafkaSearchText
         string shown = StudioTimeZones.Offset(zone, at);
         string id = StudioTimeZones.IanaId(zone.Id, region);
 
-        return id.Contains('/', StringComparison.Ordinal) ? id + " (" + shown + ")" : shown;
+        if (id.Contains('/', StringComparison.Ordinal))
+        {
+            return id + " (" + shown + ")";
+        }
+
+        // A Windows zone with no IANA name is called what the Preferences list calls it, its display name (zn52); never its id, and the
+        // offset alone when it has no other name.
+        string name = StudioTimeZones.NameOf(id, zone);
+
+        return StudioTimeZones.IsUnconvertedWindowsId(id) && !string.Equals(name, id, StringComparison.Ordinal) ? name + " (" + shown + ")" : shown;
     }
 
     /// <summary>The page's line for a local time the zone's clocks skip, naming the zone as <see cref="ZoneLabel(TimeZoneInfo, DateTimeOffset)" /> does, never by a Windows id.</summary>

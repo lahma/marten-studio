@@ -142,6 +142,20 @@ internal static partial class StudioTimeZones
         return name.Length == 0 ? id : name;
     }
 
+    /// <summary>
+    /// What a zone is called in a sentence, a tooltip or beside a time (zn52): <see cref="NameOf(string, TimeZoneInfo)" /> of its IANA id, so
+    /// the Preferences list, a module's own zone label and a tooltip that says which zone a time is shown in all use one name. A Windows zone with no
+    /// IANA name is its display name; one with no display name either keeps its id.
+    /// </summary>
+    /// <param name="zone">The zone.</param>
+    /// <param name="region">The two-letter region the conversion asks for first, or <see langword="null" />.</param>
+    public static string NameOf(TimeZoneInfo zone, string? region)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+
+        return NameOf(IanaId(zone.Id, region), zone);
+    }
+
     [GeneratedRegex(@"^\(UTC(?:[+-]\d{1,2}:\d{2})?\)\s*", RegexOptions.CultureInvariant)]
     private static partial Regex OffsetPrefix();
 

@@ -129,12 +129,14 @@ public class KafkaSearchTextTests
         TimeZoneInfo half = TimeZoneInfo.CreateCustomTimeZone("Studio Half Standard Time", new TimeSpan(5, 30, 0), "Half", "Studio Half Standard Time");
 
         KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at, "FI").Should().Be("Europe/Helsinki (UTC+02:00)", "an IANA id keeps its name and gains the offset");
-        KafkaSearchText.ZoneLabel(unknown, at, "FI").Should().Be("UTC+02:00", "a Windows-style id that cannot be converted is its offset, never the id");
-        KafkaSearchText.ZoneLabel(negative, at, "FI").Should().Be("UTC-08:00");
-        KafkaSearchText.ZoneLabel(half, at, "FI").Should().Be("UTC+05:30");
+        KafkaSearchText.ZoneLabel(unknown, at, "FI").Should().Be("Test (UTC+02:00)", "a Windows-style id that cannot be converted is its display name and offset, never the id");
+        KafkaSearchText.ZoneLabel(negative, at, "FI").Should().Be("Negative (UTC-08:00)");
+        KafkaSearchText.ZoneLabel(half, at, "FI").Should().Be("Half (UTC+05:30)");
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.CreateCustomTimeZone("Studio Bare Standard Time", TimeSpan.FromHours(2), "Studio Bare Standard Time", "Studio Bare Standard Time"), at, "FI")
+            .Should().Be("UTC+02:00", "a zone whose only name is its id is its offset alone");
         KafkaSearchText.ZoneLabel(TimeZoneInfo.Utc, at, "FI").Should().Be("UTC");
 
-        KafkaSearchText.WindowLine(at, at.AddHours(1), unknown).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
+        KafkaSearchText.WindowLine(at, at.AddHours(1), unknown).Should().Be("10:00–11:00 Test (UTC+02:00) · 08:00Z–09:00Z");
     }
 
     /// <summary>#92: the window's zone label asks the same function the Preferences list does, so a zone whose id is a legacy spelling reads under the current name where the host finds it.</summary>
@@ -164,7 +166,7 @@ public class KafkaSearchTextTests
         }
         else
         {
-            KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("UTC+02:00");
+            KafkaSearchText.ZoneLabel(windowsStyle, at, "FI").Should().Be("Helsinki (UTC+02:00)");
         }
 
         if (TimeZoneInfo.TryConvertWindowsIdToIanaId("FLE Standard Time", out string? byDefault) && TimeZoneInfo.TryFindSystemTimeZoneById(byDefault, out TimeZoneInfo? _))
@@ -174,7 +176,7 @@ public class KafkaSearchTextTests
         }
         else
         {
-            KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().Be("UTC+02:00");
+            KafkaSearchText.ZoneLabel(windowsStyle, at, null).Should().Be("Helsinki (UTC+02:00)");
         }
     }
 
@@ -187,7 +189,7 @@ public class KafkaSearchTextTests
 
         helsinki.IsInvalidTime(gap).Should().BeTrue();
         KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, helsinki).Should().Be("2026-03-29T03:30 does not exist in Europe/Helsinki (UTC+02:00) (the clocks skip it).");
-        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, unknown).Should().Be("2026-03-29T03:30 does not exist in UTC+02:00 (the clocks skip it).");
+        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, unknown).Should().Be("2026-03-29T03:30 does not exist in Test (UTC+02:00) (the clocks skip it).");
     }
 
     [Fact]

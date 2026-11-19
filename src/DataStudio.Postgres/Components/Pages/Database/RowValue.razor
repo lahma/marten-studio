@@ -246,7 +246,7 @@ else
 
     private string DateHintTitle =>
         "Read as " + SqlCellFormat.UnitLabel(SqlCellFormat.DateHintFor(Column, Type, [Text])) +
-        " because of the column's name and the size of the value - a guess, shown in " + Preferences.SelectedTimeZoneId + ".";
+        " because of the column's name and the size of the value - a guess, shown in " + Preferences.SelectedTimeZoneName + ".";
 
     private bool CanFetch => CellKey is { Count: > 0 };
 
