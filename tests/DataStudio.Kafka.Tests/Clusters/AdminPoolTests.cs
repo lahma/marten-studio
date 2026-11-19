@@ -365,12 +365,12 @@ public class AdminPoolTests
 
         using (KafkaAdminPool<StubClient>.Lease first = rig.Pool.Rent(Cluster("a")))
         {
-            first.Retire("GroupCoordinatorNotAvailable").Should().BeTrue();
+            first.RetireStaleCoordinator("GroupCoordinatorNotAvailable").Should().BeTrue();
         }
 
         using (KafkaAdminPool<StubClient>.Lease second = rig.Pool.Rent(Cluster("a")))
         {
-            second.Retire("GroupCoordinatorNotAvailable").Should().BeFalse("its predecessor was replaced a moment ago");
+            second.RetireStaleCoordinator("GroupCoordinatorNotAvailable").Should().BeFalse("its predecessor was replaced a moment ago");
         }
 
         rig.Created.Should().HaveCount(2);
@@ -379,7 +379,7 @@ public class AdminPoolTests
         using (KafkaAdminPool<StubClient>.Lease third = rig.Pool.Rent(Cluster("a")))
         {
             ReferenceEquals(third.Client, rig.Created[1]).Should().BeTrue("the client kept through the cooldown is still the cluster's");
-            third.Retire("GroupCoordinatorNotAvailable").Should().BeTrue("the cooldown has passed");
+            third.RetireStaleCoordinator("GroupCoordinatorNotAvailable").Should().BeTrue("the cooldown has passed");
         }
 
         using (rig.Pool.Rent(Cluster("b")))
@@ -388,25 +388,34 @@ public class AdminPoolTests
 
         using (KafkaAdminPool<StubClient>.Lease other = rig.Pool.Rent(Cluster("b")))
         {
-            other.Retire("NotCoordinatorForGroup").Should().BeTrue("the cooldown is each cluster's own");
+            other.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeTrue("the cooldown is each cluster's own");
         }
     }
 
     /// <summary>
-    /// 66sw (REVIEW-PR95 F4): the wire's own return of a lease is where a stale coordinator retires the client. A call answered
-    /// "not coordinator" or "coordinator not available" leaves the cluster a new client for the next call; any other answer keeps it.
+    /// 66sw (REVIEW-PR95 F4), and issue #97: the wire's own return of a lease is where a group call retires the client it ran on (D50). A
+    /// group call answered "not coordinator" or "coordinator not available", or one that timed out, leaves the cluster a new client for the next
+    /// call; any other answer keeps it. The row <c>RequestTimedOut</c> once stood for "an answer that is not a stale coordinator keeps the client"; a
+    /// timeout is now the second rule, so that row says the opposite and a refusal and a not-found stand for the answers that keep it.
     /// </summary>
     [Theory]
-    [InlineData("NotCoordinatorForGroup", 2)]
-    [InlineData("GroupCoordinatorNotAvailable", 2)]
-    [InlineData("GroupLoadInProgress", 1)]
-    [InlineData("RequestTimedOut", 1)]
-    public void The_wire_retires_the_client_a_stale_coordinator_answered_on_when_it_gives_the_lease_back(string code, int clients)
+    [InlineData("DescribeGroup", "NotCoordinatorForGroup", 2)]
+    [InlineData("DescribeGroup", "GroupCoordinatorNotAvailable", 2)]
+    [InlineData("GroupOffsets", "NotCoordinatorForGroup", 2)]
+    [InlineData("GroupOffsets", "GroupCoordinatorNotAvailable", 2)]
+    [InlineData("DescribeGroup", "Local_TimedOut", 2)]
+    [InlineData("DescribeGroup", "RequestTimedOut", 2)]
+    [InlineData("GroupOffsets", "Local_TimedOut", 2)]
+    [InlineData("GroupOffsets", "RequestTimedOut", 2)]
+    [InlineData("DescribeGroup", "GroupLoadInProgress", 1)]
+    [InlineData("GroupOffsets", "GroupLoadInProgress", 1)]
+    [InlineData("DescribeGroup", "Local_Transport", 1)]
+    public void The_wire_retires_the_client_a_group_call_was_answered_or_timed_out_on_when_it_gives_the_lease_back(string call, string code, int clients)
     {
         Rig rig = new();
         KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
 
-        ConfluentWire.Release(Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable(code, Retriable: true))), lease);
+        ConfluentWire.Release(Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable(code, Retriable: true))), lease, Enum.Parse<WireCall>(call));
 
         using (rig.Pool.Rent(Cluster("a")))
         {
@@ -415,18 +424,143 @@ public class AdminPoolTests
         rig.Created.Should().HaveCount(clients);
     }
 
+    /// <summary>A refusal by an ACL, a group or topic that is not there, and a call that answered a value are answers: the client is kept.</summary>
     [Fact]
-    public void The_wire_keeps_the_client_of_a_call_that_answered()
+    public void The_wire_keeps_the_client_of_a_group_call_that_was_refused_or_found_nothing_or_answered()
     {
         Rig rig = new();
 
-        ConfluentWire.Release(Task.FromResult(WireResult<int>.Ok(1)), rig.Pool.Rent(Cluster("a")));
+        WireError[] answers =
+        [
+            new WireError.NotAuthorized(KafkaAclOperation.Describe, KafkaResourceType.Group, "g"),
+            new WireError.NotFound(KafkaResourceType.Group, "g"),
+            new WireError.Failed("GroupAuthorizationFailed", IsFatal: false),
+        ];
+
+        foreach (WireError answer in answers)
+        {
+            ConfluentWire.Release(Task.FromResult(WireResult<int>.Fail(answer)), rig.Pool.Rent(Cluster("a")), WireCall.DescribeGroup);
+        }
+
+        ConfluentWire.Release(Task.FromResult(WireResult<int>.Ok(1)), rig.Pool.Rent(Cluster("a")), WireCall.GroupOffsets);
 
         using (rig.Pool.Rent(Cluster("a")))
         {
         }
 
         rig.Created.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Issue #97: only the two group calls retire a client. A metadata, topic, cluster, offsets or configuration read that timed out keeps its
+    /// client (a cluster that is away is told by the next read, and these calls were never seen to leave the client unsafe), and so does one
+    /// that was answered a stale coordinator, which a call that is not a group call is never answered.
+    /// </summary>
+    [Theory]
+    [InlineData("Metadata", "Local_TimedOut")]
+    [InlineData("Metadata", "RequestTimedOut")]
+    [InlineData("DescribeTopics", "Local_TimedOut")]
+    [InlineData("DescribeCluster", "Local_TimedOut")]
+    [InlineData("ListOffsets", "Local_TimedOut")]
+    [InlineData("ListOffsets", "RequestTimedOut")]
+    [InlineData("DescribeConfigs", "Local_TimedOut")]
+    [InlineData("Fetch", "Local_TimedOut")]
+    [InlineData("ListOffsets", "NotCoordinatorForGroup")]
+    public void The_wire_keeps_the_client_of_a_call_that_is_not_a_group_call(string call, string code)
+    {
+        Rig rig = new();
+
+        ConfluentWire.Release(
+            Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable(code, Retriable: true))), rig.Pool.Rent(Cluster("a")), Enum.Parse<WireCall>(call));
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void The_wire_keeps_the_client_of_a_call_that_faulted_or_was_canceled()
+    {
+        Rig rig = new();
+
+        ConfluentWire.Release(Task.FromException<WireResult<int>>(new InvalidOperationException()), rig.Pool.Rent(Cluster("a")), WireCall.DescribeGroup);
+        ConfluentWire.Release(Task.FromCanceled<WireResult<int>>(new CancellationToken(canceled: true)), rig.Pool.Rent(Cluster("a")), WireCall.GroupOffsets);
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Issue #97: a group call that timed out replaces its client every time, with no cooldown. A client whose group request timed out while the
+    /// broker was away crashes the process when the broker returns, and the replacement built during the outage times out too, inside what would
+    /// be the stale coordinator's cooldown: that one has to go as well.
+    /// </summary>
+    [Fact]
+    public void A_group_call_that_timed_out_replaces_its_client_every_time_with_no_cooldown()
+    {
+        Rig rig = new();
+
+        for (int i = 0; i < 3; i++)
+        {
+            ConfluentWire.Release(
+                Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable("Local_TimedOut", Retriable: true))),
+                rig.Pool.Rent(Cluster("a")),
+                WireCall.DescribeGroup);
+        }
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().HaveCount(4, "each of the three timed-out calls replaced the client it ran on, at no time at all after the one before");
+        rig.Logs.Entries.Count(static x => x.EventId.Id == 9680).Should().Be(3, "the same event as a stale coordinator's, with the timeout's code as its reason");
+    }
+
+    /// <summary>The timeout's own rule neither consults nor starts the stale coordinator's cooldown.</summary>
+    [Fact]
+    public void The_two_rules_do_not_share_a_cooldown()
+    {
+        Rig rig = new();
+
+        ConfluentWire.Release(
+            Task.FromResult(WireResult<int>.Fail(new WireError.Unavailable("Local_TimedOut", Retriable: true))), rig.Pool.Rent(Cluster("a")), WireCall.GroupOffsets);
+
+        using (KafkaAdminPool<StubClient>.Lease stale = rig.Pool.Rent(Cluster("a")))
+        {
+            stale.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeTrue("a timeout started no cooldown");
+        }
+
+        using (KafkaAdminPool<StubClient>.Lease again = rig.Pool.Rent(Cluster("a")))
+        {
+            again.RetireAfterTimeout("Local_TimedOut").Should().BeTrue("a stale coordinator's cooldown does not hold a timeout back");
+            again.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeFalse("its client is already gone");
+        }
+
+        using (KafkaAdminPool<StubClient>.Lease third = rig.Pool.Rent(Cluster("a")))
+        {
+            third.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeFalse("a stale coordinator is still held to the cooldown");
+        }
+    }
+
+    [Fact]
+    public void A_stale_coordinator_is_still_held_to_the_cooldown_when_the_wire_gives_the_lease_back()
+    {
+        Rig rig = new();
+        WireResult<int> stale = WireResult<int>.Fail(new WireError.Unavailable("NotCoordinatorForGroup", Retriable: true));
+
+        ConfluentWire.Release(Task.FromResult(stale), rig.Pool.Rent(Cluster("a")), WireCall.DescribeGroup);
+        ConfluentWire.Release(Task.FromResult(stale), rig.Pool.Rent(Cluster("a")), WireCall.DescribeGroup);
+
+        using (rig.Pool.Rent(Cluster("a")))
+        {
+        }
+
+        rig.Created.Should().HaveCount(2, "the second answer came within the cooldown, so its client was kept");
     }
 
     [Fact]
@@ -437,8 +571,8 @@ public class AdminPoolTests
         KafkaAdminPool<StubClient>.Lease failed = rig.Pool.Rent(Cluster("a"));
         KafkaAdminPool<StubClient>.Lease concurrent = rig.Pool.Rent(Cluster("a"));
 
-        failed.Retire("NotCoordinatorForGroup").Should().BeTrue();
-        concurrent.Retire("NotCoordinatorForGroup").Should().BeFalse("another call already replaced it");
+        failed.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeTrue();
+        concurrent.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeFalse("another call already replaced it");
 
         using (rig.Pool.Rent(Cluster("a")))
         {
@@ -461,7 +595,7 @@ public class AdminPoolTests
     {
         Rig rig = new();
         KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
-        lease.Retire("GroupCoordinatorNotAvailable");
+        lease.RetireStaleCoordinator("GroupCoordinatorNotAvailable");
 
         ValueTask dispose = rig.Pool.DisposeAsync();
         dispose.IsCompleted.Should().BeFalse("the replaced client is still leased");
@@ -479,7 +613,7 @@ public class AdminPoolTests
         KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
         rig.Pool.Dispose();
 
-        lease.Retire("NotCoordinatorForGroup").Should().BeFalse("the shutdown already retired it");
+        lease.RetireStaleCoordinator("NotCoordinatorForGroup").Should().BeFalse("the shutdown already retired it");
 
         lease.Dispose();
         SpinWait.SpinUntil(() => rig.Created[0].Disposed, TimeSpan.FromSeconds(10)).Should().BeTrue();
