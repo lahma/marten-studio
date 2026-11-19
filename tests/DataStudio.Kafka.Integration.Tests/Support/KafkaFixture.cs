@@ -430,13 +430,23 @@ internal static class DockerCli
         return output.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    /// <summary>Stops a container, as <c>docker stop</c> does (a graceful stop, then a kill after ten seconds).</summary>
+    /// <summary>Stops a container, as <c>docker stop</c> does (a graceful stop, then a kill after ten seconds). Throws when docker exits non-zero.</summary>
     /// <param name="containerId">The container.</param>
-    public static async Task StopAsync(string containerId) => await RunAsync("stop", containerId);
+    public static Task StopAsync(string containerId) => RunCheckedAsync("stop", containerId);
 
-    /// <summary>Starts a stopped container again, as <c>docker start</c> does.</summary>
+    /// <summary>Starts a stopped container again, as <c>docker start</c> does. Throws when docker exits non-zero.</summary>
     /// <param name="containerId">The container.</param>
-    public static async Task StartAsync(string containerId) => await RunAsync("start", containerId);
+    public static Task StartAsync(string containerId) => RunCheckedAsync("start", containerId);
+
+    private static async Task RunCheckedAsync(params string[] arguments)
+    {
+        (int exitCode, _, string error) = await RunWithResultAsync(arguments);
+
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"docker {string.Join(' ', arguments)} exited with code {exitCode}: {error.Trim()}");
+        }
+    }
 
     /// <summary>Removes volumes; one that is already gone is not an error.</summary>
     /// <param name="volumes">The volumes' names.</param>
@@ -462,7 +472,9 @@ internal static class DockerCli
         return [.. volumes.Where(all.Contains)];
     }
 
-    private static async Task<string> RunAsync(params string[] arguments)
+    private static async Task<string> RunAsync(params string[] arguments) => (await RunWithResultAsync(arguments)).Output;
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunWithResultAsync(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("docker")
         {
@@ -481,7 +493,6 @@ internal static class DockerCli
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        await error;
-        return await output;
+        return (process.ExitCode, await output, await error);
     }
 }
