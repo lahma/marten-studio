@@ -138,8 +138,9 @@
                        class="ms-input ms-stepper-path"
                        type="text"
                        placeholder="total, items[0].sku, $.status"
-                       value="@pathText"
-                       @oninput="OnPathChanged" />
+                       @bind:get="pathText"
+                       @bind:event="oninput"
+                       @bind:set="OnPathChanged" />
                 <button type="button"
                         class="ms-button"
                         disabled="@(searching || string.IsNullOrWhiteSpace(pathText) || window is null)"
@@ -813,7 +814,7 @@
 
     // On input, not change: "Find next change" is enabled while the path is typed, not only once the field loses focus (0.6's
     // UI sweep). The event carries the field's value, so a render that lands mid-word does not write an older one back.
-    private void OnPathChanged(ChangeEventArgs args) => pathText = args.Value?.ToString();
+    private void OnPathChanged(string? value) => pathText = value;
 
     private Task JumpAsync()
     {

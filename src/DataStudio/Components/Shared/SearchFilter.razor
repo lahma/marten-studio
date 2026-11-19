@@ -3,8 +3,9 @@
 <input type="text"
        class="ms-input ms-search-filter"
        placeholder="@Placeholder"
-       value="@_value"
-       @oninput="OnInputAsync" />
+       @bind:get="_value"
+       @bind:event="oninput"
+       @bind:set="OnInputAsync" />
 
 @code {
     private string _value = string.Empty;
@@ -19,9 +20,9 @@
     [Parameter]
     public EventCallback<string> OnFilterChanged { get; set; }
 
-    private async Task OnInputAsync(ChangeEventArgs args)
+    private async Task OnInputAsync(string? value)
     {
-        _value = args.Value?.ToString() ?? string.Empty;
+        _value = value ?? string.Empty;
 
         _debounceCts.Cancel();
         _debounceCts.Dispose();

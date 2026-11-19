@@ -18,8 +18,9 @@
            spellcheck="false"
            autocomplete="off"
            autocapitalize="off"
-           value="@_text"
-           @oninput="OnInputAsync"
+           @bind:get="_text"
+           @bind:event="oninput"
+           @bind:set="OnInputAsync"
            @onkeydown="OnKeyDownAsync" />
 
     <span class="ms-json-search-count">
@@ -103,9 +104,9 @@
         }
     }
 
-    private async Task OnInputAsync(ChangeEventArgs args)
+    private async Task OnInputAsync(string? value)
     {
-        _text = args.Value?.ToString() ?? string.Empty;
+        _text = value ?? string.Empty;
 
         _debounce.Cancel();
         _debounce.Dispose();

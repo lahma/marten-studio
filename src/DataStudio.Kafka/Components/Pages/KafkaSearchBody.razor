@@ -164,8 +164,9 @@
                           maxlength="@KafkaText.MaxPredicateLength"
                           placeholder="key = 'order-42' and header.tenant-id = 'acme'"
                           disabled="@busy"
-                          value="@predicate"
-                          @oninput="OnPredicateInput"
+                          @bind:get="predicate"
+                          @bind:event="oninput"
+                          @bind:set="OnPredicateInput"
                           @onkeydown="OnPredicateKeyAsync"></textarea>
             </div>
 
@@ -984,9 +985,9 @@
         return true;
     }
 
-    private void OnPredicateInput(ChangeEventArgs e)
+    private void OnPredicateInput(string? value)
     {
-        predicate = e.Value?.ToString() ?? string.Empty;
+        predicate = value ?? string.Empty;
         skipNextRender = true;
     }
 
