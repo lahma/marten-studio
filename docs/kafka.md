@@ -429,6 +429,27 @@ the client's error code and a sentence such as "Not available: needs `DESCRIBE` 
 read. A call throws only for what the caller got wrong or asked for: an unknown cluster key or a blank topic or group id
 (`ArgumentException`), and a cancelled token. The cluster keys are in `IKafkaDiagnostics.Clusters`.
 
+### When a broker goes away
+
+Reading a consumer group while its broker is down is not harmless, in any program that uses librdkafka's admin API. A group
+request that times out leaves work behind inside the client, and when a broker comes back librdkafka releases it twice
+([confluentinc/librdkafka#4605](https://github.com/confluentinc/librdkafka/issues/4605)): the process aborts on Linux and macOS,
+and on Windows it dies with an access violation or carries on with a damaged heap. No Confluent.Kafka release fixes it, so a
+newer client does not help. It concerns the group reads only: `GetGroupAsync`, and the lag on a topic's page.
+
+Data Studio closes the client a group read timed out on, at once, and builds another for the next read; closing it first is
+what avoids the fault. What remains is the time a timed-out client stays open because another read on it is still running:
+at most one request timeout, 10 seconds (20 for one kind of offsets read). A broker that returns inside that time can still
+bring the process down.
+
+A host that polls groups can make that time rarer still:
+
+- Ask `GetClusterAsync` first, and skip the group reads while it reports a problem. The pages do the same: a topic's page
+  reads no lag while the cluster's metadata does not answer.
+- Read all the groups you watch at one cadence, in one pass, so that their reads start and end together.
+- Give a read the engine's own time. A caller that gives up early and asks again is answered from the read already
+  running, not from a second one.
+
 ## Links
 
 In a host with the Marten module, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document

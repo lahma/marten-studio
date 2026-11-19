@@ -1,8 +1,7 @@
 # Versioning and stability
 
-Data Studio is still being shaped: packages are split and renamed, registrations change, and a design that turns
-out wrong is corrected in the next release, not carried along. So a release of any size (patch, minor or major) may break
-what a host compiles against. This page says what little is promised, and
+Data Studio 2.0 is a stable release, and it is still being shaped: a design that turns out wrong is corrected in the next
+release, not carried along. So a release of any size (patch, minor or major) may break what a host compiles against. This page says what little is promised, and
 [docs/upgrading.md](upgrading.md) names every break of a release, with what to write instead.
 
 The packages always ship together, at one version, each depending on exactly its own version of the ones below it, and
@@ -50,6 +49,9 @@ These are about safety, not about compatibility, and no release trades them away
 | .NET | `net10.0` | .NET 10; on .NET 11.0 (GA, 11.0.0) the studio runs in a Release build of the host and in a Debug build with the 11 SDK. On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](setup.md#hosting-notes) |
 | Marten (the Marten module) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (the Postgres module, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
+| Confluent.Kafka (the Kafka module) | from 2.14.0 | 2.14.0 and 2.16.0; no version is free of librdkafka's fault with a consumer group read across a broker restart ([kafka.md](kafka.md#when-a-broker-goes-away)) |
+| Apache Kafka | 3.9 and 4.x | `apache/kafka` 3.9.2 and 4.4.0, the classic consumer protocol on both and Kafka 4's own on 4.4.0 |
+| WolverineFx.Kafka (`DataStudio.Kafka.Wolverine`) | from 6.61.0 | 6.61.0 |
 | PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |
 
 PostgreSQL 14 reaches its upstream end of life on 2026-11-12. It is out of the test matrix:
