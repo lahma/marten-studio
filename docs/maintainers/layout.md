@@ -406,6 +406,8 @@ src/DataStudio.Kafka.Core/Windows/                Window resolution (D38): a tim
 src/DataStudio.Kafka.Core/Logging/                The engine's log events 9650 to 9699, the bounded log values and the log-once helper
 src/DataStudio.Kafka.Core/Predicates/             The search grammar (D39): lexer, parser, canonical text, the compiler per topic and the
                                          three-valued evaluator, with the verdict of every clause
+src/DataStudio.Kafka.Core/Diagnostics/            The diagnostics API (D50): IKafkaDiagnostics, its implementation over the catalog's cached reads,
+                                                  and its read model (the cluster, topic and group statuses and KafkaReadProblem)
 src/DataStudio.Kafka.Core/Decoding/               Value and header decoding (D39): the detection order, CloudEvents, the Confluent wire format,
                                          trace contexts, the decode counters and the per-record evaluation context
 src/DataStudio.Kafka.Core/Scanning/               The scan engine (D38, D41): plan and estimate, the scan's thread, the governor, the limiter and
@@ -444,6 +446,7 @@ tests/DataStudio.Kafka.Tests/Redaction/           The deny-list, the topic's rul
 tests/DataStudio.Kafka.Tests/Correlation/         The declarations and their bounds, the extractor, the per-topic query and the duplicate finder
 tests/DataStudio.Kafka.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
                                          limits, the estimate, batching and the lifecycle
+tests/DataStudio.Kafka.Tests/Diagnostics/         The diagnostics API on the fake broker (D50)
 tests/DataStudio.Kafka.Tests/Export/              Export writer, redaction and file name tests (D45)
 tests/DataStudio.Kafka.Tests/Index/               Record-index narrowing, clause choice and planning tests (D48)
 tests/DataStudio.Kafka.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan
