@@ -54,6 +54,26 @@ public class KafkaRelatedPageTests
         return page;
     }
 
+    /// <summary>
+    /// xvfv: a date-and-time box's <c>change</c> hands the component the value with seconds added, while the browser holds it to the minute.
+    /// The page keeps the browser's form, so the box is drawn from what it holds (a render sends it nothing), and the custom window is
+    /// read: before, the seconds made the window unreadable and the page said "Enter both times of the window." under two filled boxes.
+    /// </summary>
+    [Fact]
+    public async Task A_custom_window_typed_in_the_date_boxes_is_kept_to_the_minute_and_read()
+    {
+        await using KafkaSearchRig rig = new();
+        Seed(rig);
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=0" + Window);
+        page.WaitForAssertion(() => page.FindAll("input[type=datetime-local]").Should().HaveCount(2));
+
+        await page.FindAll("input[type=datetime-local]")[0].ChangeAsync(new ChangeEventArgs { Value = "2026-11-08T11:00:00" });
+        await page.FindAll("input[type=datetime-local]")[1].ChangeAsync(new ChangeEventArgs { Value = "2026-11-08T13:00:00" });
+
+        page.FindAll("input[type=datetime-local]").Select(static x => x.GetAttribute("value")).Should().Equal("2026-11-08T11:00", "2026-11-08T13:00");
+        page.Markup.Should().NotContain("Enter both times of the window.");
+    }
+
     private static Task SearchAsync(IRenderedComponent<KafkaRelatedPage> page) =>
         page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
 

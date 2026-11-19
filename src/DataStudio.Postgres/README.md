@@ -203,7 +203,7 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 ## Options
 
 The shell's (`DataStudioOptions`: `Path`, `Title`, `ApplicationPath`, `AuthorizationPolicy`, `ReadOnly` and
-`RefreshInterval`) are in the [README](https://github.com/lahma/marten-studio#options). This module's are every property of
+`RefreshInterval`) are in the [setup guide](https://github.com/lahma/marten-studio/blob/main/docs/setup.md#options). This module's are every property of
 `PostgresOptions`:
 
 | Option | Default | |

@@ -208,3 +208,6 @@ A box a chord commits (the SQL editor, LINQ mode's order-by box, the JSON editor
 carries no field value, so without it the render after the chord would erase the keys typed since. A date-and-time box
 is bound on `change` too, because a browser commits it part by part while it is still being typed in; its `type` is not
 written as a literal, so that it binds as text and not as a `DateTime`.
+Its setter keeps the value to the minute (`KafkaLocalInput.Minutes`): the `change` event hands the component the value with
+seconds added, while the renderer records the box as holding the browser's own text, and a field that differed from that
+would be sent to the box again on every render.

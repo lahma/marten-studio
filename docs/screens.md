@@ -21,6 +21,14 @@ newest first, with user, scope, action, target, outcome, capability and message.
 process. The durable record is your own `ILogger`, under the studio's reserved event ids: 9200-9299, 9300-9329 and
 9400-9519 for the database modules and 9600-9699 for the Kafka module.
 
+**The header** - a badge names the environment the host runs in, so nobody mistakes production for a development box. On a
+database module's pages, **Find by id** (the header box, `/` or Ctrl+K) takes a document id, a stream id or natural key,
+`#sequence`, a table name or a statement's queryid: one match opens it, several are listed. Each probe is the read its page
+makes, under the same gates, and a hidden type never answers. Press `?` for every keyboard shortcut.
+
+**Query** keeps recent and saved queries in the browser for the Marten clause box, the SQL console and LINQ mode, and the
+console's results export as CSV and JSON.
+
 ### The Marten module
 
 **Overview** — the selected store's card (with two or more stores, a line linking to Stores): databases, document
