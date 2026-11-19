@@ -86,6 +86,35 @@ public class UnplacedTenantPageTests
         }
     }
 
+    /// <summary>
+    /// 87sx (REVIEW-B2-F F2): the documents list applies the scope of its address once. A tenant found nowhere leaves the address and the
+    /// scope on screen different for good, and anything that sets the page's parameters again - a time zone change does, through the
+    /// display version - must not search the databases' tenants again.
+    /// </summary>
+    [Fact]
+    public async Task The_documents_list_searches_for_an_unplaced_tenant_once_however_often_it_is_drawn_again()
+    {
+        using DocumentsComponentContext context = TwoDatabases();
+        await context.State.EnsureInitializedAsync(Token);
+        context.Navigate("studio/marten/documents?tenant=initech");
+
+        IRenderedComponent<DataStudio.Marten.Components.Pages.Documents.Documents> page =
+            context.Render<DataStudio.Marten.Components.Pages.Documents.Documents>();
+        page.WaitForAssertion(() => context.Catalog.DescribeCalls.Should().NotBeEmpty("the tenant is looked for in the store's databases"));
+        page.WaitForAssertion(() => page.FindAll(".ms-rail-name").Should().NotBeEmpty());
+        int searched = context.Catalog.DescribeCalls.Count;
+        int placed = context.Catalog.PlaceCalls.Count;
+
+        // What a time zone change does to a page: its parameters are set again, with nothing of the address changed.
+        page.Render();
+        page.Render();
+        await page.InvokeAsync(static () => Task.CompletedTask);
+
+        context.Catalog.DescribeCalls.Should().HaveCount(searched, "the address was applied when the page opened, and it has not changed");
+        context.Catalog.PlaceCalls.Should().HaveCount(placed);
+        context.State.ActiveScope!.TenantId.Should().BeNull("the tenant was found nowhere");
+    }
+
     [Fact]
     public async Task A_stream_link_for_an_unplaced_tenant_says_it_is_not_there_and_never_reads_the_stream()
     {

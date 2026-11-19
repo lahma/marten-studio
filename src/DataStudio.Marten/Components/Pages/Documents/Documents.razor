@@ -241,6 +241,17 @@
             return;
         }
 
+        // Once per address. The parameters are set again by anything that draws the page (a time zone change is one), and an address whose
+        // tenant was found nowhere keeps differing from the scope on screen: applied again, it would search the databases' tenants again.
+        // Noted before the first await, so a second parameter set that lands while the search waits starts no second search.
+        (string?, string?, string?) address = (StoreKey, DatabaseId, TenantId);
+        if (appliedAddress == address)
+        {
+            return;
+        }
+
+        appliedAddress = address;
+
         StudioScope? active = State.ActiveScope;
 
         bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
@@ -256,6 +267,9 @@
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>The scope part of the address <see cref="ApplyScopeFromUrlAsync" /> last applied.</summary>
+    private (string? StoreKey, string? DatabaseId, string? TenantId)? appliedAddress;
 
     private async Task LoadAsync()
     {
