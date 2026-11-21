@@ -1,7 +1,8 @@
 # 2.0.1
 
-2.0.1 follows up the broker-restart fix of 2.0.0 (#97) in the Kafka engine. Nothing a host writes changes, and no public
-type or member moves; the seven packages are at 2.0.1.
+2.0.1 follows up the broker-restart fix of 2.0.0 (#97) in the Kafka engine, fixes an endpoint that a Development host with a
+Blazor app of its own had twice on .NET 11 (#98), and fixes numbers the studio wrote in the server's culture (#99). Nothing a
+host writes changes, and no public type or member moves; the seven packages are at 2.0.1.
 
 - `IKafkaDiagnostics.GetGroupAsync` reads the cluster's metadata first, as a topic's page does, and reads no group while it
   does not answer: the group's `Problem` and `OffsetsProblem` are then the metadata's, with no state, member or partition.
@@ -13,6 +14,20 @@ type or member moves; the seven packages are at 2.0.1.
 - A group call answered `RequestTimedOut` keeps its client. That code is the broker's own reply, so nothing of the request
   waits in the client, and 2.0.0 rebuilt a client for each read against a broker that kept sending it. Only the client's
   own `Local_TimedOut` replaces it.
+- In Development on ASP.NET Core 11, a host with a Blazor app of its own answers `/_framework/dotnet-browser-tools/hot-reload-settings.json`
+  from its own endpoint (#98). The framework maps that endpoint for every `MapRazorComponents` root, ordered last
+  (dotnet/aspnetcore#70461), so the studio's copy stood beside the host's on one route and the request answered 500 with an
+  `AmbiguousMatchException`. The browser asks for it at the root, so it stays there; the studio's copy now ranks below the host's,
+  and answers only where the host has none. A host that gave the studio's copy an `Order` of its own through `MapDataStudio()`
+  can remove that convention: it puts the studio's copy first, ahead of the host's.
+- The studio writes the numbers in its text and markup the same in every culture, as most of it already did (#99). Under a server
+  culture such as fi-FI or sv-SE, the tooltips of the Marten module's projections dot and dead-letter badge and of the Postgres
+  module's health badge, the refresh interval on the Projections page and the health sweep's refusal of a statement that returned
+  too many rows wrote a count with that culture's separators (`50 000 events behind`). The JSON tree's rows and show-more buttons,
+  its copy menu and the studio's menus wrote `tabindex="−1"` with that culture's minus sign (U+2212). A browser ignores that, so
+  each item became a tab stop of its own instead of being reached with the arrow keys.
+- For maintainers: the Marten suite passes under fi-FI and sv-SE, and tests pin these counts and tabindexes under fi-FI. #98 has a test
+  with copies built as the framework builds them and one on the framework itself, which runs on ASP.NET Core 11 and is skipped on 10.
 
 # 2.0.0
 
