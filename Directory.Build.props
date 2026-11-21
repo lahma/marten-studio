@@ -31,7 +31,7 @@
        builds with, and so the tag its health docs links point at - and VersionFallbackTests holds it to CHANGELOG.md's top
        version. -->
   <PropertyGroup>
-    <VersionPrefix>2.0.0</VersionPrefix>
+    <VersionPrefix>2.0.1</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -48,11 +48,9 @@
          release notes are the CHANGELOG, the version authority (D15). -->
     <PackageIcon>icon.png</PackageIcon>
     <PackageReleaseNotes>What changed in each release: https://github.com/lahma/marten-studio/blob/main/CHANGELOG.md</PackageReleaseNotes>
-    <!-- Package validation compares each shipped package with a release on nuget.org (EnablePackageValidation is on in each shipped project)
-         once there is one. For 2.0 there is none: the seven ids (DataStudio, DataStudio.Postgres, DataStudio.Postgres.Diagnostics, DataStudio.Marten,
-         DataStudio.Kafka, DataStudio.Kafka.Core, DataStudio.Kafka.Wolverine) are new, no release of them exists to be compared with, and restore refuses
-         a baseline it cannot find (NU1101), so the element is empty. One release later, in that release's own pull request, set it to 2.0.0. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+    <!-- Package validation compares each shipped package with the last release on nuget.org (EnablePackageValidation is on in each shipped
+         project). The pull request that lands a release's CHANGELOG section moves it to the release before that one. -->
+    <PackageValidationBaselineVersion>2.0.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
 </Project>

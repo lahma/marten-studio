@@ -198,7 +198,7 @@ CHANGELOG's top version without the suffix), so the suffix lives only in the CHA
 version with a hyphen, so the GitHub Release of a beta is marked a prerelease, and the release body is the section's bullets as for any release.
 The version guards compare informational versions up to the `+`, so the suffix is part of what must match:
 `KafkaWolverineVersionGuard` compares the adapter with `DataStudio.Kafka.Core`, and `KafkaCoreVersionGuard` compares the shell and
-`DataStudio.Kafka.Core` with the Kafka module's own. Package validation runs on all seven with no baseline (below). The documentation of a
+`DataStudio.Kafka.Core` with the Kafka module's own. Package validation runs on all seven against the last release (below). The documentation of a
 beta said so in marked places (the README's note and install lines, the package READMEs' and the Kafka and database pages' install lines, the notes of `docs/upgrading.md` and `docs/stability.md`, and `SECURITY.md`'s 1.3.x row), each carrying an HTML comment that one `git grep` found; 2.0.0 removed what each marked. A later prerelease marks its places the same way: in prose and tables an HTML comment, and for a command block the comment on the line directly above its fence, because inside the fence it would be shown and a `#` comment after a command breaks it when pasted into `cmd.exe`.
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
@@ -234,9 +234,9 @@ then tag that commit.
 
 **Package validation.** Each shipped project has `EnablePackageValidation`, and `PackageValidationBaselineVersion` names the release the
 packages are compared with at `Pack`: `Pack` restores that version of each package from nuget.org and fails on a breaking change to the
-public surface (a removed or changed member, an interface member without a default body). **For 2.0 there is no baseline**: the seven ids
-are new, no release of them exists to compare with, and restore refuses a baseline it cannot find (NU1101), so
-`Directory.Build.props`' element is empty, for all seven. In the pull request of the release after 2.0, set it to `2.0.0`, and from then on move it, in the pull request that lands a release's CHANGELOG section, to the release before it, so the next release is compared with the last one shipped. A
+public surface (a removed or changed member, an interface member without a default body). `Directory.Build.props`' element is the same
+for all seven, and the pull request that lands a release's CHANGELOG section moves it to the release before it, so the next release is
+compared with the last one shipped (2.0.0 had none: its ids were new, and restore refuses a baseline it cannot find, NU1101). A
 deliberate break is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline. A change to a Razor
 component's members is not a break: components are public only because Razor makes them so, and no baseline lists them
 (D20, `docs/stability.md`). Package validation still reports one, so suppress it in the project's
