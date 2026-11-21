@@ -33,6 +33,7 @@ using Microsoft.AspNetCore.Components.Endpoints;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Constraints;
 using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,6 +68,22 @@ internal static class StudioEndpointMapper
     private const string BlazorCircuitPath = "/_blazor";
 
     private const string OpaqueRedirectPath = "/_framework/opaque-redirect";
+
+    /// <summary>The folder of the address where the .NET 11 SDK's browser tools ask whether Hot Reload is on (<see cref="YieldHotReloadSettingsToTheHost" />).</summary>
+    private const string HotReloadSettingsFolder = "/_framework/dotnet-browser-tools";
+
+    private const string HotReloadSettingsFile = "hot-reload-settings.json";
+
+    private const string HotReloadSettingsPath = HotReloadSettingsFolder + "/" + HotReloadSettingsFile;
+
+    /// <summary>
+    /// <see cref="HotReloadSettingsPath" /> as a parameter that matches only that file: the same address, with a lower route precedence than the
+    /// literal the framework maps.
+    /// </summary>
+    private static readonly RoutePattern HotReloadSettingsYieldingPattern = RoutePatternFactory.Parse(
+        HotReloadSettingsFolder + "/{file}",
+        defaults: null,
+        parameterPolicies: new RouteValueDictionary { ["file"] = new StringRouteConstraint(HotReloadSettingsFile) });
 
     private const string FrameworkScriptPath = "/_framework/blazor.web.js";
 
@@ -171,6 +188,10 @@ internal static class StudioEndpointMapper
         // studio-rooted <base href> so the browser asks for them there. It is also what a reverse proxy
         // that forwards only the studio prefix needs.
         components.Add(endpointBuilder => ReRootUnderStudioPath(endpointBuilder, studioPath, descriptor));
+
+        // One framework endpoint stays at the root, because the browser asks for it there: ASP.NET Core 11's Hot Reload settings, which a host
+        // with a Blazor app of its own maps too. The studio's copy yields to the host's.
+        components.Add(YieldHotReloadSettingsToTheHost);
 
         // The studio has no form, so it needs no antiforgery token - and requiring one would be a
         // middleware-ordering requirement on the host, which is the one thing registering the studio must
@@ -309,6 +330,29 @@ internal static class StudioEndpointMapper
         if (HomeRedirectOf(componentType, rawText, assembly, descriptor) is { } home)
         {
             RedirectRequestsTo(routeEndpointBuilder, studioPath, home);
+        }
+    }
+
+    /// <summary>
+    /// Ranks the studio's copy of the framework's Hot Reload settings endpoint below a copy the host maps on the same address, so the host's
+    /// answers where there is one and the studio's where there is none.
+    /// </summary>
+    /// <remarks>
+    /// In Development, ASP.NET Core 11 maps <c>GET /_framework/dotnet-browser-tools/hot-reload-settings.json</c> for every
+    /// <c>MapRazorComponents</c> root (dotnet/aspnetcore#70461), so a host with a Blazor app of its own had two endpoints on one route and the
+    /// request answered 500 with an <c>AmbiguousMatchException</c> (#98). The browser tools ask for it at the origin's root, so it cannot move
+    /// under the mount as <c>opaque-redirect</c> does. Both copies are already ordered last (<c>int.MaxValue</c>), so no order puts the studio's
+    /// after the host's; a lower route precedence does, because routing ranks by order and then by precedence, and a constrained parameter
+    /// ranks below a literal segment. The two copies answer the same, but the studio's carries the studio's authorization, which must not
+    /// decide the host's own request. Remove this once the framework maps the endpoint once per application.
+    /// </remarks>
+    /// <param name="endpointBuilder">An endpoint of the studio's own <c>MapRazorComponents</c> call.</param>
+    internal static void YieldHotReloadSettingsToTheHost(EndpointBuilder endpointBuilder)
+    {
+        if (endpointBuilder is RouteEndpointBuilder routeEndpointBuilder
+            && string.Equals(routeEndpointBuilder.RoutePattern.RawText, HotReloadSettingsPath, StringComparison.OrdinalIgnoreCase))
+        {
+            routeEndpointBuilder.RoutePattern = HotReloadSettingsYieldingPattern;
         }
     }
 
