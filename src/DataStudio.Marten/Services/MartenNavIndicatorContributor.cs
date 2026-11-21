@@ -126,8 +126,8 @@ internal static class MartenNavBadges
 
             reasons.Add(
                 worst is { Length: > 0 }
-                    ? $"{worst} is {lag:N0} events behind"
-                    : $"a shard is {lag:N0} events behind");
+                    ? string.Create(CultureInfo.InvariantCulture, $"{worst} is {lag:N0} events behind")
+                    : string.Create(CultureInfo.InvariantCulture, $"a shard is {lag:N0} events behind"));
         }
 
         if (summary.PausedCount > 0)
@@ -159,7 +159,7 @@ internal static class MartenNavBadges
                 "ms-nav-badge-danger",
                 count == 1
                     ? "One event the async daemon could not apply"
-                    : $"{count:N0} events the async daemon could not apply");
+                    : string.Create(CultureInfo.InvariantCulture, $"{count:N0} events the async daemon could not apply"));
         }
 
         if (projectionsNeedAttention)

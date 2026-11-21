@@ -544,6 +544,42 @@ public class JsonViewTests
         TreeText(view).Should().NotContain("Helsinki");
     }
 
+    /// <summary>
+    /// #99. A tabindex is markup, not text: in a culture whose minus sign is not the hyphen-minus (fi-FI writes U+2212) the rows, the
+    /// show-more buttons and the copy menu's items said <c>tabindex="−1"</c>, which a browser drops, so each became a tab stop of its own.
+    /// </summary>
+    [Fact]
+    public void A_tabindex_is_written_the_same_in_every_culture()
+    {
+        CultureInfo before = CultureInfo.CurrentCulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fi-FI");
+            CultureInfo.CurrentCulture.NumberFormat.NegativeSign.Should().NotBe("-", "the culture is the premise of the case");
+
+            using var context = new JsonTestContext();
+            var json = "{\"items\":[" +
+                string.Join(",", Enumerable.Range(0, 340).Select(i => i.ToString(CultureInfo.InvariantCulture))) + "]}";
+
+            var windowed = context.Render<JsonView>(p => p
+                .Add(c => c.Json, json)
+                .Add(c => c.AutoExpandNodeBudget, 10_000));
+
+            windowed.FindAll(".ms-json-row-more button").Select(x => x.GetAttribute("tabindex")).Should().Equal("-1", "-1");
+            windowed.FindAll("[role=treeitem]").Skip(1).Should().NotBeEmpty().And.OnlyContain(x => x.GetAttribute("tabindex") == "-1");
+
+            var view = context.Render<JsonView>(p => p.Add(c => c.Json, Sample));
+            view.FindAll(".ms-json-key")[1].Click();
+
+            view.FindAll(".ms-copy-menu .ms-menu-item").Select(x => x.GetAttribute("tabindex")).Should().Equal("0", "-1", "-1", "-1", "-1", "-1");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = before;
+        }
+    }
+
     [Fact]
     public void Arrow_keys_move_the_roving_tabindex()
     {

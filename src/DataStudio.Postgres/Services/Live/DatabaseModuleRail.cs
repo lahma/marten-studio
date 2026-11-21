@@ -335,19 +335,19 @@ internal sealed class DatabaseModuleRail : IStudioModuleRail
 
         if (health.Critical > 0)
         {
-            parts.Add(health.Critical == 1 ? "1 critical finding" : $"{health.Critical:N0} critical findings");
+            parts.Add(health.Critical == 1 ? "1 critical finding" : string.Create(CultureInfo.InvariantCulture, $"{health.Critical:N0} critical findings"));
         }
 
         if (health.Warning > 0)
         {
-            parts.Add(health.Warning == 1 ? "1 warning" : $"{health.Warning:N0} warnings");
+            parts.Add(health.Warning == 1 ? "1 warning" : string.Create(CultureInfo.InvariantCulture, $"{health.Warning:N0} warnings"));
         }
 
         string withheld = health.Withheld switch
         {
             0 => string.Empty,
             1 => ", and 1 finding not shown to you",
-            _ => $", and {health.Withheld:N0} findings not shown to you",
+            _ => string.Create(CultureInfo.InvariantCulture, $", and {health.Withheld:N0} findings not shown to you"),
         };
 
         return string.Join(" and ", parts) + withheld + ", as of " + preferences.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");

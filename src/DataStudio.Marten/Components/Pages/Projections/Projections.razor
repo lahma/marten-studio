@@ -2122,7 +2122,7 @@
 
     private string FreshnessTitle => view is null
         ? string.Empty
-        : $"Read {Preferences.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {StudioSettings.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
+        : string.Create(CultureInfo.InvariantCulture, $"Read {Preferences.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {StudioSettings.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.");
 
     /// <summary>When the studio paused this store's coordinator, in the visitor's selected time zone.</summary>
     private string PausedAtText => view?.Daemon.PausedByStudio is { } pause

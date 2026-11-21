@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using AngleSharp.Dom;
 
 using Bunit;
@@ -83,6 +85,32 @@ public class MenuButtonTests
             "anchor-name: --second-menu-button",
             "a name is a dashed identifier: what it cannot hold becomes a hyphen");
         second.Find(".test-popover").GetAttribute("style").Should().Be("position-anchor: --second-menu-button");
+    }
+
+    /// <summary>
+    /// #99. A tabindex is markup, not text: in a culture whose minus sign is not the hyphen-minus (fi-FI writes U+2212) the items said
+    /// <c>tabindex="−1"</c>, which a browser drops, so every item became a tab stop of its own.
+    /// </summary>
+    [Fact]
+    public void A_tabindex_is_written_the_same_in_every_culture()
+    {
+        CultureInfo before = CultureInfo.CurrentCulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fi-FI");
+            CultureInfo.CurrentCulture.NumberFormat.NegativeSign.Should().NotBe("-", "the culture is the premise of the case");
+
+            using var context = new StudioComponentContext();
+
+            var menu = Render(context, ThreeItems([]));
+
+            Tabindexes(menu).Should().Equal("0", "-1", "-1");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = before;
+        }
     }
 
     [Fact]

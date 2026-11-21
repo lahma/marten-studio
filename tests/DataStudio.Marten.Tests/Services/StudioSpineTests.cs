@@ -398,7 +398,7 @@ public class StudioSpineTests
         IReadOnlyDictionary<string, StudioNavBadge> badges = MartenNavBadges.From(1234, projectionsNeedAttention: true, "OrderSummary:All is 5,000 events behind");
 
         badges[MartenDescriptor.DeadLettersBadge].Should().Be(
-            new StudioNavBadge("1,234", "ms-nav-badge-danger", $"{1234:N0} events the async daemon could not apply"));
+            new StudioNavBadge("1,234", "ms-nav-badge-danger", "1,234 events the async daemon could not apply"));
         badges[MartenDescriptor.ProjectionsBadge].Should().Be(
             new StudioNavBadge(string.Empty, "ms-nav-badge-dot ms-nav-badge-warning", "OrderSummary:All is 5,000 events behind"));
 

@@ -37,7 +37,7 @@
                 id="@ItemId(index)"
                 class="ms-menu-item"
                 role="menuitem"
-                tabindex="@(index == _activeIndex ? 0 : -1)"
+                tabindex="@(index == _activeIndex ? "0" : "-1")"
                 @key="index"
                 @onclick="() => CopyAsync(item.Text, item.What)">
             <span class="ms-menu-item-label">@item.Label</span>

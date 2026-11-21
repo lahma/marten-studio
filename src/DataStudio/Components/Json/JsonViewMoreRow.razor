@@ -13,7 +13,7 @@
 
 <div class="ms-json-row ms-json-row-more" role="presentation" style="--ms-json-depth: @Depth">
     <span class="ms-json-toggle ms-json-toggle-empty" aria-hidden="true"></span>
-    <button type="button" class="ms-json-more" tabindex="@(Focused ? 0 : -1)" @ref="_element" @onclick="ShowMoreAsync">Show @NextCount more</button>
+    <button type="button" class="ms-json-more" tabindex="@(Focused ? "0" : "-1")" @ref="_element" @onclick="ShowMoreAsync">Show @NextCount more</button>
     <button type="button" class="ms-json-more" tabindex="-1" @onclick="ShowAllAsync">Show all (@Total)</button>
     <span class="ms-json-count">@Shown of @Total shown</span>
 </div>
