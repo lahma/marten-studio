@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using DataStudio.Services.Settings;
 using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Events;
@@ -73,6 +75,36 @@ public class NavIndicatorServiceTests
 
         ProjectionsDot(indicators).Should().NotBeNull();
         ProjectionsDot(indicators)!.Title.Should().Contain("OrderSummary:All").And.Contain("50,000 events behind");
+    }
+
+    /// <summary>
+    /// #99. The tooltips are English sentences, so they write a count the same in every culture, as the rest of the studio does: under
+    /// fi-FI they said "50 000 events behind", with a no-break space for the thousands.
+    /// </summary>
+    [Fact]
+    public async Task The_tooltips_write_a_count_the_same_in_every_culture()
+    {
+        CultureInfo before = CultureInfo.CurrentCulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fi-FI");
+            CultureInfo.CurrentCulture.NumberFormat.NumberGroupSeparator.Should().NotBe(",", "the culture is the premise of the case");
+
+            Harness harness = await Harness.ReadyAsync();
+            harness.Projections.HighWaterMark = 50_000;
+            harness.Projections.WithProjection("OrderSummary", sequence: 0);
+            harness.Events.DeadLetterCount = 1_234;
+
+            NavIndicators indicators = await harness.Service.ReadAsync(Token);
+
+            ProjectionsDot(indicators)!.Title.Should().Be("OrderSummary:All is 50,000 events behind");
+            indicators.Badges[MartenDescriptor.DeadLettersBadge].Title.Should().Be("1,234 events the async daemon could not apply");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = before;
+        }
     }
 
     [Fact]

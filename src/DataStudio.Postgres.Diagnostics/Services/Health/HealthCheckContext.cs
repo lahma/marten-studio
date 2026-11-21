@@ -456,7 +456,7 @@ internal sealed class HealthSqlRunner
                             {
                                 if (rows.Count == MaxRows)
                                 {
-                                    string bounded = $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.";
+                                    string bounded = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.");
                                     throw new HealthSweepRuleException(bounded, bounded);
                                 }
 
