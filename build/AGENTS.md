@@ -102,8 +102,8 @@ The Kafka module's Confluent.Kafka follows it with `--confluent-version` (`DataS
 (`DataStudio.Postgres.Diagnostics [<version>]`, `DataStudio [<version>]`, `DataStudio.Postgres [<version>]`), then
 `src/DataStudio.Kafka.Core`, `src/DataStudio.Kafka` and `src/DataStudio.Kafka.Wolverine` at the same version
 (`DataStudio.Kafka` on exactly `DataStudio [<version>]` and that `DataStudio.Kafka.Core`, `DataStudio.Kafka.Wolverine` on exactly
-that `DataStudio.Kafka.Core`), and `Publish` pushes the seven in that order. Package validation has no baseline for the new ids
-(`PackageValidationBaselineVersion` is empty for 2.0, and is set to `2.0.0` one release later). The
+that `DataStudio.Kafka.Core`), and `Publish` pushes the seven in that order. Package validation compares each package with the last release
+(`PackageValidationBaselineVersion`, moved in the pull request that lands a release's CHANGELOG section). The
 build needs at least one commit. To bump the latest-tested Marten, change `DataStudioMartenLatest`, run the suites
 with `--marten-version latest` and fix or record every difference, in a pull request of its own. A project that sets
 `DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request. Full text:
