@@ -35,9 +35,16 @@
 
   <ItemGroup>
     <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/SuiteCultureTests.cs" Link="Support/Linked/SuiteCultureTests.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
+  </ItemGroup>
+
+  <!-- The fast suites run in fi-FI, from one file for all five (docs/maintainers/testing.md, "The fast suites run in fi-FI"), and
+       SuiteCultureTests holds it in force. -->
+  <ItemGroup>
+    <None Include="../xunit.runner.json" Link="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

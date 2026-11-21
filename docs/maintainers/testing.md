@@ -1,6 +1,6 @@
 # Testing
 
-This is the full text of D16, D19 and the description of the seven kinds of test. `tests/AGENTS.md` states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D16, D19, the description of the seven kinds of test and the culture the fast suites run in. `tests/AGENTS.md` states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D16
 
@@ -142,6 +142,18 @@ shell's and the Kafka module's own:
    (and the Health page's first one in `Health/`), over the addresses of 2.0 (`{mount}/postgres/…`, `{mount}/marten/…`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19). The browser suites record enhanced
    navigations (`StudioPage.EnhancedNavigations`) and assert none (`AssertNoPageFetch`).
+
+## The fast suites run in fi-FI
+
+The five fast suites run in `fi-FI`, wherever they run: `tests/xunit.runner.json` says `"culture": "fi-FI"`, each fast suite's project
+copies it beside its assembly, and xunit applies it to every test, under `dotnet test`, the Fallout `Test` target and an IDE alike. xunit
+builds the culture without the machine's regional overrides, so it is ICU's `fi-FI` everywhere. It groups thousands with a no-break space
+and writes its minus sign as U+2212, so a number the studio formats in the server's culture instead of the invariant one fails a test.
+#99 found 12 such faults that every English-culture run had passed: counts in tooltips (`50 000 events behind`) and `tabindex="−1"`,
+which a browser drops. `SuiteCultureTests`, linked into all five, fails if the setting stops applying. A test that needs another culture
+sets `CultureInfo.CurrentCulture` and restores it, as `UpgradeHazardChecksTests` does with `tr-TR`. An expected value is written out,
+never formatted in the current culture: `$"{1234:N0} …"` in a test passes whatever the product does. The three integration suites run
+in the machine's culture.
 
 ## The Kafka suites
 
