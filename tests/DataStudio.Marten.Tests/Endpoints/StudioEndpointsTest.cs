@@ -713,6 +713,129 @@ public class StudioEndpointsTest
         }
     }
 
+    private const string HotReloadSettingsPath = "/_framework/dotnet-browser-tools/hot-reload-settings.json";
+
+    private const string HotReloadSettingsName = "Browser tools Hot Reload settings";
+
+    /// <summary>The endpoint ASP.NET Core 11 maps for every <c>MapRazorComponents</c> root in Development, built as the framework builds it.</summary>
+    private static Endpoint FrameworkHotReloadSettings(string answer, Action<EndpointBuilder>? convention = null)
+    {
+        RouteEndpointBuilder builder = new(
+            context => context.Response.WriteAsync(answer, context.RequestAborted),
+            Microsoft.AspNetCore.Routing.Patterns.RoutePatternFactory.Parse(HotReloadSettingsPath),
+            int.MaxValue)
+        {
+            DisplayName = HotReloadSettingsName,
+        };
+
+        builder.Metadata.Add(new HttpMethodMetadata([HttpMethods.Get]));
+        convention?.Invoke(builder);
+        return builder.Build();
+    }
+
+    /// <summary>What a GET of <paramref name="path" /> answers in an application whose only endpoints are <paramref name="endpoints" />.</summary>
+    private static async Task<(HttpStatusCode Status, string Body)> GetFromAsync(string path, params Endpoint[] endpoints)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Microsoft.Extensions.Hosting.Environments.Production });
+        builder.WebHost.UseTestServer();
+        await using var app = builder.Build();
+        ((IEndpointRouteBuilder) app).DataSources.Add(new DefaultEndpointDataSource(endpoints));
+
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+            using var response = await client.GetAsync(new Uri(path, UriKind.Relative), Token);
+            return (response.StatusCode, await response.Content.ReadAsStringAsync(Token));
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// #98. In Development, ASP.NET Core 11 maps its Hot Reload settings endpoint once for every <c>MapRazorComponents</c> root, ordered last
+    /// (dotnet/aspnetcore#70461), so a host with a Blazor app of its own had a second copy beside the studio's on one route, and the request
+    /// answered 500. ASP.NET Core 10 maps none, so the copies are built here as the framework builds them, and the studio's yields to the host's
+    /// by route precedence: the host's answers where there is one, the studio's where there is none, and the studio's answers that file only.
+    /// </summary>
+    [Fact]
+    public async Task The_studios_hot_reload_settings_endpoint_yields_to_the_hosts_own()
+    {
+        Func<Task> twoLiterals = () => GetFromAsync(HotReloadSettingsPath, FrameworkHotReloadSettings("host"), FrameworkHotReloadSettings("studio"));
+        // The framework's exception type is internal.
+        (await twoLiterals.Should().ThrowAsync<Exception>("that is #98, as the framework maps the two copies"))
+            .Which.GetType().Name.Should().Be("AmbiguousMatchException");
+
+        Endpoint studio = FrameworkHotReloadSettings("studio", StudioEndpointMapper.YieldHotReloadSettingsToTheHost);
+
+        (await GetFromAsync(HotReloadSettingsPath, FrameworkHotReloadSettings("host"), studio))
+            .Should().Be((HttpStatusCode.OK, "host"), "the host's own copy answers, as it did before the studio was mapped");
+        (await GetFromAsync(HotReloadSettingsPath, studio, FrameworkHotReloadSettings("host")))
+            .Should().Be((HttpStatusCode.OK, "host"), "the order the copies were mapped in does not matter");
+        (await GetFromAsync(HotReloadSettingsPath.ToUpperInvariant(), studio))
+            .Should().Be((HttpStatusCode.OK, "studio"), "a host with no Blazor app of its own gets the studio's copy, matched as a literal would be");
+        (await GetFromAsync("/_framework/dotnet-browser-tools/other.json", studio))
+            .Status.Should().Be(HttpStatusCode.NotFound, "the studio's copy answers for the settings file and nothing else");
+    }
+
+    /// <summary>
+    /// #98 on the framework that has the endpoint: a Development host with a Blazor app of its own, on ASP.NET Core 11, answers the Hot Reload
+    /// settings from its own copy, and a host with none from the studio's. Skipped on a framework that maps no such endpoint (ASP.NET Core 10);
+    /// the .NET 11 check runs it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task On_the_framework_that_maps_it_the_hot_reload_settings_answer_from_the_hosts_copy_if_there_is_one(bool hostHasBlazor)
+    {
+        await using var app = CreateApp(configureBuilder: builder => builder.Environment.EnvironmentName = Microsoft.Extensions.Hosting.Environments.Development);
+        app.UseAntiforgery();
+
+        if (hostHasBlazor)
+        {
+            app.MapRazorComponents<TestHostComponents>().AddInteractiveServerRenderMode();
+        }
+
+        app.MapDataStudio().AllowAnonymous();
+
+        List<RouteEndpoint> copies = [.. GetRouteEndpoints(app).Where(static x => x.DisplayName == HotReloadSettingsName)];
+        Assert.SkipWhen(copies.Count == 0, $"ASP.NET Core {typeof(WebApplication).Assembly.GetName().Version} maps no Hot Reload settings endpoint; 11 does.");
+        copies.Should().HaveCount(hostHasBlazor ? 2 : 1);
+
+        Endpoint? matched = null;
+        app.Use((context, next) =>
+        {
+            matched = context.GetEndpoint();
+            return next(context);
+        });
+
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+            using var response = await client.GetAsync(new Uri(HotReloadSettingsPath, UriKind.Relative), Token);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            matched.Should().NotBeNull();
+            StudioEndpointMarker? studios = matched!.Metadata.GetMetadata<StudioEndpointMarker>();
+
+            if (hostHasBlazor)
+            {
+                studios.Should().BeNull("the host's own copy answers, as it did before the studio was mapped");
+            }
+            else
+            {
+                studios.Should().NotBeNull("the studio's copy answers where the host has none");
+            }
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
     /// <summary>
     /// The framework script is mapped for every mount, not only a custom path (P1.2 review finding B1).
     /// A host with no <c>.razor</c> files of its own never resolves the ASP.NET Core web-assets pack, so

@@ -324,7 +324,9 @@ tenant, because there is nothing to filter on and hiding it would hide something
   its own does not end up with two endpoints on `/_blazor`.
 - **.NET 11 and the hot-reload initializer.** A Debug build of the host with the .NET 11 SDK lists a hot-reload
   script among the page's Blazor initializers. The studio serves the host's whole `_framework` tree under its path, so
-  that script loads and the page starts.
+  that script loads and the page starts. In Development the script asks `/_framework/dotnet-browser-tools/hot-reload-settings.json`
+  at the root: a host with a Blazor app of its own answers it from its own endpoint, and the studio's copy answers only where
+  the host has none.
 - **.NET 11 and a fail-closed `FallbackPolicy`.** ASP.NET Core 11 holds the async hub methods Blazor's circuit uses to the
   `FallbackPolicy` whatever the endpoint allows, so the circuit starts only for a visitor the `FallbackPolicy` admits; an
   `AllowAnonymous()` mapping under a fail-closed policy is the usual case
