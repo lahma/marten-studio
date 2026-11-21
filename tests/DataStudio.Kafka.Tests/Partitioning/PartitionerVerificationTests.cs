@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 using DataStudio.Kafka.Core.Scanning;
@@ -175,7 +176,7 @@ public class PartitionerVerificationTests
         PartitionerCheck.TooFewKeys few = pruning.Check.Should().BeOfType<PartitionerCheck.TooFewKeys>().Subject;
         few.Checked.Should().BeInRange(1, 99);
         pruning.IsPruned.Should().BeFalse();
-        pruning.NotPrunedReason.Should().Be($"only {few.Checked:N0} keyed records could be checked; at least 100 are needed");
+        pruning.NotPrunedReason.Should().Be("only " + few.Checked.ToString(CultureInfo.InvariantCulture) + " keyed records could be checked; at least 100 are needed");
     }
 
     [Fact]

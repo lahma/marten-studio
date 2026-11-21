@@ -145,15 +145,17 @@ shell's and the Kafka module's own:
 
 ## The fast suites run in fi-FI
 
-The five fast suites run in `fi-FI`, wherever they run: `tests/xunit.runner.json` says `"culture": "fi-FI"`, each fast suite's project
-copies it beside its assembly, and xunit applies it to every test, under `dotnet test`, the Fallout `Test` target and an IDE alike. xunit
-builds the culture without the machine's regional overrides, so it is ICU's `fi-FI` everywhere. It groups thousands with a no-break space
-and writes its minus sign as U+2212, so a number the studio formats in the server's culture instead of the invariant one fails a test.
-#99 found 12 such faults that every English-culture run had passed: counts in tooltips (`50 000 events behind`) and `tabindex="−1"`,
-which a browser drops. `SuiteCultureTests`, linked into all five, fails if the setting stops applying. A test that needs another culture
-sets `CultureInfo.CurrentCulture` and restores it, as `UpgradeHazardChecksTests` does with `tr-TR`. An expected value is written out,
-never formatted in the current culture: `$"{1234:N0} …"` in a test passes whatever the product does. The three integration suites run
-in the machine's culture.
+The five fast suites run in `fi-FI`, wherever they run: `SuiteCultureTests`, linked into all five, makes it the process's default
+culture from a module initializer before the first test, under `dotnet test`, the Fallout `Test` target and an IDE alike. A process default
+and not xunit's `culture` setting, because that reaches only the test's own flow, and a `TestServer` request runs on a thread that does
+not carry it, so a page's prerendered markup and the shell's golden files would still render in the machine's culture. The culture is
+built without the machine's regional overrides, so it is ICU's `fi-FI` everywhere. It groups thousands with a no-break space and writes
+its minus sign as U+2212, so a number the studio formats in the server's culture instead of the invariant one fails a test. #99 found 12
+such faults that every English-culture run had passed: counts in tooltips (`50 000 events behind`) and `tabindex="−1"`, which a browser
+drops. `SuiteCultureTests` fails if the culture stops reaching a test, a thread without the test's context or (in the three suites
+with `TestServer`) a request. A test that needs another culture sets `CultureInfo.CurrentCulture` and restores it, as
+`UpgradeHazardChecksTests` does with `tr-TR`. An expected value is written out, never formatted in the current culture: `$"{1234:N0} …"`
+in a test passes whatever the product does. The three integration suites run in the machine's culture.
 
 ## The Kafka suites
 
