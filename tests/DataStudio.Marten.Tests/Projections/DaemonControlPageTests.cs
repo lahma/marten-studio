@@ -27,6 +27,20 @@ public class DaemonControlPageTests
     /// <summary>The confirm button of whichever dialog is open. There is never more than one.</summary>
     private const string ConfirmButton = ".ms-confirm-actions .ms-button-danger";
 
+    /// <summary>#99: the freshness badge's title says the refresh interval with a decimal point, in every culture.</summary>
+    [Fact]
+    public async Task The_freshness_badge_says_the_refresh_interval_with_a_decimal_point()
+    {
+        FakeProjectionDataService data = new FakeProjectionDataService().WithProjection("DailySales");
+
+        await using StudioComponentContext context = await ReadyAsync(data);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromSeconds(2.5);
+
+        IRenderedComponent<Page> page = context.Render<Page>();
+
+        page.WaitForAssertion(() => page.Find(".ms-projections-freshness").GetAttribute("title").Should().Contain("refreshed every 2.5 s"));
+    }
+
     [Fact]
     public async Task The_card_offers_pause_and_resume_rather_than_start_all_and_stop_all()
     {

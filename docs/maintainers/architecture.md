@@ -41,15 +41,15 @@ file of the host's `_framework` tree (`{Path}/_framework/{**file}`, forwarded to
 whatever the host serves at `/_framework/{file}`, else its web root's `_framework/`, and a 404 for a path that could
 climb out of it) are mirrored under the mount path. The last is what lets the .NET 11 SDK's
 hot-reload initializer, which a Debug build lists among the page's Blazor initializers, load under the studio-rooted
-`<base href>`; the two literal endpoints keep their own handlers by route precedence. One framework endpoint stays at the root,
-because the browser asks for it there: ASP.NET Core 11's Development-only Hot Reload settings
+`<base href>`; the two literal endpoints keep their own handlers by route precedence. That forward serves the *host's*
+files, so unlike the package-content assets it is never anonymous by the studio's own act: it carries the studio's policy,
+or is part of the builder `MapDataStudio()` returns (the caller's statement and the `FallbackPolicy` govern it as they govern
+the page), and it answers 404 where the host's root endpoint would refuse the visitor (see D22 in ui.md). One framework endpoint
+stays at the root, because the browser asks for it there: ASP.NET Core 11's Development-only Hot Reload settings
 (`/_framework/dotnet-browser-tools/hot-reload-settings.json`), which every `MapRazorComponents` root maps, ordered last
 (dotnet/aspnetcore#70461). The studio's copy is rewritten as a parameter that matches only that file, so it ranks below a host's
 literal copy by route precedence: a host with a Blazor app of its own answers from its own copy, one without from the studio's (#98).
-That forward serves the *host's*
-files, so unlike the package-content assets it is never anonymous by the studio's own act: it carries the studio's policy,
-or is part of the builder `MapDataStudio()` returns (the caller's statement and the `FallbackPolicy` govern it as they govern
-the page), and it answers 404 where the host's root endpoint would refuse the visitor (see D22 in ui.md). Endpoint display names keep the
+Endpoint display names keep the
 compile-time template, so no log or diagnostic text is ever built from one. A 1.x address (`{mount}/documents`, `{mount}/health`)
 matches nothing and is a 404; there is no redirect (D49). This is ~250 lines of genuinely fiddly engineering that already works in production
 somewhere; rewriting it would be the single most likely way to ship something that renders locally and

@@ -261,6 +261,14 @@ public class ProjectionThresholdOptionTests
         MartenNavBadges.Explain(summary).Should().Be("Trips:All is 2,000 events behind");
     }
 
+    [Fact]
+    public void A_summary_that_names_no_shard_says_a_shard_is_behind()
+    {
+        ProjectionSummary summary = new(1, 1, 2_000, null, 0, 0, null!, null);
+
+        MartenNavBadges.Explain(summary).Should().Be("a shard is 2,000 events behind");
+    }
+
     // ---- Where each projection's thresholds come from (the disclosure) -----------------------------------------------
 
     [Fact]

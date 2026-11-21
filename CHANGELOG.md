@@ -26,8 +26,8 @@ host writes changes, and no public type or member moves; the seven packages are 
   too many rows wrote a count with that culture's separators (`50 000 events behind`). The JSON tree's rows and show-more buttons,
   its copy menu and the studio's menus wrote `tabindex="−1"` with that culture's minus sign (U+2212). A browser ignores that, so
   each item became a tab stop of its own instead of being reached with the arrow keys.
-- For maintainers: the five fast suites run in fi-FI (`tests/xunit.runner.json`), wherever they run, so a number formatted in the server's
-  culture fails a test; `SuiteCultureTests` holds the setting in force. #98 has a test with copies built as the framework builds them and one
+- For maintainers: the five fast suites run in fi-FI, wherever they run and on every thread, a `TestServer` request's included, so a number
+  formatted in the server's culture fails a test; `SuiteCultureTests` sets it and holds it in force. #98 has a test with copies built as the framework builds them and one
   on the framework itself, which runs on ASP.NET Core 11 and is skipped on 10.
 
 # 2.0.0

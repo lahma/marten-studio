@@ -182,6 +182,20 @@ public class HealthWithheldPageTests
         badge.GetAttribute("aria-label").Should().StartWith("1 critical finding, and 3 findings not shown to you, as of ");
     }
 
+    /// <summary>#99: the badge's name is an English sentence, so its counts are written the same in every culture.</summary>
+    [Fact]
+    public async Task The_badge_writes_counts_past_a_thousand_the_same_in_every_culture()
+    {
+        await using StudioComponentContext context = await ReadyAsync();
+        context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 1_234, 2_000, [new HealthGlanceItem("default|db|D01", "Pinned")], Withheld: 1_500);
+
+        var nav = context.Render<NavMenu>();
+
+        IElement badge = HealthEntry(nav).QuerySelector(".ms-nav-badge")!;
+        badge.TextContent.Trim().Should().Be("3,234");
+        badge.GetAttribute("aria-label").Should().StartWith("1,234 critical findings and 2,000 warnings, and 1,500 findings not shown to you, as of ");
+    }
+
     /// <summary>
     /// Findings the visitor may not see draw no badge of their own: their severity is the gate's to withhold, and a badge
     /// that cannot say how bad would sit on every page. An absent badge is no claim; the page and the Overview say it.

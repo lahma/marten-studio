@@ -34,10 +34,4 @@
     <ProjectReference Include="../../src/DataStudio.Marten/DataStudio.Marten.csproj" />
   </ItemGroup>
 
-  <!-- The fast suites run in fi-FI, from one file for all five (docs/maintainers/testing.md, "The fast suites run in fi-FI"), and
-       SuiteCultureTests holds it in force. -->
-  <ItemGroup>
-    <None Include="../xunit.runner.json" Link="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
 </Project>

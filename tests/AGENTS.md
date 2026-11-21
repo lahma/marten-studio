@@ -48,8 +48,9 @@ packets, two terminals — must do, because schema names derive from test class 
 drop each other's tables. `TESTCONTAINERS_REUSE_ENABLE` is **not** read by Testcontainers 4.x (verified by
 decompilation, 2026-09-14) and must not be used.
 
-The five fast suites run in `fi-FI` (`tests/xunit.runner.json`), so a number formatted in the server's culture fails a test; write an
-expected value out, never with the current culture. Full text: [testing.md](../docs/maintainers/testing.md#the-fast-suites-run-in-fi-fi).
+The five fast suites run in `fi-FI` (`SuiteCultureTests` sets it for the whole process), so a number formatted in the server's
+culture fails a test; write an expected value out, never with the current culture. Full text:
+[testing.md](../docs/maintainers/testing.md#the-fast-suites-run-in-fi-fi).
 
 There are seven kinds of test, in eight projects: unit, component, endpoint and metadata, public API snapshot,
 conventions, Marten API surface, and integration and browser. Waits are always wait-on-condition, **never

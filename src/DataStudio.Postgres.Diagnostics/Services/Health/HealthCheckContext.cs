@@ -348,6 +348,11 @@ internal sealed class HealthSqlRunner
     /// <summary>The most rows one statement may return before the check fails, rather than the page.</summary>
     public const int MaxRows = 10_000;
 
+    /// <summary>What a check that read more than <see cref="MaxRows" /> rows fails with.</summary>
+    public static readonly string TooManyRows = string.Create(
+        System.Globalization.CultureInfo.InvariantCulture,
+        $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.");
+
     private readonly HealthConnection connection;
     private readonly ReadOnlySqlSession session;
     private readonly ReadOnlySqlSession applicationRoleSession;
@@ -456,8 +461,7 @@ internal sealed class HealthSqlRunner
                             {
                                 if (rows.Count == MaxRows)
                                 {
-                                    string bounded = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.");
-                                    throw new HealthSweepRuleException(bounded, bounded);
+                                    throw new HealthSweepRuleException(TooManyRows, TooManyRows);
                                 }
 
                                 rows.Add(map(reader));
