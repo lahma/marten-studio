@@ -21,6 +21,12 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// listed too and are ignored here; only directories are held to account, because they are the part that
 /// says "this is where that kind of code lives".
 /// </para>
+/// <para>
+/// A directory on disk counts when a file outside build output lies somewhere below it, which is what a clone carries. The folder
+/// of a renamed project, left holding only its <c>bin/</c> and <c>obj/</c>, and an empty directory, which git does not carry, are
+/// no directory of the repository's, so a machine that built the 1.x projects passes as CI does
+/// (<see cref="A_directory_counts_only_when_it_holds_a_file_outside_build_output" />).
+/// </para>
 /// </remarks>
 public class AgentsLayoutTests
 {
@@ -48,6 +54,36 @@ public class AgentsLayoutTests
     }
 
     [Fact]
+    public void A_directory_counts_only_when_it_holds_a_file_outside_build_output()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "agents-layout-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            Write(root, "src/Leftover/bin/Debug/net10.0/Leftover.dll");
+            Write(root, "src/Leftover/obj/project.assets.json");
+            Write(root, "src/Real/Code.cs");
+            Write(root, "src/Real/bin/Debug/Real.dll");
+            Write(root, "src/Nested/Deep/Code.cs");
+            Directory.CreateDirectory(Path.Combine(root, "src", "Empty"));
+            Write(root, "samples/Leftover/obj/project.assets.json");
+
+            DirectoriesUnder(root).Order(StringComparer.Ordinal).Should().Equal("src/", "src/Nested/", "src/Nested/Deep/", "src/Real/");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
+        static void Write(string root, string relative)
+        {
+            string file = Path.Combine(root, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, string.Empty);
+        }
+    }
+
+    [Fact]
     public void The_layout_section_is_a_single_text_fenced_block()
     {
         ExtractLayoutBlock().Should().NotBeNullOrWhiteSpace(
@@ -55,26 +91,27 @@ public class AgentsLayoutTests
             "test parses, and what a reader is expected to trust");
     }
 
-    private static HashSet<string> DirectoriesOnDisk()
+    private static HashSet<string> DirectoriesOnDisk() => DirectoriesUnder(RepositoryRoot.FullPath);
+
+    /// <summary>The directories of the described roots under <paramref name="repository" /> that hold a file outside build output.</summary>
+    private static HashSet<string> DirectoriesUnder(string repository)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var root in DescribedRoots)
         {
-            var rootPath = RepositoryRoot.Combine(root);
+            var rootPath = Path.Combine(repository, root);
 
             if (!Directory.Exists(rootPath))
             {
                 continue;
             }
 
-            result.Add(root + "/");
-
-            foreach (var directory in Directory.GetDirectories(rootPath, "*", SearchOption.AllDirectories))
+            foreach (var directory in Directory.GetDirectories(rootPath, "*", SearchOption.AllDirectories).Prepend(rootPath))
             {
-                var relative = Path.GetRelativePath(RepositoryRoot.FullPath, directory).Replace('\\', '/');
+                var relative = Path.GetRelativePath(repository, directory).Replace('\\', '/');
 
-                if (relative.Split('/').Any(x => ExcludedSegments.Contains(x, StringComparer.Ordinal)))
+                if (relative.Split('/').Any(x => ExcludedSegments.Contains(x, StringComparer.Ordinal)) || !HoldsSource(directory))
                 {
                     continue;
                 }
@@ -85,6 +122,12 @@ public class AgentsLayoutTests
 
         return result;
     }
+
+    /// <summary>Whether a file lies in <paramref name="directory" /> or below it, outside build output.</summary>
+    private static bool HoldsSource(string directory) =>
+        Directory.EnumerateFiles(directory).Any()
+        || Directory.EnumerateDirectories(directory)
+            .Any(x => !ExcludedSegments.Contains(Path.GetFileName(x), StringComparer.Ordinal) && HoldsSource(x));
 
     private static HashSet<string> DocumentedDirectories()
     {
