@@ -4,6 +4,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
+    <!-- Sees the conditional Microsoft.CodeAnalysis.CSharp row: CurrentCultureTextAnalyzerTests runs DS1305 over code in process. -->
+    <DataStudioAnalyzersPinsRoslyn>true</DataStudioAnalyzersPinsRoslyn>
   </PropertyGroup>
 
   <!-- Global usings, so no test file repeats them and IDE0005 (a warning, and warnings are errors)
@@ -28,10 +30,12 @@
     <PackageReference Include="Verify.XunitV3" />
     <PackageReference Include="PublicApiGenerator" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/DataStudio.Marten/DataStudio.Marten.csproj" />
+    <ProjectReference Include="../../analyzers/DataStudio.Analyzers/DataStudio.Analyzers.csproj" />
   </ItemGroup>
 
 </Project>

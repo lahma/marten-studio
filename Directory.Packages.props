@@ -118,6 +118,18 @@
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
   </ItemGroup>
 
+  <!--
+    The compiler API of DS1305, the culture guard over src/ (analyzers/DataStudio.Analyzers; AGENTS.md, Package budget changes,
+    2026-11-22), and of the conventions test that runs it over code. Build time only: every project under src/ takes the analyzer with
+    PrivateAssets="all" and ReferenceOutputAssembly="false", so no package of ours depends on it. 5.0.0 is the compiler of the 10.0.100
+    SDK that global.json allows, so every SDK this repository builds with can load the analyzer, and it is the version
+    WolverineFx.RuntimeCompilation already brings to the Kafka sample. Conditional, like the Npgsql and Microsoft.Extensions rows below, so
+    the Kafka projects keep their own 5.0.0 unpinned: only a project that sets DataStudioAnalyzersPinsRoslyn sees it.
+  -->
+  <ItemGroup Label="The culture guard (they set DataStudioAnalyzersPinsRoslyn)" Condition="'$(DataStudioAnalyzersPinsRoslyn)' == 'true'">
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Test - DataStudio.Marten.Integration.Tests (needs Docker)">
     <!-- WebApplicationFactory over the real sample host. 11.0.0 is rc; do not take it. -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />

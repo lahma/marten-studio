@@ -1,0 +1,16 @@
+<Project>
+
+  <!-- The repository's props first: this file only adds to them, for the shipped projects. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- DS1305, the culture guard (testing.md, *The fast suites run in fi-FI*): every project under src/ compiles with it, so a number or a
+       date written in the server's culture fails the build where CA1305 cannot see it. An analyzer and nothing else: no reference to its
+       assembly, nothing in a nuspec, and nothing in the restore graph the fence tests read. -->
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../analyzers/DataStudio.Analyzers/DataStudio.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

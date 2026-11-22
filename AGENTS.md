@@ -212,7 +212,8 @@ The decisions that hold in every directory are whole here. The others are in the
 
 **D1 — `net10.0` only.** Marten 9 targets net9.0 and net10.0, .NET 9 is out of support, and the build template this
 repository came from is net10-only. A second target framework would double the test matrix and the
-conditional-compilation surface to support a runtime nobody should be deploying.
+conditional-compilation surface to support a runtime nobody should be deploying. The one other target is build tooling: the analyzer
+in `analyzers/` is `netstandard2.0`, which the compiler that loads it needs, and no package ships it.
 
 **D3 — Few dependencies a package, and no upper bound on any.** The shell (`DataStudio`) takes `Microsoft.AspNetCore.App.Internal.Assets`
 (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App`, nothing else. The Postgres module takes the shell and
@@ -288,7 +289,7 @@ address is a 404) or log category. Full text: [architecture.md](docs/maintainers
 
 ## Layout
 
-The directory tree is in `docs/maintainers/layout.md`: every directory under `src/`, `samples/`, `tests/`, `build/`,
+The directory tree is in `docs/maintainers/layout.md`: every directory under `src/`, `analyzers/`, `samples/`, `tests/`, `build/`,
 `.claude/` and `docs/`, and what belongs in each. Read it before adding a file. Add a directory to it in the same pull
 request that creates the directory, because `AgentsLayoutTests` fails on a directory the tree misses and on one that no
 longer exists. The roots in brief:
@@ -296,6 +297,7 @@ longer exists. The roots in brief:
   `src/DataStudio.Postgres.Diagnostics/` the engine under it; `src/DataStudio.Marten/` holds the Marten screens and checks;
   `src/DataStudio.Kafka/`, `src/DataStudio.Kafka.Core/` and `src/DataStudio.Kafka.Wolverine/` are the Kafka module, its engine and
   its Wolverine adapter. A module has `Components/`, `Services/` and, where it has SQL, `Internal/Sql/` (hard rule 4).
+- `analyzers/` holds DS1305, the culture guard every project under `src/` compiles with (`src/Directory.Build.props`).
 - `samples/` holds the demo hosts and their demo data (D17, D18).
 - `tests/` holds the eight test projects ([tests/AGENTS.md](tests/AGENTS.md)).
 - `build/` is the Fallout orchestrator.
