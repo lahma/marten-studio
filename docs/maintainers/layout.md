@@ -10,6 +10,9 @@ misses one that does. Keep it in step with the tree.
 .claude/                                 Agent definitions and local Claude Code configuration
 .claude/agents/                          studio-implementer, studio-reviewer, studio-ui-verifier,
                                          studio-grunt (hard rule 12 - the only way work is delegated)
+analyzers/                               Build tooling the shipped projects compile with: never packed, never a dependency of a package
+analyzers/DataStudio.Analyzers/          DS1305, the culture guard: every project under src/ compiles with it (src/Directory.Build.props),
+                                         so a number or a date written in the server's culture fails the build (testing.md)
 build/                                   The Fallout orchestrator. `build/` is a resolver convention and
                                          .gitignore must never untrack it (hard rule 8)
   Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes

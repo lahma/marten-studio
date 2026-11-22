@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- DS1305, the culture guard: the analyzer every project under src/ compiles with (src/Directory.Build.props), so a number or a date
+       the studio writes in the server's culture fails the build where CA1305 cannot see it (testing.md, *The fast suites run in fi-FI*).
+       It is build tooling, never packed and never loaded at run time. netstandard2.0 because a compiler loads it, the SDK's on .NET and
+       Visual Studio's on .NET Framework; D1 (net10.0 only) is about what ships. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- RS2008 asks an analyzer that ships to track its releases in AnalyzerReleases.*.md files; this one ships nowhere. -->
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+    <!-- Sees the conditional Microsoft.CodeAnalysis.CSharp row of Directory.Packages.props. -->
+    <DataStudioAnalyzersPinsRoslyn>true</DataStudioAnalyzersPinsRoslyn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

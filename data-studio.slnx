@@ -18,6 +18,9 @@
       <Build Project="false" />
     </Project>
   </Folder>
+  <Folder Name="/analyzers/">
+    <Project Path="analyzers/DataStudio.Analyzers/DataStudio.Analyzers.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/DataStudio/DataStudio.csproj" />
     <Project Path="src/DataStudio.Marten/DataStudio.Marten.csproj" />

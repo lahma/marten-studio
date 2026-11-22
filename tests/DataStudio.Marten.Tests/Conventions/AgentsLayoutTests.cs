@@ -17,7 +17,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// The contract is deliberately narrow and mechanical: inside the <c>```text</c> block under
 /// <c># Layout</c>, the first whitespace-delimited token of a line is a directory entry when it ends in
 /// <c>/</c>. The set of those entries must equal the set of directories on disk under <c>src/</c>,
-/// <c>samples/</c>, <c>tests/</c>, <c>build/</c> and <c>.claude/</c> - build output excluded. Files may be
+/// <c>analyzers/</c>, <c>samples/</c>, <c>tests/</c>, <c>build/</c>, <c>.claude/</c> and <c>docs/</c> - build output excluded. Files may be
 /// listed too and are ignored here; only directories are held to account, because they are the part that
 /// says "this is where that kind of code lives".
 /// </para>
@@ -25,7 +25,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 public class AgentsLayoutTests
 {
     /// <summary>Roots whose directory structure the layout tree has to describe completely.</summary>
-    private static readonly string[] DescribedRoots = ["src", "samples", "tests", "build", ".claude", "docs"];
+    private static readonly string[] DescribedRoots = ["src", "analyzers", "samples", "tests", "build", ".claude", "docs"];
 
     /// <summary>Directory names that are build output, never source, and never listed.</summary>
     private static readonly string[] ExcludedSegments = ["bin", "obj", "artifacts"];

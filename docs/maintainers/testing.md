@@ -157,6 +157,27 @@ with `TestServer`) a request. A test that needs another culture sets `CultureInf
 `UpgradeHazardChecksTests` does with `tr-TR`. An expected value is written out, never formatted in the current culture: `$"{1234:N0} …"`
 in a test passes whatever the product does. The three integration suites run in the machine's culture.
 
+The suites catch only what some test renders, and the build catches what it can see. Every project under `src/` compiles with DS1305,
+the analyzer in `analyzers/DataStudio.Analyzers` (`src/Directory.Build.props`), an error wherever a number or a date becomes text in the
+server's culture where CA1305 does not look: an interpolation hole, a concatenation, `StringBuilder.Append`, `TextWriter.Write`,
+`string.Concat` and `string.Join`, Blazor's `AddContent` and `AddAttribute` (markup, attributes and `@bind`), and, in a `.razor` file only,
+`ToString`, `string.Format` and `Convert.ToString` without a provider, which CA1305 covers in a `.cs` file. It goes by type: a fractional
+number or a date with any format but the invariant `O`, `R`, `s` and `u`, a `TimeSpan` written with `g`, an integer written with a
+grouping, decimal, percent or currency format (`N0`, `F1`, `P`, `#,0`), and an integer the code shows to be negative
+(`Focused ? 0 : -1`). The fix is the studio's usual one: `string.Create(CultureInfo.InvariantCulture, $"…")`,
+`ToString(CultureInfo.InvariantCulture)`, or a string such as `"-1"`. `CurrentCultureTextAnalyzerTests` holds each shape, the `.razor` ones as
+the code the Razor compiler generates for them.
+
+Run over `src/` on 2026-11-22, it reported nothing, so it allows no false positive there. The review's first version of it (2026-11-21)
+also took every difference for negative, and flagged seven, each non-negative by construction: a count past a limit it was just compared
+with (`routes.Count - MaxRoutesNamed` in `StudioEndpointAuthorizationGuard`, `projection.Isolated.Count - IsolatedLimit` in
+`Relationships.razor`, `unread.Count - UnconsumedLimit` in `EventFlow.razor`, `distinct.Length - SentenceLimit` in `EventFlow.cs`), a part
+taken from its whole (`entries.Count - problems` in `EventShapePanel.razor`, `attempted - couldNot` in `Stores.razor`) and an SVG
+coordinate (`Y(frame) + RowHeight - 6` in `PlanIcicle.razor`). So a difference is not taken for negative, and that is the gap the rule
+leaves: an integer negative at run time with no minus sign in the code. It also misses a value of a type it does not know (an
+`IFormattable` of the host's), a value a message template logs (the logger formats it), and code Razor writes in another shape than the
+one the tests pin. The fi-FI suites stay behind all of these.
+
 ## The Kafka suites
 
 `tests/DataStudio.Kafka.Tests` runs the engine on `FakeKafkaCluster`, a hand-written in-memory broker (D36), with no Docker, and the Kafka module's pages over the

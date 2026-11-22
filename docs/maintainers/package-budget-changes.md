@@ -748,3 +748,26 @@ Kafka needs the script and must not need Npgsql to get it; the shell is the one 
 `DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka` each list the pack at its central row (`Pack` asserts every line), and the nuspecs of the shell and of
 the three Kafka packages name no database package (`Pack` asserts that too). Nothing in the budget table changed but the *Where* column. Exit: none; the
 six 1.x ids are deprecated on nuget.org with their successors after the first 2.0 tag.
+
+**2026-11-22 — `Microsoft.CodeAnalysis.CSharp` 5.0.0, build time only, for DS1305, the culture guard (task kz5c).** What: Roslyn's C#
+compiler API, referenced by `analyzers/DataStudio.Analyzers`, the analyzer every project under `src/` compiles with
+(`src/Directory.Build.props`), and by `tests/DataStudio.Marten.Tests`, whose `CurrentCultureTextAnalyzerTests` run it over code in process.
+Why: #99's twelve faults were numbers written in the server's culture where CA1305 does not look: interpolation holes, Blazor's
+`AddContent` and `AddAttribute`, and `.razor` code, which analyzers see as generated. The fi-FI suites catch only what some test renders.
+Telling an `int` hole, which every culture writes alike, from a `double` one, which it does not, takes the value's type: a scan of the
+text in the conventions suite has none, and would have to flag every hole or miss the doubles. An analyzer has the types and reads the
+code Razor generates, mapped back to the `.razor` line. What it replaces: nothing; CA1305 stays for what it sees. Nothing already present
+does the job: the SDK's analyzers skip generated code and do not take a number boxed into `AddContent` for formatting, and a third-party
+analyzer package would be a dependency with a rule set of its own to configure, for part of it. Version: 5.0.0, the compiler of the
+10.0.100 SDK that `global.json` allows (`rollForward: latestFeature`), so every SDK this repository builds with can load the analyzer;
+it is also the version `WolverineFx.RuntimeCompilation` 6.61.0 already brings to the Kafka sample and its live suite. It brings
+`Microsoft.CodeAnalysis.Common` 5.0.0 and `Microsoft.CodeAnalysis.Analyzers` 3.11.0, whose analyzer-authoring rules hold the analyzer's
+own build, and, for the analyzer's `netstandard2.0` target only, `NETStandard.Library` 2.0.3, `System.Collections.Immutable` and
+`System.Reflection.Metadata` 9.0.0 and the polyfills they need; the net10.0 test project takes none of those. The row is conditional
+on `DataStudioAnalyzersPinsRoslyn`, which only those two projects set, so the Kafka projects' transitive 5.0.0 stays unpinned.
+Measured: no package of ours depends on it. `src/Directory.Build.props` references the project with `OutputItemType="Analyzer"`,
+`ReferenceOutputAssembly="false"` and `PrivateAssets="all"`; a forced restore of `src/DataStudio` left its `project.assets.json`
+unchanged, so the fence tests' restore graphs do not see the analyzer; and `Pack` packed the seven packages with the dependencies it
+asserts. The analyzer is the one `netstandard2.0` project: a compiler loads it, the SDK's on .NET and Visual Studio's on .NET Framework,
+and nothing ships it (D1). Exit: none planned. A later Razor compiler that writes other shapes would need the analyzer to
+follow (`CurrentCultureTextAnalyzerTests`, remarks).
