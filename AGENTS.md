@@ -215,10 +215,10 @@ repository came from is net10-only. A second target framework would double the t
 conditional-compilation surface to support a runtime nobody should be deploying. The one other target is build tooling: the analyzer
 in `analyzers/` is `netstandard2.0`, which the compiler that loads it needs, and no package ships it.
 
-**D3 — Few dependencies a package, and no upper bound on any.** The shell (`DataStudio`) takes `Microsoft.AspNetCore.App.Internal.Assets`
+**D3 — Few dependencies a package, a floor on each, and an upper bound only at a next major known to break the build (Marten 10, WolverineFx.Kafka 7, Confluent.Kafka 3 and later): one build of the Marten module or the Wolverine adapter cannot run on both, and Confluent.Kafka 4 is another client.** The shell (`DataStudio`) takes `Microsoft.AspNetCore.App.Internal.Assets`
 (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App`, nothing else. The Postgres module takes the shell and
 `DataStudio.Postgres.Diagnostics`, each at exactly its own version, plus the framework reference. The Marten module takes two dependencies
-(`Marten`, floor `9.57.0`, and the Postgres module at exactly its own version), plus the framework reference; it has no direct `Npgsql`, which
+(`Marten`, floor `9.57.0` and below 10.0.0, and the Postgres module at exactly its own version), plus the framework reference; it has no direct `Npgsql`, which
 arrives through `Weasel.Postgresql`. The engine (`DataStudio.Postgres.Diagnostics`) takes `Npgsql` (floor `9.0.4`) and four
 `Microsoft.Extensions.*` abstractions (floor `10.0.0`), with no framework reference at all. The Kafka module takes the shell and
 `DataStudio.Kafka.Core`, each at exactly its own version, plus the framework reference; the Kafka engine takes `Confluent.Kafka` (floor

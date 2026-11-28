@@ -4,17 +4,17 @@ This is the full text of D3, D21, the *Package budget changes* and *Held deliber
 
 ## D3
 
-**D3 — Few dependencies a package, and no upper bound on any.** Seven packages, one version:
+**D3 — Few dependencies a package, a floor on each, and an upper bound only at a next major known to break the build (Marten 10, WolverineFx.Kafka 7, Confluent.Kafka 3 and later):** one build of the Marten module or the Wolverine adapter cannot run on both majors, and Confluent.Kafka 4 is another client. Seven packages, one version:
 
 | Package | Takes |
 |---|---|
 | `DataStudio` (the shell) | `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App` |
 | `DataStudio.Postgres.Diagnostics` (the engine) | `Npgsql` (floor `9.0.4`) and four `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference at all |
 | `DataStudio.Postgres` | `DataStudio` and `DataStudio.Postgres.Diagnostics`, each at exactly its own version, and the framework reference |
-| `DataStudio.Marten` | `Marten` (floor `9.57.0`) and `DataStudio.Postgres` at exactly its own version, and the framework reference |
-| `DataStudio.Kafka.Core` (the Kafka engine) | `Confluent.Kafka` (floor `2.14.0`) and three `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference |
+| `DataStudio.Marten` | `Marten` (floor `9.57.0`, below `10.0.0`) and `DataStudio.Postgres` at exactly its own version, and the framework reference |
+| `DataStudio.Kafka.Core` (the Kafka engine) | `Confluent.Kafka` (floor `2.14.0`, below `3.0.0`) and three `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference |
 | `DataStudio.Kafka` | `DataStudio` and `DataStudio.Kafka.Core`, each at exactly its own version, and the framework reference |
-| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core` at exactly its own version and `WolverineFx.Kafka` (floor `6.61.0`) |
+| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core` at exactly its own version and `WolverineFx.Kafka` (floor `6.61.0`, below `7.0.0`) |
 
 Everything else any of these needs (Blazor, SignalR, authorization, endpoint routing) is in the shared framework, so none pins an
 ASP.NET Core patch onto its host; nor does the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no
@@ -26,6 +26,8 @@ The Kafka module references no Postgres module, no engine of Postgres and no Npg
 nuspecs of the shell and of the three Kafka packages are asserted to name no database package (*Build*). The floors follow the latest releases (*Package budget changes*,
 2026-11-03: the user's policy of 2026-11-02 is that consumers keep up with Marten and Npgsql), tested and packed as *Build* says. The
 Marten module compiles without the JasperFx source generator Marten bundles, so its public API is the same whichever Marten built it.
+
+The three upper bounds are exclusive ranges in the nuspecs (`Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)`, `WolverineFx.Kafka [6.61.0, 7.0.0)`), `Pack` asserts them, and each is backed at startup for a host that silences NU1608 or reaches the assembly another way: `MartenVersionGuard` (called by `AddMarten()` and `AddMartenDiagnostics()` right after `PostgresVersionGuard`), `ConfluentClientGuard` (the first call of `AddKafka()`'s body) and, for Wolverine, a shape check in `WolverineClusterSource` that turns a Wolverine whose Kafka configuration is no longer Confluent's into one note and no cluster (D43 holds: a note, never an exception). Data Studio 3.0 is the line for Marten 10 and Wolverine 7 (issue 103). No range on Npgsql, the ASP.NET Core assets or `Microsoft.Extensions.*`.
 
 ## D21
 

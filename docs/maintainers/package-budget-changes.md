@@ -805,3 +805,17 @@ What it showed, 2026-11-28:
   suite's process is named and C18 then rightly judges none of them. `NpgsqlSettingsCatalogTests` now expects `Multiplexing` and
   `Write Coalescing Buffer Threshold Bytes` to be absent from the loaded builder at 11 and keeps both in the catalogue, which a host on
   Npgsql 9 or 10 still sets.
+
+**2026-11-28 — upper bounds on `Marten` (below 10.0.0), `Confluent.Kafka` (below 3.0.0) and `WolverineFx.Kafka` (below 7.0.0); no package added, no floor moved.**
+Data Studio 2.0.1 restored on Marten 10, Wolverine 7 and Confluent.Kafka 4 (D3 said no upper bound on any) and then failed at an arbitrary call
+with a `MissingMethodException` (issue 103). One build cannot serve both majors: Marten 10 and Wolverine 7 moved the types the module compiles
+against, Wolverine 7's `KafkaTransport.ConsumerConfig`, `ProducerConfig` and `AdminClientConfig` are Wolverine's own `KafkaConsumerOptions`,
+`KafkaProducerOptions` and `KafkaAdminClientOptions` where 6.61's are Confluent's, and Confluent.Kafka 4.4.0-alpha.1 is a different client (a
+Rust core and a Java-style API) under the same package id. Data Studio 3.0 is the line for Marten 10 and Wolverine 7. What changed: the three central rows in `Directory.Packages.props` became ranges (`[$(DataStudioMartenVersion), 10.0.0)`,
+`[$(DataStudioConfluentVersion), 3.0.0)`, `[6.61.0, 7.0.0)`), so the nuspecs say `Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)` and
+`WolverineFx.Kafka [6.61.0, 7.0.0)`, which `Pack` asserts; `--marten-version` and `--confluent-version` still take an exact version, now inside
+the range. Nothing else gets a bound: Npgsql, the ASP.NET Core assets and `Microsoft.Extensions.*` keep their floors. A range only makes a
+restore warn (NU1608); a host that ignores the warning is stopped at startup by `MartenVersionGuard` (`AddMarten()` and
+`AddMartenDiagnostics()`) and `ConfluentClientGuard` (`AddKafka()`), and a Wolverine 7 beside the adapter lists no cluster and says why in one
+note. Exit: 3.0 moves the Marten and WolverineFx.Kafka bounds with its own floors; the Confluent.Kafka bound stays until a driver for
+Confluent.Kafka 4 exists.

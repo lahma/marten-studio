@@ -156,7 +156,7 @@ partial class Build
                 AssertNuspecDependsOnNoneOf(package, PostgresPackageId, DiagnosticsPackageId, MartenPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
             }
 
-            // DataStudio.Marten depends on exactly its own DataStudio.Postgres and on the Marten floor. The exact range comes
+            // DataStudio.Marten depends on exactly its own DataStudio.Postgres and on Marten from its floor up to, and not including, 10.0.0 (#103). The exact range comes
             // from DataStudioMartenPinsPostgresExactly in DataStudio.Marten.csproj, which works through two NuGet-private
             // names; this is what turns a NuGet that renamed them into a failed build rather than a shipped `>=`.
             // The assets pack is there too without DataStudio.Marten referencing it: under transitive pinning NuGet writes
@@ -169,7 +169,7 @@ partial class Build
             AssertNuspecDependencies(PackagesDirectory / $"{MartenPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
-                    ["Marten"] = MartenFloor,
+                    ["Marten"] = $"[{MartenFloor}, 10.0.0)",
                     [PostgresPackageId] = $"[{Version}]",
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
@@ -214,13 +214,13 @@ partial class Build
                     ["Microsoft.Extensions.Diagnostics.HealthChecks"] = CentralPackageVersion("Microsoft.Extensions.Diagnostics.HealthChecks"),
                 });
 
-            // DataStudio.Kafka.Core depends on Confluent.Kafka at its floor and on the three Microsoft.Extensions.* abstractions it
+            // DataStudio.Kafka.Core depends on Confluent.Kafka from its floor up to, and not including, 3.0.0 (#103) and on the three Microsoft.Extensions.* abstractions it
             // registers into, logs through and binds options with, at their central floors (DataStudioKafkaCorePinsExtensions): no
             // ASP.NET Core and no part of the Marten family.
             AssertNuspecDependencies(PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
-                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Confluent.Kafka"] = $"[{ConfluentFloor}, 3.0.0)",
                     ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
                     ["Microsoft.Extensions.Logging.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.Logging.Abstractions"),
                     ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
@@ -237,12 +237,12 @@ partial class Build
                 {
                     [ShellPackageId] = $"[{Version}]",
                     [KafkaCorePackageId] = $"[{Version}]",
-                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Confluent.Kafka"] = $"[{ConfluentFloor}, 3.0.0)",
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
 
             // DataStudio.Kafka.Wolverine depends on exactly its own DataStudio.Kafka.Core (DataStudioKafkaWolverinePinsCoreExactly) and on
-            // WolverineFx.Kafka at its central floor, which pins the Confluent.Kafka floor, so a Wolverine host is never raised.
+            // WolverineFx.Kafka at its central range, [6.61.0, 7.0.0) (#103), whose floor pins the Confluent.Kafka floor, so a Wolverine host is never raised.
             // The rest is CPM's transitive pinning (measured by K8), because the project sets DataStudioKafkaCorePinsExtensions: the
             // Confluent.Kafka floor and the three abstractions, as DataStudio.Kafka.Core's own, and Microsoft.Extensions.Hosting, which
             // WolverineFx brings and the same conditional group (Directory.Packages.props) has a row for. All are floors a host
@@ -252,7 +252,7 @@ partial class Build
                 {
                     [KafkaCorePackageId] = $"[{Version}]",
                     ["WolverineFx.Kafka"] = CentralPackageVersion("WolverineFx.Kafka"),
-                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Confluent.Kafka"] = $"[{ConfluentFloor}, 3.0.0)",
                     ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
                     ["Microsoft.Extensions.Logging.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.Logging.Abstractions"),
                     ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),

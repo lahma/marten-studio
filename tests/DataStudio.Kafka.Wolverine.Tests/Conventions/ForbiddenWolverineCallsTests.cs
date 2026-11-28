@@ -62,7 +62,7 @@ public class ForbiddenWolverineCallsTests
         "Invoke", "InvokeMember", "DynamicInvoke", "CreateDelegate", "CreateInstance", "SetValue", "Compile",
     };
 
-    private static readonly string[] AllowedReflectedNames = ["Tenants", "TenantId", "Transport"];
+    private static readonly string[] AllowedReflectedNames = ["Tenants", "TenantId", "Transport", "ConsumerConfig", "ProducerConfig", "AdminClientConfig"];
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodes();
 
@@ -85,7 +85,7 @@ public class ForbiddenWolverineCallsTests
     }
 
     [Fact]
-    public void Reflection_is_used_for_exactly_the_three_members_of_the_tenant_probe()
+    public void Reflection_is_used_for_exactly_the_three_members_of_the_tenant_probe_and_the_three_types_the_shape_check_reads()
     {
         List<string> found = [];
 

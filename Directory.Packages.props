@@ -42,13 +42,15 @@
   <ItemGroup Label="Library (src/DataStudio.Marten)">
     <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
          Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
-         package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
-         on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql.
+         package from pinning an ASP.NET Core patch on its host. A range, not an exact pin: a consumer
+         on a newer Marten 9.x must not be forced down, and Marten 10 is excluded because one build of the Marten
+         module cannot run on both majors (Data Studio 3.0 is the line for Marten 10, issue 103; Package budget
+         changes, 2026-11-28). Npgsql arrives transitively via Weasel.Postgresql.
 
          The floor is 9.57.0 (2026-11-03): the newest release, which removes the compaction hazard
          of #5797 instead of guarding it. Older bisections (9.31.0 for the code, 9.39.0 for the
          advisories) are history in AGENTS.md, *Package budget changes*. -->
-    <PackageVersion Include="Marten" Version="$(DataStudioMartenVersion)" />
+    <PackageVersion Include="Marten" Version="[$(DataStudioMartenVersion), 10.0.0)" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
       Core assembly: it lives in this pack, which the SDK resolves only for a project whose
@@ -191,7 +193,8 @@
     DataStudioConfluentFloor is what DataStudio.Kafka.Core depends on: 2.14.0, the version WolverineFx.Kafka 6.61 pins, so a
     Wolverine host is never raised (AGENTS.md, Package budget changes, 2026-11-09). DataStudioConfluentLatest is the newest
     release the suites are also run at. DataStudioConfluentVersion is what is restored; empty means the floor. Only the
-    Kafka projects reference Confluent.Kafka, so the property may be passed to the whole solution.
+    Kafka projects reference Confluent.Kafka, so the property may be passed to the whole solution. The row is a range that excludes
+    Confluent.Kafka 3 and later: 4.x is another client under the same package id (Package budget changes, 2026-11-28).
   -->
   <PropertyGroup Label="Kafka Confluent.Kafka version">
     <DataStudioConfluentFloor>2.14.0</DataStudioConfluentFloor>
@@ -200,18 +203,19 @@
   </PropertyGroup>
 
   <ItemGroup Label="Kafka engine (src/DataStudio.Kafka.Core)">
-    <PackageVersion Include="Confluent.Kafka" Version="$(DataStudioConfluentVersion)" />
+    <PackageVersion Include="Confluent.Kafka" Version="[$(DataStudioConfluentVersion), 3.0.0)" />
   </ItemGroup>
 
   <!--
     Wolverine's Kafka transport (the Kafka module M4, WOLV; AGENTS.md D43; Package budget changes, 2026-11-1x entry "WolverineFx.Kafka 6.61.0").
     Referenced by src/DataStudio.Kafka.Wolverine, tests/DataStudio.Kafka.Integration.Tests and samples/DataStudio.Sample.Kafka (tests/DataStudio.Kafka.Wolverine.Tests takes it through its reference to the adapter). 6.61.0
     pins Confluent.Kafka 2.14.0, DataStudio.Kafka.Core's floor, so a Wolverine host is never raised by the Kafka module. It brings JasperFx 2.99.0, above Marten
-    9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. Unconditional: none of the shipped
+    9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. A range that excludes Wolverine 7, whose
+    Kafka configuration is no longer Confluent's (Package budget changes, 2026-11-28). Unconditional: none of the shipped
     studio packages or the Kafka module / DataStudio.Kafka.Core reference it (KafkaWolverineFenceTests).
   -->
   <ItemGroup Label="DataStudio.Kafka.Wolverine (src/DataStudio.Kafka.Wolverine)">
-    <PackageVersion Include="WolverineFx.Kafka" Version="6.61.0" />
+    <PackageVersion Include="WolverineFx.Kafka" Version="[6.61.0, 7.0.0)" />
   </ItemGroup>
 
   <!--

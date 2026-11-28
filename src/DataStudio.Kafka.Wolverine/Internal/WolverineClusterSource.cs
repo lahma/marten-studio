@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 using Confluent.Kafka;
@@ -89,6 +91,9 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
     /// <inheritdoc />
     public string Name => SourceName;
 
+    /// <summary>The transport type whose shape is checked before anything of it is read: Wolverine's, and a stand-in only in a test.</summary>
+    internal Type TransportType { get; init; } = typeof(KafkaTransport);
+
     /// <inheritdoc />
     public KafkaClusterContribution Contribute()
     {
@@ -110,6 +115,18 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
             if (wolverine is null)
             {
                 notes.Add(new KafkaSourceNote("clusters", "Wolverine is not registered in this application", "Wolverine is not registered in this application, so no cluster was listed."));
+                return new KafkaClusterContribution(clusters, notes);
+            }
+
+            // Before any member of a KafkaTransport whose type changed in Wolverine 7 is touched (#103): a Wolverine this build cannot read is one note, never an exception.
+            KafkaSourceNote? refusal = ShapeRefusal(
+                TransportType,
+                KafkaWolverineVersionGuard.ReleaseVersion(KafkaWolverineVersionGuard.InformationalVersion(typeof(WolverineOptions).Assembly)),
+                KafkaWolverineVersionGuard.ReleaseVersion(KafkaWolverineVersionGuard.InformationalVersion(typeof(WolverineClusterSource).Assembly)));
+
+            if (refusal is not null)
+            {
+                notes.Add(refusal);
                 return new KafkaClusterContribution(clusters, notes);
             }
 
@@ -137,6 +154,36 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
     /// <summary>The Settings page's sentence while the tenants are not read yet.</summary>
     internal const string IncompleteNote = "Tenant clusters are listed once the application has started.";
 
+    /// <summary>
+    /// Whether a transport type keeps its Kafka configuration the way this build reads it: the public instance properties <c>ConsumerConfig</c>, <c>ProducerConfig</c> and
+    /// <c>AdminClientConfig</c> exist and are Confluent's types, compared by <see cref="Type" /> and not by name. Wolverine 7 keeps them in its own option types.
+    /// The properties are looked up by name and their types read, never invoked; the names are literals so that <c>ForbiddenWolverineCallsTests</c> can check them.
+    /// </summary>
+    /// <param name="transport">The transport type: <c>typeof(KafkaTransport)</c>, or a test's stand-in for another Wolverine's.</param>
+    internal static bool HasConfluentShape(Type transport)
+    {
+        ArgumentNullException.ThrowIfNull(transport);
+
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
+
+        return transport.GetProperty("ConsumerConfig", flags)?.PropertyType == typeof(ConsumerConfig)
+            && transport.GetProperty("ProducerConfig", flags)?.PropertyType == typeof(ProducerConfig)
+            && transport.GetProperty("AdminClientConfig", flags)?.PropertyType == typeof(AdminClientConfig);
+    }
+
+    /// <summary>The note that says why no cluster is listed from a Wolverine whose Kafka configuration this build cannot read, or <see langword="null" /> when it can.</summary>
+    /// <param name="transport">The transport type to check.</param>
+    /// <param name="wolverineVersion">Wolverine's own version, as the sentence names it.</param>
+    /// <param name="ownVersion">This adapter's version, as the sentence names it.</param>
+    internal static KafkaSourceNote? ShapeRefusal(Type transport, string wolverineVersion, string ownVersion) =>
+        HasConfluentShape(transport)
+            ? null
+            : new KafkaSourceNote(
+                "clusters",
+                "this Wolverine version needs Data Studio 3.0 or later",
+                "Wolverine " + wolverineVersion + " keeps its Kafka configuration in a form Data Studio " + ownVersion + " cannot read, so no cluster was listed: Wolverine 7 and later need Data Studio 3.0 or later.");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void AddTransport(
         List<KafkaContributedCluster> clusters,
         List<KafkaSourceNote> notes,
