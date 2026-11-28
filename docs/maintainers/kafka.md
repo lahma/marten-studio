@@ -724,7 +724,9 @@ started. A tenant is listed only under a parent cluster the same source listed (
 with it), and two named brokers whose names make one slug list only the first, with its tenants. A tenant id that is blank, over 128 characters, holds a
 control character or a `|` (the engine's log-once keys use it as a separator) is not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
 `ForbiddenWolverineCallsTests` fails on any `GetProperty`, `GetField` or other member lookup whose name is not one of the three, and on any
-reflection call that invokes or sets. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
+reflection call that invokes or sets. The one other lookup is the shape check of 2.0.2 (`WolverineClusterSource.HasConfluentShape`): it reads the
+types of `KafkaTransport.ConsumerConfig`, `ProducerConfig` and `AdminClientConfig`, and the test allows those three names there alone and only for
+their type. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
 adapter's; until there is one, the probe is the guarded path.
 
 **What a discovered topic becomes.** `KafkaTopicDescriptor` gains the source's facts beside the host's declaration. The host's descriptor

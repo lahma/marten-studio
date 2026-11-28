@@ -10,7 +10,7 @@
   <!--
     The Marten version, defined once and tested at both ends.
 
-    DataStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
+    DataStudioMartenFloor is the version the shipped package depends on (`Marten [floor, 10.0.0)` in its
     nuspec) and the one every build, test and pack uses unless told otherwise. Since 2026-11-03 the
     floors follow the latest releases (the user's policy of 2026-11-02: consumers keep up). 9.57.0
     fixes #5797, where compacting a stream that folds to null replaced its whole history with an

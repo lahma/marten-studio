@@ -10,7 +10,7 @@ namespace DataStudio.Marten.Internal;
 /// <remarks>
 /// <para>
 /// <b>Why.</b> Data Studio 2 is built against Marten 9 and its package accepts no Marten from 10.0.0 on (the nuspec says so,
-/// <c>Directory.Packages.props</c>), but a host can silence NU1608 or take a newer Marten through its own reference, and the studio would
+/// <c>Directory.Packages.props</c>), but NU1608 is only a warning and a host can take a newer Marten through its own reference, and the studio would
 /// then start and fail at an arbitrary call with a <see cref="MissingMethodException" />. One build of the Marten module cannot serve both
 /// majors: Data Studio 3.0 is the line for Marten 10.
 /// </para>

@@ -120,7 +120,7 @@
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioMartenVersion)' != '$(DataStudioMartenFloor)'"
-           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten &gt;= $(DataStudioMartenVersion) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
+           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten [$(DataStudioMartenVersion), 10.0.0) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
     <Error Condition="'$(_MartenAssetsFileExists)' != 'true'"
            Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
     <Error Condition="'$(_MartenAssetsFileExists)' == 'true' and '$(_MartenAssetsAtFloor)' != 'true'"

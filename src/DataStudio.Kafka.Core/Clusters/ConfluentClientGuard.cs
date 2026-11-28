@@ -8,8 +8,8 @@ namespace DataStudio.Kafka.Core.Clusters;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why.</b> The engine reads Kafka with Confluent.Kafka 2 and its package accepts no version from 3.0.0 on (the nuspec says so), but a host can silence
-/// NU1608 or take a newer one through its own reference. Confluent.Kafka 4 is a different client under the same package id (a Rust core and a
+/// <b>Why.</b> The engine reads Kafka with Confluent.Kafka 2 and its package accepts no version from 3.0.0 on (the nuspec says so), but NU1608 is
+/// only a warning and a host can take a newer one through its own reference. Confluent.Kafka 4 is a different client under the same package id (a Rust core and a
 /// Java-style API), so the engine would start and fail at an arbitrary call with a <see cref="MissingMethodException" />.
 /// </para>
 /// <para>
