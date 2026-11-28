@@ -203,8 +203,9 @@ starts. Heavy runs follow the quiet-window handshake.
       `DataSourceEndpoints.Of` and `DaemonTimeoutsCheck.SleepsInsteadOfKeepalive`; the Marten module reaches it through
       `InternalsVisibleTo`. On Npgsql 11 the keyword cannot be in a connection string, so the answer is `false`. Add a
       test on each path (task `43bf`).
-- [ ] Move `DataStudioNpgsqlLatest` to 11.0.0 and run the latest-Npgsql pass (`--npgsql-version latest`), fixing or
-      recording every difference. Add a budget entry.
+- [x] Move `DataStudioNpgsqlLatest` to 11.0.0 and run the latest-Npgsql pass (`--npgsql-version latest`), fixing or
+      recording every difference. Add a budget entry. The pass also takes `Microsoft.Extensions.*` at 11.0.0
+      (`DataStudioExtensionsVersion`), which Npgsql 11 asks for; Pack stays at 10.0.0.
 - [x] Make the next majors fail with a sentence, not at a random call (decision 1):
   - `AddMarten()` refuses Marten 10 or later and names Data Studio 3, as `PostgresVersionGuard` does.
   - The Wolverine source's note says "Wolverine 7 needs Data Studio 3". It checks the shape of `KafkaTransport`'s three
