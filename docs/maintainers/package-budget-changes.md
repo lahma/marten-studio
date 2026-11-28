@@ -784,7 +784,11 @@ What it showed, 2026-11-28:
   build at 11.0.0 failed with CS1061, and a host that took Npgsql 11 got `MissingMethodException` on the first health sweep. Both
   now read the keyword through one engine helper, `NpgsqlMultiplexing.Multiplexes` (`TryGetValue("Multiplexing", ...)`, the same code
   at Npgsql 9.0.4 and 11.0.0). `NpgsqlRemovedMemberTests` fails on any compiled reference, in the engine, the Postgres module or the Marten
-  module, to a member 11 removed. The tests that set the keyword skip where Npgsql does not know it ("Npgsql 11 removed Multiplexing"), each
+  module, to the four `NpgsqlConnectionStringBuilder` accessors Npgsql 11 removed (`Multiplexing` and `WriteCoalescingBufferThresholdBytes`,
+  get and set); it does not look for the other binary breaks between 9.0.4 and 11.0.0 (the types `NpgsqlLargeObjectManager` and
+  `NpgsqlLargeObjectStream`; `NpgsqlConnection.BeginTextExport`, `BeginTextExportAsync`, `BeginTextImport` and `BeginTextImportAsync`, and
+  `NpgsqlDataReader.GetColumnSchemaAsync`, whose return types changed), because a metadata scan of the three shipped assemblies finds no
+  reference to any of them. The tests that set the keyword skip where Npgsql does not know it ("Npgsql 11 removed Multiplexing"), each
   with a twin that runs everywhere; the keyword catalog (`ConnectionHints`, `NpgsqlSettingsCatalog`) already read it by name.
 - **`Microsoft.Extensions.*` at 10.0.0 sit below what Npgsql 11.0.0 asks for.** Its net10.0 asset depends on
   `Microsoft.Extensions.DependencyInjection.Abstractions` and `Logging.Abstractions` 11.0.0. Restoring `data-studio-postgres.slnf` with
@@ -796,10 +800,12 @@ What it showed, 2026-11-28:
 - **Npgsql 11 names a pool after its `Application Name`.** `NpgsqlDataSource.Name` is `name ?? settings.ApplicationName ?? connection string
   without the password` at v11.0.0 (v10.0.3: `name ?? connection string without the password`), and the meter reports the pool under it.
   A pool of a data source the host built with an `Application Name` is then a *named* pool: not a connection string, so the sibling
-  count (C16 to C18, S05, S11 to S13, the Connection page) can identify it only when the studio holds the data source
+  count, which only C18 judges (the Connection page shows C18's result), can identify it only when the studio holds the data source
   (`NamedPoolIdentities`: the data source the sweep is about, then the source provider's), and otherwise says it did not judge it
   ("Not judged for N named pool(s)"), never a wrong count. That is the safe answer and it is unchanged code, but it is wider on
-  Npgsql 11, where most hosts set an application name. Recorded here; not changed in 2.0.2. The pass shows it in three live tests,
+  Npgsql 11, where most hosts set an application name. C01 and the Sessions page's pool summary match their pool by the same name and
+  refuse an ambiguous tally, so they too go "not judged" more often on Npgsql 11, whenever two pools share an `Application Name`
+  (a database per tenant under one application name, say). Recorded here; not changed in 2.0.2. The pass shows it in three live tests,
   adjusted and not deleted: `ConnectionObservedLiveTests` builds its second pool without an `Application Name` on Npgsql 11, and the
   two C18 tests in `ConnectionChecksLiveTests` skip there ("Npgsql 11 names a pool after its Application Name"), because every pool of the
   suite's process is named and C18 then rightly judges none of them. `NpgsqlSettingsCatalogTests` now expects `Multiplexing` and

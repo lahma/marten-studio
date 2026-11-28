@@ -31,7 +31,7 @@ dotnet test tests\DataStudio.Postgres.Tests                     # the Postgres m
 dotnet test tests\DataStudio.Postgres.Integration.Tests         # its live suite - needs Docker
 dotnet test tests\DataStudio.Kafka.Tests                        # the Kafka module's fast suite: a Kafka-only host
 .\build.ps1 Test --npgsql-version latest                  # ... and then the Postgres module's projects at the latest-tested Npgsql
-dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3   # that pass alone; never the .slnx
+dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=11.0.0 -p:DataStudioExtensionsVersion=11.0.0   # that pass alone (Npgsql 11 needs the extensions property too); never the .slnx
 ```
 
 **The suites run at two Marten versions** (both 9.57.0 until the next latest-tested bump): the floor (`build.yml`) and

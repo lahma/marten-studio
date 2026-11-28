@@ -75,6 +75,9 @@ partial class Build
     /// <summary><c>DataStudioNpgsqlLatest</c> from <c>Directory.Packages.props</c>.</summary>
     string NpgsqlLatest { get; set; }
 
+    /// <summary><c>DataStudioExtensionsFloor</c> from <c>Directory.Packages.props</c>: the Microsoft.Extensions.* every run but the second pass restores, and the only one Pack packs at.</summary>
+    string ExtensionsFloor { get; set; }
+
     /// <summary><c>DataStudioExtensionsLatest</c> from <c>Directory.Packages.props</c>: the Microsoft.Extensions.* the second pass restores.</summary>
     string ExtensionsLatest { get; set; }
 
@@ -91,6 +94,7 @@ partial class Build
 
         NpgsqlFloor = ReadPackagesProperty(props, "DataStudioNpgsqlFloor");
         NpgsqlLatest = ReadPackagesProperty(props, "DataStudioNpgsqlLatest");
+        ExtensionsFloor = ReadPackagesProperty(props, "DataStudioExtensionsFloor");
         ExtensionsLatest = ReadPackagesProperty(props, "DataStudioExtensionsLatest");
 
         var requested = NpgsqlVersion?.Trim();

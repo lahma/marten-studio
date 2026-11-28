@@ -142,12 +142,14 @@ host that brings it - is read as one on 9 is. The finding's caveat names the two
 the shapes of Npgsql's own instruments, so a later Npgsql that changes one fails there - and
 `ConnectionPoolLiveTests` that a burst of commands through a watched pool delivers nothing to the listener.
 `NpgsqlPoolInstrumentsTests` and `NpgsqlPoolLiveTests` in `DataStudio.Postgres.Tests` do the same for both sets of names,
-and read a real pool - C01's report and the Sessions panel - at the Npgsql floor and at the latest-tested Npgsql 10.
+and read a real pool - C01's report and the Sessions panel - at the Npgsql floor and at the latest-tested Npgsql 11.
 
 The pool is matched to the database by its pool name tag, which is the data source's connection string unless the
 host named the data source (`NpgsqlDataSourceBuilder.Name`), and then its name - the one the studio reads through, so
 Sessions' pool panel, the Connection page's pool line and this check find a named data source's pool too; a pool neither
-finds is not guessed at, and the check says so. Two pools built from one connection string - the host's own `AddNpgsqlDataSource(cs)`
+finds is not guessed at, and the check says so. **On Npgsql 11** a pool is also named after its data source's
+`Application Name` when it has one and the host set no `Name`, so the tag is no connection string for most hosts: a pool of a data
+source the studio does not hold, with an application name, is "not judged", and so is a pool whose name several pools share. Two pools built from one connection string - the host's own `AddNpgsqlDataSource(cs)`
 beside Marten's, or `new NpgsqlConnection(cs)` with Marten's connection string, which Npgsql pools on its own -
 report under the same name: the observer counts the pools behind each
 name, and when they report different numbers the check says it cannot tell which is Marten's and judges nothing
@@ -733,7 +735,7 @@ port, database and login: each may open up to its own `Maximum Pool Size`, so to
 saturation and C03's headroom - one pool at a time - do not add up.
 
 It is counted from the pool names Npgsql reports to its meter (`pool.name`, the data source's connection string unless the data
-source was given a `Name`). Each name is parsed in memory and compared, and **only counts are kept**: the finding shows how many
+source was given a `Name`; on Npgsql 11, unless it has an `Application Name`, which is then the pool's name). Each name is parsed in memory and compared, and **only counts are kept**: the finding shows how many
 pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool per tenant
 database, or per login, is a different database or login and is not counted.
 
@@ -748,7 +750,9 @@ the ceiling of every pooling data source, so a pool lacks one only when its usag
 pass, or when the loaded Npgsql does not publish it.
 
 **Named data sources.** A data source built with `NpgsqlDataSourceBuilder.Name` reports that name to Npgsql's meter instead of
-its connection string, so the name alone says nothing about the database. (`AddNpgsqlDataSource` and Aspire's Npgsql integration
+its connection string, so the name alone says nothing about the database. **Npgsql 11 does the same with the `Application Name`**
+when the host set no `Name`: its pool is reported under the application name, so on Npgsql 11 a pool of a data source with an
+application name is a named pool whether or not the host ever called `Name`. (`AddNpgsqlDataSource` and Aspire's Npgsql integration
 set no name of their own; a host sets one directly or in the builder callback they take.) The studio identifies such a pool through
 the data sources it already resolves - it adds no scan of your container:
 

@@ -131,6 +131,7 @@ partial class Build
                     // anything else either.
                     .SetProperty(MartenVersionProperty, MartenFloor)
                     .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
+                    .SetProperty(ExtensionsVersionProperty, ExtensionsFloor)
                     .SetProperty(ConfluentVersionProperty, ConfluentFloor));
             }
 
@@ -400,7 +401,11 @@ partial class Build
             $"{package.Name} must depend on no database module, no Npgsql and no part of the Marten family, and its nuspec names [{string.Join(", ", forbidden)}]");
     }
 
-    /// <summary>A package's version from its <c>PackageVersion</c> row in <c>Directory.Packages.props</c>.</summary>
+    /// <summary>
+    /// A package's version from its <c>PackageVersion</c> row in <c>Directory.Packages.props</c>. The Microsoft.Extensions.* rows
+    /// say <c>$(DataStudioExtensionsVersion)</c>, which this reads as text and never evaluates: Pack packs at
+    /// <see cref="ExtensionsFloor" />, so that is what the row means here (the same way the Npgsql expectation is <see cref="NpgsqlFloor" />).
+    /// </summary>
     string CentralPackageVersion(string id)
     {
         var rows = XDocument.Load(PackagesPropsFile).Descendants()
@@ -410,7 +415,7 @@ partial class Build
 
         Assert.True(rows.Count == 1, $"Directory.Packages.props must have exactly one PackageVersion row for {id}; found {rows.Count}");
 
-        return rows[0];
+        return rows[0] == "$(" + ExtensionsVersionProperty + ")" ? ExtensionsFloor : rows[0];
     }
 
     /// <summary>

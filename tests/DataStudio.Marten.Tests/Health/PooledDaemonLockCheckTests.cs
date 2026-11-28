@@ -256,7 +256,9 @@ public class PooledDaemonLockCheckTests
 
         HealthCheckResult result = (await harness.SweepAsync()).Results.Single();
 
-        result.Problem?.Reason.Should().NotContain("Multiplexing=true");
+        result.Outcome.Should().Be(HealthCheckOutcome.Failed, "without the keyword the check does try the server, and the connection string is refused");
+        result.Problem.Should().NotBeNull();
+        result.Problem!.Reason.Should().NotContain("Multiplexing=true");
     }
 
     [Fact]

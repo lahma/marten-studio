@@ -67,11 +67,6 @@ public class ConnectionChecksLiveTests(PostgresVersionMatrix matrix)
     [HealthQuiet("C17")]
     public async Task C17_fires_for_a_data_source_with_pooling_off_and_session_churn_and_is_quiet_with_a_pool()
     {
-        // Npgsql 11 reports a pool under its Application Name when it has one (NpgsqlDataSource.Name), which is no connection string, and
-        // every host of this suite has one: the process's pools are then "named" pools the studio can only identify if it holds the data
-        // source, so C18 says it did not judge them (2026-11-28 entry of the package budget changes). Recorded, not fixed here.
-        Assert.SkipWhen(NpgsqlSettingsReader.LoadedMajor >= 11, "Npgsql 11 names a pool after its Application Name, which C18 cannot identify for a data source the studio does not hold");
-
         MatrixServer server = await matrix.IsolatedServerAsync(17, "np2-pools");
         server.SkipIfUnavailable();
 
