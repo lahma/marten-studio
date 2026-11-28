@@ -665,8 +665,10 @@ group never joined), and `Redaction/MaskTextTests`.
 **D43 — DataStudio.Kafka.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
 the cluster registry is first built, through DataStudio.Kafka.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
 version guard). It starts, connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
-clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
-never replaces a host's descriptor, and discovery adds no redaction.
+clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. Before it reads a
+transport, the adapter checks, by reflection and without invoking anything, that `KafkaTransport.ConsumerConfig`, `ProducerConfig` and
+`AdminClientConfig` have Confluent's types; Wolverine 7's do not, and then it lists no cluster and leaves one note that names the release that
+reads Wolverine 7 (#103). A discovered topic never replaces a host's descriptor, and discovery adds no redaction.
 
 **Three declarations (#71 to #73), none of them a guess.** *CloudEvents:* `KafkaWolverineOptions.CloudEventsSerializer<T>()` (and the
 `Type` overload) marks every endpoint whose `DefaultSerializer` is `CloudEventsMapper` or assignable to a declared type as a CloudEvents topic;
