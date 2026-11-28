@@ -14,6 +14,9 @@ line for Marten 10 and Wolverine 7. No public type or member moves; the seven pa
   needs Data Studio 3.0 or later, instead of logging a `MissingMethodException`.
 - The packages name the next major as an upper bound: `Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)` and
   `WolverineFx.Kafka [6.61.0, 7.0.0)`, so a restore beside a newer major warns (NU1608).
+- Npgsql 11 names a pool after its data source's `Application Name` when it has one. The connection checks then judge the
+  sibling pools (C18) only of data sources the studio holds, and say how many they did not judge; C01 and the Sessions page's
+  pool summary are unavailable more often, when pools share an application name. No count is wrong, but fewer are given.
 - For maintainers: the Postgres module is also tested at Npgsql 11.0.0, the latest tested; its floor stays 9.0.4.
 
 # 2.0.1

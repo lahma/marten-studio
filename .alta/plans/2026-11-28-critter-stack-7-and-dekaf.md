@@ -199,16 +199,16 @@ starts. Heavy runs follow the quiet-window handshake.
 
 ### Step 1: 2.0.2 on main
 
-- [ ] Read `Multiplexing` through the connection string's keywords, never the property, in one engine helper used by
+- [x] Read `Multiplexing` through the connection string's keywords, never the property, in one engine helper used by
       `DataSourceEndpoints.Of` and `DaemonTimeoutsCheck.SleepsInsteadOfKeepalive`; the Marten module reaches it through
       `InternalsVisibleTo`. On Npgsql 11 the keyword cannot be in a connection string, so the answer is `false`. Add a
       test on each path (task `43bf`).
 - [ ] Move `DataStudioNpgsqlLatest` to 11.0.0 and run the latest-Npgsql pass (`--npgsql-version latest`), fixing or
       recording every difference. Add a budget entry.
-- [ ] Make the next majors fail with a sentence, not at a random call (decision 1):
+- [x] Make the next majors fail with a sentence, not at a random call (decision 1):
   - `AddMarten()` refuses Marten 10 or later and names Data Studio 3, as `PostgresVersionGuard` does.
-  - The Wolverine source's note says "Wolverine 7 needs Data Studio 3", reading the transport assembly's version before
-    any member.
+  - The Wolverine source's note says "Wolverine 7 needs Data Studio 3". It checks the shape of `KafkaTransport`'s three
+    configuration properties before any member is read, not a version: `Wolverine.Kafka.dll` is 0.0.0.0 in every release.
   - `AddKafka()` refuses Confluent.Kafka 3 or later, which includes the Rust-based 4.x.
 - [ ] CHANGELOG 2.0.2 and the tag (patch releases are within the release authority).
 - [ ] If decision 2 keeps a 2.x line: cut `release/2.x` at `v2.0.2`, and add it to `OnPushBranches` and
@@ -229,6 +229,11 @@ The Marten module:
       that read the daemon.
 - [ ] The Marten module's suites run on Npgsql 11. The Postgres module keeps its 9.0.4 floor and is tested at 9.0.4 and
       11.0.0 (`NpgsqlVersionTests`).
+- [ ] C18 on Npgsql 11 (REVIEW-202-A, F1), where a pool is named after its data source's `Application Name`: the
+      reason list and caveat of `SiblingPoolsCheck` and C01's unavailable text name the application name as a cause; when
+      the sweep's own name has several reporters, the note says its pool shares that name with other pools of the process
+      instead of "no pool it can identify connects"; the two C18 live tests run at 11 again (a sibling without an
+      application name). The engine's words baseline moves.
 
 Kafka:
 
