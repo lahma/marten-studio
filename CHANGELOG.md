@@ -1,3 +1,24 @@
+# 2.0.2
+
+2.0.2 makes Data Studio run beside Npgsql 11, and says plainly that Marten 10, Wolverine 7 and Confluent.Kafka 4 are for a later
+line (#103): one build of the Marten module or of the Wolverine adapter cannot run on both majors, and Data Studio 3.0 is the
+line for Marten 10 and Wolverine 7. No public type or member moves; the seven packages are at 2.0.2.
+
+- On Npgsql 11, the health sweep and the Postgres module's server page no longer throw `MissingMethodException`. Npgsql 11.0.0
+  removed `NpgsqlConnectionStringBuilder.Multiplexing`, which 2.0.1 read; the studio now reads the connection string's
+  `Multiplexing` keyword, the same way on Npgsql 9, 10 and 11.
+- `AddMarten()` and `AddMartenDiagnostics()` refuse Marten 10 and later, and `AddKafka()` refuses Confluent.Kafka 3 and later,
+  with a sentence at startup, instead of failing later at an arbitrary call with a `MissingMethodException`. Confluent.Kafka 4
+  is another client under the same package id.
+- Beside Wolverine 7, `UseWolverineKafka()` lists no Wolverine cluster and says on the Kafka module's Settings page that Wolverine 7
+  needs Data Studio 3.0 or later, instead of logging a `MissingMethodException`.
+- The packages name the next major as an upper bound: `Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)` and
+  `WolverineFx.Kafka [6.61.0, 7.0.0)`, so a restore beside a newer major warns (NU1608).
+- Npgsql 11 names a pool after its data source's `Application Name` when it has one. The connection checks then judge the
+  sibling pools (C18) only of data sources the studio holds, and say how many they did not judge; C01 and the Sessions page's
+  pool summary are unavailable more often, when pools share an application name. No count is wrong, but fewer are given.
+- For maintainers: the Postgres module is also tested at Npgsql 11.0.0, the latest tested; its floor stays 9.0.4.
+
 # 2.0.1
 
 2.0.1 follows up the broker-restart fix of 2.0.0 (#97) in the Kafka engine, fixes an endpoint that a Development host with a

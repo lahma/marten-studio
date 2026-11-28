@@ -60,6 +60,9 @@ public static class KafkaDataStudioBuilderExtensions
         DataStudioBuilder builder,
         Action<KafkaOptions>? configure)
     {
+        // The engine's client first: this build reads Kafka with Confluent.Kafka 2, and says so here rather than at an arbitrary call later (#103).
+        ConfluentClientGuard.Ensure();
+
         IServiceCollection services = builder.Services;
 
         // The module itself: TryAddEnumerable deduplicates by implementation type, so a second call adds it once.

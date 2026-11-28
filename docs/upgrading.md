@@ -1,3 +1,13 @@
+# Upgrading to 2.0.2
+
+## 2.0.1 → 2.0.2: Marten 10, Wolverine 7 and Confluent.Kafka 4 are refused, with a sentence
+
+Data Studio 2 is built for Marten 9, Wolverine 6 and Confluent.Kafka 2, and 2.0.2 says so instead of failing later at an arbitrary call.
+The packages now depend on `Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)` and `WolverineFx.Kafka [6.61.0, 7.0.0)`, so a restore
+beside a newer major warns (NU1608). At startup, `AddMarten()` and `AddMartenDiagnostics()` refuse Marten 10 or later and `AddKafka()` refuses
+Confluent.Kafka 3 or later, each with a sentence; beside Wolverine 7 the Kafka module lists no Wolverine cluster and says why on its Settings
+page. Data Studio 3.0 is the line for Marten 10 and Wolverine 7: stay on 2.0.x until you move to them. Npgsql 11 works with 2.0.2.
+
 # Upgrading to 2.0
 
 ## 1.x → 2.0: one product, Data Studio

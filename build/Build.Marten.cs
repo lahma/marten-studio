@@ -31,7 +31,7 @@ using Serilog;
 /// <c>Pack</c> refuses any version but the floor (<see cref="AssertPackingAtTheMartenFloor"/>), and
 /// <c>src/DataStudio.Marten/DataStudio.Marten.csproj</c> refuses the same thing for a bare <c>dotnet pack</c> -
 /// checking what <c>project.assets.json</c> resolved as well as the property, because that file is where
-/// NuGet takes the range from: the nuspec says <c>Marten &gt;= {the version it was restored at}</c>, so a
+/// NuGet takes the range from: the nuspec says <c>Marten [{the version it was restored at}, 10.0.0)</c>, so a
 /// package packed on the latest leg would raise every host's floor without anybody having decided to.
 /// </para>
 /// </remarks>
@@ -102,7 +102,7 @@ partial class Build
         Assert.True(ResolvedMartenVersion == MartenFloor,
             $"Refusing to pack against Marten {ResolvedMartenVersion}: the Marten module is packed only at the Marten " +
             $"floor ({MartenFloor}, DataStudioMartenFloor in Directory.Packages.props). The nuspec would say " +
-            $"'Marten >= {ResolvedMartenVersion}' and raise every host's floor. Run Pack without --marten-version " +
+            $"'Marten [{ResolvedMartenVersion}, 10.0.0)' and raise every host's floor. Run Pack without --marten-version " +
             "(and without MARTEN_VERSION in the environment), or raise the floor deliberately and record why in " +
             "docs/maintainers/package-budget-changes.md.");
     }

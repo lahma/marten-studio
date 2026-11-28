@@ -310,7 +310,9 @@ public sealed class NamedPoolSiblingsTests
     public async Task Nothing_is_asked_of_the_studios_sources_when_every_pool_name_is_a_connection_string()
     {
         await using NpgsqlDataSource unnamed = Source(null, Own);
-        await using NpgsqlDataSource sibling = Source(null, Own + ";Application Name=sibling");
+        // Not an Application Name: Npgsql 11 reports an unnamed data source's pool under its application name when it has one, which
+        // is not a connection string - the case this test is not about.
+        await using NpgsqlDataSource sibling = Source(null, Own + ";Command Timeout=7");
         CountingProvider provider = new();
 
         Read read = await ReadAsync(unnamed, [PoolOf(unnamed), PoolOf(sibling)], services: s => s.AddScoped<IStudioSourceProvider>(_ => provider));

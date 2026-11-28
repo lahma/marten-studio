@@ -81,6 +81,9 @@ public static class MartenDataStudioBuilderExtensions
         // PostgresVersionGuardTests scans this method's IL to keep it that way.
         PostgresVersionGuard.Ensure();
 
+        // And Marten itself: this build supports Marten 9 only (#103), and says so here rather than at an arbitrary call later.
+        MartenVersionGuard.Ensure();
+
         AddMartenServices(builder, configure);
 
         return builder;

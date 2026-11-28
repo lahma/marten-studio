@@ -90,14 +90,14 @@
 
   <!--
     The package is packed at the Marten floor and nowhere else. A nupkg packed against 9.54.1 would
-    say `Marten >= 9.54.1` and silently raise the floor of every host that takes it; the floor is a
+    say `Marten [9.54.1, 10.0.0)` and silently raise the floor of every host that takes it; the floor is a
     decision recorded in AGENTS.md, not a side effect of which leg of CI ran Pack. The build's Pack
     target refuses first and says why; this is the same refusal for a bare `dotnet pack`.
 
     Two checks, because the property is not what NuGet packs from. Pack writes the dependency range
     from project.assets.json - whatever the last restore wrote - so `dotnet test ...
     -p:DataStudioMartenVersion=9.54.1` followed by `dotnet pack` with no-restore or no-build would
-    pass a property-only check at the floor and still write `Marten >= 9.54.1`. So the guard also
+    pass a property-only check at the floor and still write `Marten [9.54.1, 10.0.0)`. So the guard also
     reads $(ProjectAssetsFile) and requires the library key "Marten/<floor>" in it, quotes included,
     so that a package whose name merely ends in Marten cannot satisfy it; a graph holds one version of
     a package, so the key's presence is the resolved version. The quotes are spelled \x22 in the
@@ -120,7 +120,7 @@
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioMartenVersion)' != '$(DataStudioMartenFloor)'"
-           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten &gt;= $(DataStudioMartenVersion) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
+           Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(DataStudioMartenVersion). A package packed here would depend on Marten [$(DataStudioMartenVersion), 10.0.0) and raise every host's floor. Pack without DataStudioMartenVersion, or raise DataStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
     <Error Condition="'$(_MartenAssetsFileExists)' != 'true'"
            Text="DataStudio.Marten is packed only at the Marten floor ($(DataStudioMartenFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
     <Error Condition="'$(_MartenAssetsFileExists)' == 'true' and '$(_MartenAssetsAtFloor)' != 'true'"

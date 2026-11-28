@@ -20,7 +20,7 @@ dotnet add package DataStudio.Postgres
 
 The package references `DataStudio` (the shell: the mount, the layout, the front page, Activity and the static assets) and
 `DataStudio.Postgres.Diagnostics` (the diagnostics engine, which brings `Npgsql`, floor 9.0.4 and tested at 9.0.4 and
-10.0.3, and the `Microsoft.Extensions.*` abstractions, and which you can take alone when you have no UI to mount:
+11.0.0, and the `Microsoft.Extensions.*` abstractions, and which you can take alone when you have no UI to mount:
 [diagnostics.md](diagnostics.md#without-the-ui)), each at exactly its own version. The shell brings
 `Microsoft.AspNetCore.App.Internal.Assets` (floor 10.0.12, which puts `_framework/blazor.web.js` in your application's own
 static web assets); everything else comes from the shared framework, and no Marten, JasperFx or Weasel package is
@@ -368,8 +368,8 @@ visitor could shape reaches a log line escaped and bounded.
 ## Npgsql
 
 The package depends on Npgsql 9.0.4 or later: 9.0.4 is the Npgsql Marten 9.57.0 itself uses, so a host that runs both
-modules never has two. A host on Npgsql 8 moves to 9.0.4 or later. It is tested at 9.0.4 and at 10.0.3, whose renamed pool
-instruments (`db.client.connection.count` and `.max`) it reads as well as 9's (`db.client.connections.*`).
+modules never has two. A host on Npgsql 8 moves to 9.0.4 or later. It is tested at 9.0.4 and at 11.0.0, and it reads the pool
+instruments Npgsql 10 renamed (`db.client.connection.count` and `.max`) as well as 9's (`db.client.connections.*`).
 
 ## Limits
 

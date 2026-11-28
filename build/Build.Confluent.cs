@@ -87,14 +87,14 @@ partial class Build
 
     /// <summary>
     /// The Kafka module is packed at the Confluent.Kafka floor or not at all: a nuspec written at a newer version would say
-    /// <c>Confluent.Kafka &gt;= {that version}</c> and raise every host's Confluent.Kafka.
+    /// <c>Confluent.Kafka [{that version}, 3.0.0)</c> and raise every host's Confluent.Kafka.
     /// </summary>
     void AssertPackingAtTheConfluentFloor()
     {
         Assert.True(ResolvedConfluentVersion == ConfluentFloor,
             $"Refusing to pack with --confluent-version {ResolvedConfluentVersion}: the Kafka module is packed only at the " +
             $"Confluent.Kafka floor ({ConfluentFloor}, DataStudioConfluentFloor in Directory.Packages.props). The nuspec " +
-            $"would say 'Confluent.Kafka >= {ResolvedConfluentVersion}' and raise every host's Confluent.Kafka (a " +
+            $"would say 'Confluent.Kafka [{ResolvedConfluentVersion}, 3.0.0)' and raise every host's Confluent.Kafka (a " +
             "Wolverine host pins the floor). Run Pack without --confluent-version (and without CONFLUENT_VERSION in " +
             "the environment), or raise the floor deliberately and record why in " +
             "docs/maintainers/package-budget-changes.md.");

@@ -31,7 +31,7 @@
        builds with, and so the tag its health docs links point at - and VersionFallbackTests holds it to CHANGELOG.md's top
        version. -->
   <PropertyGroup>
-    <VersionPrefix>2.0.1</VersionPrefix>
+    <VersionPrefix>2.0.2</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -50,7 +50,7 @@
     <PackageReleaseNotes>What changed in each release: https://github.com/lahma/marten-studio/blob/main/CHANGELOG.md</PackageReleaseNotes>
     <!-- Package validation compares each shipped package with the last release on nuget.org (EnablePackageValidation is on in each shipped
          project). The pull request that lands a release's CHANGELOG section moves it to the release before that one. -->
-    <PackageValidationBaselineVersion>2.0.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>2.0.1</PackageValidationBaselineVersion>
   </PropertyGroup>
 
 </Project>

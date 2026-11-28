@@ -665,8 +665,10 @@ group never joined), and `Redaction/MaskTextTests`.
 **D43 — DataStudio.Kafka.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
 the cluster registry is first built, through DataStudio.Kafka.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
 version guard). It starts, connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
-clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
-never replaces a host's descriptor, and discovery adds no redaction.
+clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. Before it reads a
+transport, the adapter checks, by reflection and without invoking anything, that `KafkaTransport.ConsumerConfig`, `ProducerConfig` and
+`AdminClientConfig` have Confluent's types; Wolverine 7's do not, and then it lists no cluster and leaves one note that names the release that
+reads Wolverine 7 (#103). A discovered topic never replaces a host's descriptor, and discovery adds no redaction.
 
 **Three declarations (#71 to #73), none of them a guess.** *CloudEvents:* `KafkaWolverineOptions.CloudEventsSerializer<T>()` (and the
 `Type` overload) marks every endpoint whose `DefaultSerializer` is `CloudEventsMapper` or assignable to a declared type as a CloudEvents topic;
@@ -722,7 +724,9 @@ started. A tenant is listed only under a parent cluster the same source listed (
 with it), and two named brokers whose names make one slug list only the first, with its tenants. A tenant id that is blank, over 128 characters, holds a
 control character or a `|` (the engine's log-once keys use it as a separator) is not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
 `ForbiddenWolverineCallsTests` fails on any `GetProperty`, `GetField` or other member lookup whose name is not one of the three, and on any
-reflection call that invokes or sets. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
+reflection call that invokes or sets. The one other lookup is the shape check of 2.0.2 (`WolverineClusterSource.HasConfluentShape`): it reads the
+types of `KafkaTransport.ConsumerConfig`, `ProducerConfig` and `AdminClientConfig`, and the test allows those three names there alone and only for
+their type. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
 adapter's; until there is one, the probe is the guarded path.
 
 **What a discovered topic becomes.** `KafkaTopicDescriptor` gains the source's facts beside the host's declaration. The host's descriptor

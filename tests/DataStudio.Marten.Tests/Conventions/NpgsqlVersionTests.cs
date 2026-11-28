@@ -67,6 +67,31 @@ public class NpgsqlVersionTests
     }
 
     [Fact]
+    public void The_five_Microsoft_Extensions_rows_take_their_version_from_the_extensions_property_and_the_floor_is_10_0_0()
+    {
+        string[] ids =
+        [
+            "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "Microsoft.Extensions.Logging.Abstractions",
+            "Microsoft.Extensions.Options",
+            "Microsoft.Extensions.Diagnostics.HealthChecks",
+            "Microsoft.Extensions.Hosting",
+        ];
+
+        foreach (string id in ids)
+        {
+            XElement row = PackagesProps.Value.Descendants()
+                .Where(x => x.Name.LocalName == "PackageVersion" && (string?) x.Attribute("Include") == id)
+                .Should().ContainSingle($"Directory.Packages.props has one row for {id}").Subject;
+
+            ((string?) row.Attribute("Version")).Should().Be("$(DataStudioExtensionsVersion)",
+                $"{id} must follow the property, or the latest-Npgsql pass restores the floor and Npgsql 11's net10.0 asset beats the pin (and Pack, which reads the floor, would not know the row)");
+        }
+
+        SingleProperty("DataStudioExtensionsFloor").Should().Be("10.0.0");
+    }
+
+    [Fact]
     public void The_floor_never_raises_the_Npgsql_a_Marten_host_already_resolves()
     {
         Assert.SkipUnless(File.Exists(MartenAssetsFile), "src/DataStudio.Marten has not been restored, so there is no project.assets.json to read");

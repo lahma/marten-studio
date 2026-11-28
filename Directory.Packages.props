@@ -10,7 +10,7 @@
   <!--
     The Marten version, defined once and tested at both ends.
 
-    DataStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
+    DataStudioMartenFloor is the version the shipped package depends on (`Marten [floor, 10.0.0)` in its
     nuspec) and the one every build, test and pack uses unless told otherwise. Since 2026-11-03 the
     floors follow the latest releases (the user's policy of 2026-11-02: consumers keep up). 9.57.0
     fixes #5797, where compacting a stream that folds to null replaced its whole history with an
@@ -42,13 +42,15 @@
   <ItemGroup Label="Library (src/DataStudio.Marten)">
     <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
          Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
-         package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
-         on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql.
+         package from pinning an ASP.NET Core patch on its host. A range, not an exact pin: a consumer
+         on a newer Marten 9.x must not be forced down, and Marten 10 is excluded because one build of the Marten
+         module cannot run on both majors (Data Studio 3.0 is the line for Marten 10, issue 103; Package budget
+         changes, 2026-11-28). Npgsql arrives transitively via Weasel.Postgresql.
 
          The floor is 9.57.0 (2026-11-03): the newest release, which removes the compaction hazard
          of #5797 instead of guarding it. Older bisections (9.31.0 for the code, 9.39.0 for the
          advisories) are history in AGENTS.md, *Package budget changes*. -->
-    <PackageVersion Include="Marten" Version="$(DataStudioMartenVersion)" />
+    <PackageVersion Include="Marten" Version="[$(DataStudioMartenVersion), 10.0.0)" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
       Core assembly: it lives in this pack, which the SDK resolves only for a project whose
@@ -154,14 +156,33 @@
     that Npgsql through the ProjectReference, with no diagnostic, and the Marten module on Npgsql 10 is not
     a tested combination.
 
+    Since 2026-11-28 the latest tested is 11.0.0, which removed NpgsqlConnectionStringBuilder.Multiplexing (the studio
+    reads the keyword instead: NpgsqlMultiplexing) and whose net10.0 asset asks for 11.0.0 of two packages,
+    Microsoft.Extensions.DependencyInjection.Abstractions and Microsoft.Extensions.Logging.Abstractions; the five
+    Microsoft.Extensions rows below take 11.0.0 in that pass (DataStudioExtensionsVersion).
+
     DataStudioNpgsqlVersion is what those projects restore. Empty means the floor. Pack packs
     The Postgres module at the floor only: the build's Pack target and src/DataStudio.Postgres/DataStudio.Postgres.csproj
     both refuse anything else.
   -->
   <PropertyGroup Label="Postgres module Npgsql version">
     <DataStudioNpgsqlFloor>9.0.4</DataStudioNpgsqlFloor>
-    <DataStudioNpgsqlLatest>10.0.3</DataStudioNpgsqlLatest>
+    <DataStudioNpgsqlLatest>11.0.0</DataStudioNpgsqlLatest>
     <DataStudioNpgsqlVersion Condition="'$(DataStudioNpgsqlVersion)' == ''">$(DataStudioNpgsqlFloor)</DataStudioNpgsqlVersion>
+  </PropertyGroup>
+
+  <!--
+    The version of the Microsoft.Extensions.* rows below. DataStudioExtensionsVersion is what is restored: empty means the
+    floor, 10.0.0, which Pack and every other build use. The latest-Npgsql pass (build/Build.Npgsql.cs) sets it to
+    DataStudioExtensionsLatest whenever it runs an Npgsql other than the floor, because Npgsql 11.0.0's net10.0 asset asks for
+    Logging.Abstractions and DependencyInjection.Abstractions 11.0.0, and a central pin below that either fails restore
+    (NU1109, the worker sample) or silently wins (the engine) - measured 2026-11-28. Only the projects that set
+    DataStudioDiagnosticsPinsExtensions or DataStudioKafkaCorePinsExtensions see the rows, and the pass reaches only the first.
+  -->
+  <PropertyGroup Label="Microsoft.Extensions version">
+    <DataStudioExtensionsFloor>10.0.0</DataStudioExtensionsFloor>
+    <DataStudioExtensionsLatest>11.0.0</DataStudioExtensionsLatest>
+    <DataStudioExtensionsVersion Condition="'$(DataStudioExtensionsVersion)' == ''">$(DataStudioExtensionsFloor)</DataStudioExtensionsVersion>
   </PropertyGroup>
 
   <ItemGroup Label="Postgres-only projects (they set DataStudioPostgresPinsNpgsql)">
@@ -173,7 +194,8 @@
     DataStudioConfluentFloor is what DataStudio.Kafka.Core depends on: 2.14.0, the version WolverineFx.Kafka 6.61 pins, so a
     Wolverine host is never raised (AGENTS.md, Package budget changes, 2026-11-09). DataStudioConfluentLatest is the newest
     release the suites are also run at. DataStudioConfluentVersion is what is restored; empty means the floor. Only the
-    Kafka projects reference Confluent.Kafka, so the property may be passed to the whole solution.
+    Kafka projects reference Confluent.Kafka, so the property may be passed to the whole solution. The row is a range that excludes
+    Confluent.Kafka 3 and later: 4.x is another client under the same package id (Package budget changes, 2026-11-28).
   -->
   <PropertyGroup Label="Kafka Confluent.Kafka version">
     <DataStudioConfluentFloor>2.14.0</DataStudioConfluentFloor>
@@ -182,18 +204,19 @@
   </PropertyGroup>
 
   <ItemGroup Label="Kafka engine (src/DataStudio.Kafka.Core)">
-    <PackageVersion Include="Confluent.Kafka" Version="$(DataStudioConfluentVersion)" />
+    <PackageVersion Include="Confluent.Kafka" Version="[$(DataStudioConfluentVersion), 3.0.0)" />
   </ItemGroup>
 
   <!--
     Wolverine's Kafka transport (the Kafka module M4, WOLV; AGENTS.md D43; Package budget changes, 2026-11-1x entry "WolverineFx.Kafka 6.61.0").
     Referenced by src/DataStudio.Kafka.Wolverine, tests/DataStudio.Kafka.Integration.Tests and samples/DataStudio.Sample.Kafka (tests/DataStudio.Kafka.Wolverine.Tests takes it through its reference to the adapter). 6.61.0
     pins Confluent.Kafka 2.14.0, DataStudio.Kafka.Core's floor, so a Wolverine host is never raised by the Kafka module. It brings JasperFx 2.99.0, above Marten
-    9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. Unconditional: none of the shipped
+    9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. A range that excludes Wolverine 7, whose
+    Kafka configuration is no longer Confluent's (Package budget changes, 2026-11-28). Unconditional: none of the shipped
     studio packages or the Kafka module / DataStudio.Kafka.Core reference it (KafkaWolverineFenceTests).
   -->
   <ItemGroup Label="DataStudio.Kafka.Wolverine (src/DataStudio.Kafka.Wolverine)">
-    <PackageVersion Include="WolverineFx.Kafka" Version="6.61.0" />
+    <PackageVersion Include="WolverineFx.Kafka" Version="[6.61.0, 7.0.0)" />
   </ItemGroup>
 
   <!--
@@ -227,11 +250,11 @@
     6.61's own net10.0 minimum and raises nothing.
   -->
   <ItemGroup Label="DataStudio.Postgres.Diagnostics and DataStudio.Kafka.Core (they set DataStudioDiagnosticsPinsExtensions or DataStudioKafkaCorePinsExtensions)" Condition="'$(DataStudioDiagnosticsPinsExtensions)' == 'true' or '$(DataStudioKafkaCorePinsExtensions)' == 'true'">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(DataStudioExtensionsVersion)" />
   </ItemGroup>
 
 </Project>

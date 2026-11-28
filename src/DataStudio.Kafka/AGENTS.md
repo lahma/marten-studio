@@ -93,7 +93,8 @@ Full text: [kafka.md](../../docs/maintainers/kafka.md#d42).
 (`InternalsVisibleTo`, an exact pin and a version guard), and its tenants once more after the host has started. It starts,
 connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
 clusters (`{cluster}/{tenant}`, `TenantId` on the resource, listed only under their listed cluster) come from a
-reflection probe of three members that fails closed. A discovered topic never replaces a host's descriptor, and
+reflection probe of three members that fails closed; a Wolverine whose transport does not keep Confluent's configuration types (Wolverine 7)
+gets one note and no cluster. A discovered topic never replaces a host's descriptor, and
 discovery adds no redaction. Full text: [kafka.md](../../docs/maintainers/kafka.md#d43).
 
 **D45 — The Kafka module exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs

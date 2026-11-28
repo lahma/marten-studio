@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Reflection.Emit;
 
+using DataStudio.Kafka.Internal;
+
 using Wolverine.Kafka;
 using Wolverine.Kafka.Internals;
 using Wolverine.Runtime;
@@ -64,6 +66,21 @@ public class ForbiddenWolverineCallsTests
 
     private static readonly string[] AllowedReflectedNames = ["Tenants", "TenantId", "Transport"];
 
+    /// <summary>
+    /// The three properties of Wolverine's Kafka transport whose types the shape check reads (Wolverine 7 changed them, #103). They are allowed to be looked up
+    /// by name in exactly one method, <c>WolverineClusterSource.HasConfluentShape</c>, and only as a <c>GetProperty</c> lookup whose <c>PropertyType</c> is read.
+    /// </summary>
+    private static readonly string[] ShapeCheckNames = ["ConsumerConfig", "ProducerConfig", "AdminClientConfig"];
+
+    /// <summary>The only reflective members the shape check may call: a lookup, the type of what it found, and the comparison of two types.</summary>
+    private static readonly HashSet<string> ShapeCheckMembers = new(StringComparer.Ordinal)
+    {
+        "System.Type::GetProperty", "System.Reflection.PropertyInfo::get_PropertyType", "System.Type::GetTypeFromHandle", "System.Type::op_Equality",
+    };
+
+    private static bool IsShapeCheck(MethodBase caller) =>
+        caller.DeclaringType == typeof(WolverineClusterSource) && caller.Name == nameof(WolverineClusterSource.HasConfluentShape);
+
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodes();
 
     [Fact]
@@ -85,27 +102,38 @@ public class ForbiddenWolverineCallsTests
     }
 
     [Fact]
-    public void Reflection_is_used_for_exactly_the_three_members_of_the_tenant_probe()
+    public void Reflection_is_used_for_exactly_the_three_members_of_the_tenant_probe_and_the_shape_checks_one_lookup_of_three_types()
     {
-        List<string> found = [];
-
-        foreach ((MethodBase caller, MemberInfo member, string[] strings) in CallsWithStrings(Adapter.GetTypes()))
-        {
-            if (member.DeclaringType == typeof(Type) && ReflectionLookups.Contains(member.Name))
-            {
-                // The name is the string literal loaded just before the call; a name that is not a literal cannot be checked, so it is an offence too.
-                if (strings.Length == 0 || strings.Any(static x => !AllowedReflectedNames.Contains(x, StringComparer.Ordinal)))
-                {
-                    found.Add($"{Describe(caller)} calls Type.{member.Name} with {string.Join(",", strings)}");
-                }
-            }
-            else if (IsReflectionInvocation(member))
-            {
-                found.Add($"{Describe(caller)} calls {member.DeclaringType?.Name}.{member.Name}");
-            }
-        }
+        List<string> found = [.. ReflectionOffences(Adapter.GetTypes(), IsShapeCheck)];
 
         found.Should().BeEmpty("hard rule 17's reasoning: a forbidden member could be reached by a name the scan above never sees. Found: " + string.Join("; ", found));
+    }
+
+    [Fact]
+    public void The_shape_check_looks_up_exactly_three_properties_by_literal_name_and_only_reads_their_types()
+    {
+        (MethodBase Caller, MemberInfo Member, string[] Strings)[] calls =
+            [.. CallsWithStrings(Adapter.GetTypes()).Where(static x => IsShapeCheck(x.Caller))];
+
+        // Anti-vacuity: the check is found, and it looks the three properties up and reads their types.
+        calls.Where(static x => x.Member.Name == "GetProperty").Select(static x => x.Strings.SingleOrDefault()).Should().Equal(ShapeCheckNames);
+        calls.Should().Contain(static x => x.Member.Name == "get_PropertyType");
+
+        // Nothing else of reflection: no value read, no method, no invocation.
+        List<string> reflective = [.. calls.Select(static x => x.Member).Where(IsReflective).Select(static x => x.DeclaringType!.FullName + "::" + x.Name).Distinct()];
+
+        reflective.Should().BeSubsetOf(ShapeCheckMembers, "the shape check reads the types of three properties and never a value, a method or an invocation");
+    }
+
+    [Fact]
+    public void The_scan_finds_the_shape_names_looked_up_anywhere_else_and_any_other_reflection_in_the_shape_check()
+    {
+        // The three names are allowed only in HasConfluentShape: the same lookup in another method is an offence.
+        ReflectionOffences([typeof(ShapeNamesElsewhere)], IsShapeCheck).Should().ContainSingle().Which.Should().Contain(nameof(ShapeNamesElsewhere));
+
+        // And in the shape check itself, a call of reflection beyond the allowed four is an offence (the fixture stands in for it).
+        ReflectionOffences([typeof(ShapeCheckStandIn)], static caller => caller.DeclaringType == typeof(ShapeCheckStandIn))
+            .Should().ContainSingle().Which.Should().Contain("GetValue");
     }
 
     [Fact]
@@ -151,6 +179,43 @@ public class ForbiddenWolverineCallsTests
 
         found.Should().NotBeEmpty("the fixture reflects on a member the probe does not read");
     }
+
+    /// <summary>
+    /// What the reflection rule refuses in <paramref name="types" />: a lookup by a name that is not the tenant probe's three (or, in the shape check alone, the
+    /// shape's three), a lookup with no literal name, any invocation, and in the shape check any reflective call but the four it is allowed.
+    /// </summary>
+    /// <param name="types">The types to scan.</param>
+    /// <param name="isShapeCheck">Which method is the shape check.</param>
+    private static IEnumerable<string> ReflectionOffences(IEnumerable<Type> types, Func<MethodBase, bool> isShapeCheck)
+    {
+        foreach ((MethodBase caller, MemberInfo member, string[] strings) in CallsWithStrings(types))
+        {
+            bool shape = isShapeCheck(caller);
+
+            if (shape && IsReflective(member) && !ShapeCheckMembers.Contains(member.DeclaringType!.FullName + "::" + member.Name))
+            {
+                yield return $"{Describe(caller)} calls {member.DeclaringType?.Name}.{member.Name}, which the shape check may not";
+            }
+            else if (member.DeclaringType == typeof(Type) && ReflectionLookups.Contains(member.Name))
+            {
+                // The name is the string literal loaded just before the call; a name that is not a literal cannot be checked, so it is an offence too.
+                string[] allowed = shape && member.Name == "GetProperty" ? ShapeCheckNames : AllowedReflectedNames;
+
+                if (strings.Length == 0 || strings.Any(x => !allowed.Contains(x, StringComparer.Ordinal)))
+                {
+                    yield return $"{Describe(caller)} calls Type.{member.Name} with {string.Join(",", strings)}";
+                }
+            }
+            else if (IsReflectionInvocation(member))
+            {
+                yield return $"{Describe(caller)} calls {member.DeclaringType?.Name}.{member.Name}";
+            }
+        }
+    }
+
+    /// <summary>A member of <see cref="Type" /> or of <c>System.Reflection</c>: reflection, whatever it is called.</summary>
+    private static bool IsReflective(MemberInfo member) =>
+        member.DeclaringType is { } owner && (owner == typeof(Type) || owner.Namespace == "System.Reflection");
 
     private static IEnumerable<string> Offenders(IEnumerable<Type> types)
     {
@@ -294,6 +359,19 @@ public class ForbiddenWolverineCallsTests
             .Select(static field => (OpCode) field.GetValue(null)!)
             .GroupBy(static code => code.Value)
             .ToDictionary(static group => group.Key, static group => group.First());
+
+    /// <summary>The shape's three names looked up in a method that is not the shape check.</summary>
+    private static class ShapeNamesElsewhere
+    {
+        public static bool Run(Type transport) => transport.GetProperty("ConsumerConfig", BindingFlags.Public | BindingFlags.Instance) is not null;
+    }
+
+    /// <summary>A shape check that also reads a value, which it may not.</summary>
+    private static class ShapeCheckStandIn
+    {
+        public static object? Run(Type transport, object instance) =>
+            transport.GetProperty("ConsumerConfig", BindingFlags.Public | BindingFlags.Instance)?.GetValue(instance);
+    }
 
     /// <summary>Every kind of call the scan must find, never run.</summary>
     private static class Fixture

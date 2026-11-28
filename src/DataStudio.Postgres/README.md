@@ -31,7 +31,7 @@ One package reference. It brings the shell, [`DataStudio`](https://www.nuget.org
 layout, the front page, Activity and `Microsoft.AspNetCore.App.Internal.Assets` - floor `10.0.12`, three `.js` files and an
 MSBuild target, no runtime assembly), and
 [`DataStudio.Postgres.Diagnostics`](https://www.nuget.org/packages/DataStudio.Postgres.Diagnostics) (the diagnostics engine,
-with `Npgsql` - floor `9.0.4`, tested at 9.0.4 and 10.0.3 - and the `Microsoft.Extensions.*` abstractions), each at exactly
+with `Npgsql` - floor `9.0.4`, tested at 9.0.4 and 11.0.0 - and the `Microsoft.Extensions.*` abstractions), each at exactly
 its own version, and takes everything else from the shared framework. It references no Marten, JasperFx or Weasel
 package. Target framework: `net10.0`. PostgreSQL 15 to 19 are tested, and 14 still works
 ([`docs/postgres-versions.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres-versions.md)).

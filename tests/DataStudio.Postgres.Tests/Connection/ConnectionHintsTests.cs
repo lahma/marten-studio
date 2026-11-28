@@ -336,8 +336,17 @@ public sealed class ConnectionHintsTests
     [Fact]
     public void MUX_is_multiplexing_on()
     {
+        NpgsqlKeywords.SkipUnlessMultiplexingIsKnown();
+
         Hint(Settings("Host=db.example;Multiplexing=true"), ConnectionHintIds.Multiplexing)!.Text.Should().Contain("experimental").And.Contain("removed it");
         Hint(Settings("Host=db.example"), ConnectionHintIds.Multiplexing).Should().BeNull();
+    }
+
+    [Fact]
+    public void MUX_is_absent_without_the_keyword_on_every_Npgsql()
+    {
+        Hint(Settings("Host=db.example"), ConnectionHintIds.Multiplexing).Should().BeNull();
+        Hint(Settings("Host=db.example;Pooling=true"), ConnectionHintIds.Multiplexing).Should().BeNull();
     }
 
     [Fact]

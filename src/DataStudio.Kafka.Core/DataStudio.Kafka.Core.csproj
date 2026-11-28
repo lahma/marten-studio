@@ -64,7 +64,7 @@
     </PropertyGroup>
 
     <Error Condition="'$(DataStudioConfluentVersion)' != '$(DataStudioConfluentFloor)'"
-           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor), Directory.Packages.props), and this pack asks for Confluent.Kafka $(DataStudioConfluentVersion). A package packed here would depend on Confluent.Kafka &gt;= $(DataStudioConfluentVersion) and raise every host's Confluent.Kafka. Pack without DataStudioConfluentVersion, or raise DataStudioConfluentFloor deliberately and record why in AGENTS.md, Package budget changes." />
+           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor), Directory.Packages.props), and this pack asks for Confluent.Kafka $(DataStudioConfluentVersion). A package packed here would depend on Confluent.Kafka [$(DataStudioConfluentVersion), 3.0.0) and raise every host's Confluent.Kafka. Pack without DataStudioConfluentVersion, or raise DataStudioConfluentFloor deliberately and record why in AGENTS.md, Package budget changes." />
     <Error Condition="'$(_KafkaCoreAssetsFileExists)' != 'true'"
            Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
     <Error Condition="'$(_KafkaCoreAssetsFileExists)' == 'true' and '$(_KafkaCoreAssetsAtFloor)' != 'true'"

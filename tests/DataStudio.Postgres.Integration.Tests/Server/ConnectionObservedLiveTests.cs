@@ -94,8 +94,20 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         facts.Siblings.SumMaxPoolSize.Should().Be(100);
 
         // A second pool to the same host, port, database and login is a sibling whatever its Application Name: the meter is the process's.
-        await using NpgsqlDataSource second = NpgsqlDataSource.Create(
-            new NpgsqlConnectionStringBuilder(server.ConnectionString(MatrixRole.App, database)) { ApplicationName = "ms-connobs-second" }.ConnectionString);
+        // Not on Npgsql 11, which reports a pool under its Application Name, no connection string, so a second data source the studio
+        // does not hold cannot be identified (2026-11-28 entry of the package budget changes): there it has none and differs by another keyword.
+        NpgsqlConnectionStringBuilder secondSettings = new(server.ConnectionString(MatrixRole.App, database));
+        if (NpgsqlSettingsReader.LoadedMajor >= 11)
+        {
+            secondSettings.Remove("Application Name");
+            secondSettings.CommandTimeout = 7;
+        }
+        else
+        {
+            secondSettings.ApplicationName = "ms-connobs-second";
+        }
+
+        await using NpgsqlDataSource second = NpgsqlDataSource.Create(secondSettings.ConnectionString);
         await using NpgsqlConnection warm = await second.OpenConnectionAsync(Token);
 
         ConnectionFacts both = await ConnectionFacts.ReadAsync(context, Token);

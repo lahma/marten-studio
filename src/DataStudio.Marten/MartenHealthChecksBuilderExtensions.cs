@@ -96,6 +96,9 @@ public static class MartenHealthChecksBuilderExtensions
         // scans this method's IL.
         PostgresVersionGuard.Ensure();
 
+        // And Marten itself: this build supports Marten 9 only (#103).
+        MartenVersionGuard.Ensure();
+
         return AddMartenDiagnosticsHealthCheck(builder, name, failureStatus, tags, timeout);
     }
 

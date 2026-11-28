@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services.Connection;
 using DataStudio.Postgres.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -394,7 +395,7 @@ internal sealed record DataSourceEndpoints(IReadOnlyList<(string Host, int Port)
         try
         {
             NpgsqlConnectionStringBuilder settings = new(dataSource.ConnectionString);
-            return new DataSourceEndpoints(Parse(settings.Host, settings.Port), settings.Multiplexing);
+            return new DataSourceEndpoints(Parse(settings.Host, settings.Port), NpgsqlMultiplexing.Multiplexes(settings));
         }
         catch (ArgumentException)
         {

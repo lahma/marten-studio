@@ -4,17 +4,17 @@ This is the full text of D3, D21, the *Package budget changes* and *Held deliber
 
 ## D3
 
-**D3 — Few dependencies a package, and no upper bound on any.** Seven packages, one version:
+**D3 — Few dependencies a package, a floor on each, and an upper bound only at a next major known to break the build (Marten 10, WolverineFx.Kafka 7, Confluent.Kafka 3 and later):** one build of the Marten module or the Wolverine adapter cannot run on both majors, and Confluent.Kafka 4 is another client. Seven packages, one version:
 
 | Package | Takes |
 |---|---|
 | `DataStudio` (the shell) | `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`) and `FrameworkReference Microsoft.AspNetCore.App` |
 | `DataStudio.Postgres.Diagnostics` (the engine) | `Npgsql` (floor `9.0.4`) and four `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference at all |
 | `DataStudio.Postgres` | `DataStudio` and `DataStudio.Postgres.Diagnostics`, each at exactly its own version, and the framework reference |
-| `DataStudio.Marten` | `Marten` (floor `9.57.0`) and `DataStudio.Postgres` at exactly its own version, and the framework reference |
-| `DataStudio.Kafka.Core` (the Kafka engine) | `Confluent.Kafka` (floor `2.14.0`) and three `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference |
+| `DataStudio.Marten` | `Marten` (floor `9.57.0`, below `10.0.0`) and `DataStudio.Postgres` at exactly its own version, and the framework reference |
+| `DataStudio.Kafka.Core` (the Kafka engine) | `Confluent.Kafka` (floor `2.14.0`, below `3.0.0`) and three `Microsoft.Extensions.*` abstractions (floor `10.0.0`); no framework reference |
 | `DataStudio.Kafka` | `DataStudio` and `DataStudio.Kafka.Core`, each at exactly its own version, and the framework reference |
-| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core` at exactly its own version and `WolverineFx.Kafka` (floor `6.61.0`) |
+| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core` at exactly its own version and `WolverineFx.Kafka` (floor `6.61.0`, below `7.0.0`) |
 
 Everything else any of these needs (Blazor, SignalR, authorization, endpoint routing) is in the shared framework, so none pins an
 ASP.NET Core patch onto its host; nor does the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no
@@ -26,6 +26,8 @@ The Kafka module references no Postgres module, no engine of Postgres and no Npg
 nuspecs of the shell and of the three Kafka packages are asserted to name no database package (*Build*). The floors follow the latest releases (*Package budget changes*,
 2026-11-03: the user's policy of 2026-11-02 is that consumers keep up with Marten and Npgsql), tested and packed as *Build* says. The
 Marten module compiles without the JasperFx source generator Marten bundles, so its public API is the same whichever Marten built it.
+
+The three upper bounds are exclusive ranges in the nuspecs (`Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)`, `WolverineFx.Kafka [6.61.0, 7.0.0)`), `Pack` asserts them, and each is backed at startup, because a range only makes a restore warn (NU1608) and a host can still take a newer major: `MartenVersionGuard` (called by `AddMarten()` and `AddMartenDiagnostics()` right after `PostgresVersionGuard`), `ConfluentClientGuard` (the first call of `AddKafka()`'s body) and, for Wolverine, a shape check in `WolverineClusterSource` that turns a Wolverine whose Kafka configuration is no longer Confluent's into one note and no cluster (D43 holds: a note, never an exception). Data Studio 3.0 is the line for Marten 10 and Wolverine 7 (issue 103). No range on Npgsql, the ASP.NET Core assets or `Microsoft.Extensions.*`.
 
 ## D21
 
@@ -128,7 +130,7 @@ and turn each that leaves state a host may still carry into a health check or a 
 **The Postgres module's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
 `DataStudioNpgsqlFloor` (9.0.4, what the Postgres packages depend on; never above the Npgsql that Marten's
 own packages already require at the Marten floor, which `NpgsqlVersionTests` reads from the Marten module's restore) and
-`DataStudioNpgsqlLatest` (10.0.3) are defined there once, and the `Npgsql` row reads `$(DataStudioNpgsqlVersion)`
+`DataStudioNpgsqlLatest` (11.0.0) are defined there once, and the `Npgsql` row reads `$(DataStudioNpgsqlVersion)`
 only for a project that sets `DataStudioPostgresPinsNpgsql`. `build/Build.Npgsql.cs` resolves `--npgsql-version` (env
 `NPGSQL_VERSION`) - `floor`, the default; `latest`; or an exact version - but the whole-solution Restore, Compile and
 Test always get `-p:DataStudioNpgsqlVersion=<floor>`: handed to the solution, a higher Npgsql reaches the Marten module
@@ -136,8 +138,8 @@ and its tests through the `ProjectReference` with no diagnostic (PS-0), and the 
 combination. Anything but the floor adds `NpgsqlPass`, which `Test` triggers: a separate restore, build and test over
 `data-studio-postgres.slnf`, which holds exactly the projects that set the property and the shell they reference (which has
 no Npgsql to pin), and reaches nothing outside itself (`PostgresSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
-pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
-latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3` - never the
+pass's; the pass also sets `DataStudioExtensionsVersion` to `DataStudioExtensionsLatest` (11.0.0), because Npgsql 11's net10.0 asset asks for that `Microsoft.Extensions.*`. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
+latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=11.0.0 -p:DataStudioExtensionsVersion=11.0.0` - never the
 `.slnx`. A project that sets `DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request.
 
 **The Kafka module's Confluent.Kafka is `Directory.Packages.props`'s too, and needs no pass of its own.**

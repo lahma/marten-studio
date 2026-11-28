@@ -771,3 +771,57 @@ unchanged, so the fence tests' restore graphs do not see the analyzer; and `Pack
 asserts. The analyzer is the one `netstandard2.0` project: a compiler loads it, the SDK's on .NET and Visual Studio's on .NET Framework,
 and nothing ships it (D1). Exit: none planned. A later Razor compiler that writes other shapes would need the analyzer to
 follow (`CurrentCultureTextAnalyzerTests`, remarks).
+
+**2026-11-28 — latest-tested Npgsql 10.0.3 to 11.0.0, and `Microsoft.Extensions.*` follow it in that pass (2.0.2, task 43bf).** No
+package is added and no floor moves: `Npgsql` stays 9.0.4, `Microsoft.Extensions.*` 10.0.0, and `Pack` still packs at the floors only.
+`DataStudioNpgsqlLatest` is now 11.0.0 (2026-11-20), which the Postgres module's latest-Npgsql pass (`--npgsql-version latest`, over
+`data-studio-postgres.slnf`) tests.
+
+What it showed, 2026-11-28:
+
+- **Npgsql 11.0.0 removed `NpgsqlConnectionStringBuilder.Multiplexing`** (and `Write Coalescing Buffer Threshold Bytes`; Marten 10's
+  migration guide). 2.0.1 read the property in `DataSourceEndpoints.Of` and `DaemonTimeoutsCheck.SleepsInsteadOfKeepalive`: a
+  build at 11.0.0 failed with CS1061, and a host that took Npgsql 11 got `MissingMethodException` on the first health sweep. Both
+  now read the keyword through one engine helper, `NpgsqlMultiplexing.Multiplexes` (`TryGetValue("Multiplexing", ...)`, the same code
+  at Npgsql 9.0.4 and 11.0.0). `NpgsqlRemovedMemberTests` fails on any compiled reference, in the engine, the Postgres module or the Marten
+  module, to the four `NpgsqlConnectionStringBuilder` accessors Npgsql 11 removed (`Multiplexing` and `WriteCoalescingBufferThresholdBytes`,
+  get and set); it does not look for the other binary breaks between 9.0.4 and 11.0.0 (the types `NpgsqlLargeObjectManager` and
+  `NpgsqlLargeObjectStream`; `NpgsqlConnection.BeginTextExport`, `BeginTextExportAsync`, `BeginTextImport` and `BeginTextImportAsync`, and
+  `NpgsqlDataReader.GetColumnSchemaAsync`, whose return types changed), because a metadata scan of the three shipped assemblies finds no
+  reference to any of them. The tests that set the keyword skip where Npgsql does not know it ("Npgsql 11 removed Multiplexing"), each
+  with a twin that runs everywhere; the keyword catalog (`ConnectionHints`, `NpgsqlSettingsCatalog`) already read it by name.
+- **`Microsoft.Extensions.*` at 10.0.0 sit below what Npgsql 11.0.0 asks for.** Its net10.0 asset depends on
+  `Microsoft.Extensions.DependencyInjection.Abstractions` and `Logging.Abstractions` 11.0.0. Restoring `data-studio-postgres.slnf` with
+  `-p:DataStudioNpgsqlVersion=11.0.0`: the worker sample failed with NU1109 (a central pin below the minimum), and the engine, which
+  references the rows directly, resolved both at 10.0.0 under Npgsql 11 with no NU code, the silent downgrade of 2026-11-01. The five
+  conditional rows now read `$(DataStudioExtensionsVersion)`: `DataStudioExtensionsFloor` (10.0.0) by default, which is every build and
+  `Pack`, and `DataStudioExtensionsLatest` (11.0.0), which `NpgsqlPass` sets for the restore, build and test of a pass at any Npgsql but the
+  floor. The Kafka engine shares the rows, and no pass reaches it.
+- **Npgsql 11 names a pool after its `Application Name`.** `NpgsqlDataSource.Name` is `name ?? settings.ApplicationName ?? connection string
+  without the password` at v11.0.0 (v10.0.3: `name ?? connection string without the password`), and the meter reports the pool under it.
+  A pool of a data source the host built with an `Application Name` is then a *named* pool: not a connection string, so the sibling
+  count, which only C18 judges (the Connection page shows C18's result), can identify it only when the studio holds the data source
+  (`NamedPoolIdentities`: the data source the sweep is about, then the source provider's), and otherwise says it did not judge it
+  ("Not judged for N named pool(s)"), never a wrong count. That is the safe answer and it is unchanged code, but it is wider on
+  Npgsql 11, where most hosts set an application name. C01 and the Sessions page's pool summary match their pool by the same name and
+  refuse an ambiguous tally, so they too go "not judged" more often on Npgsql 11, whenever two pools share an `Application Name`
+  (a database per tenant under one application name, say). Recorded here; not changed in 2.0.2. The pass shows it in three live tests,
+  adjusted and not deleted: `ConnectionObservedLiveTests` builds its second pool without an `Application Name` on Npgsql 11, and the
+  two C18 tests in `ConnectionChecksLiveTests` skip there ("Npgsql 11 names a pool after its Application Name"), because every pool of the
+  suite's process is named and C18 then rightly judges none of them. `NpgsqlSettingsCatalogTests` now expects `Multiplexing` and
+  `Write Coalescing Buffer Threshold Bytes` to be absent from the loaded builder at 11 and keeps both in the catalogue, which a host on
+  Npgsql 9 or 10 still sets.
+
+**2026-11-28 — upper bounds on `Marten` (below 10.0.0), `Confluent.Kafka` (below 3.0.0) and `WolverineFx.Kafka` (below 7.0.0); no package added, no floor moved.**
+Data Studio 2.0.1 restored on Marten 10, Wolverine 7 and Confluent.Kafka 4 (D3 said no upper bound on any) and then failed at an arbitrary call
+with a `MissingMethodException` (issue 103). One build cannot serve both majors: Marten 10 and Wolverine 7 moved the types the module compiles
+against, Wolverine 7's `KafkaTransport.ConsumerConfig`, `ProducerConfig` and `AdminClientConfig` are Wolverine's own `KafkaConsumerOptions`,
+`KafkaProducerOptions` and `KafkaAdminClientOptions` where 6.61's are Confluent's, and Confluent.Kafka 4.4.0-alpha.1 is a different client (a
+Rust core and a Java-style API) under the same package id. Data Studio 3.0 is the line for Marten 10 and Wolverine 7. What changed: the three central rows in `Directory.Packages.props` became ranges (`[$(DataStudioMartenVersion), 10.0.0)`,
+`[$(DataStudioConfluentVersion), 3.0.0)`, `[6.61.0, 7.0.0)`), so the nuspecs say `Marten [9.57.0, 10.0.0)`, `Confluent.Kafka [2.14.0, 3.0.0)` and
+`WolverineFx.Kafka [6.61.0, 7.0.0)`, which `Pack` asserts; `--marten-version` and `--confluent-version` still take an exact version, now inside
+the range. Nothing else gets a bound: Npgsql, the ASP.NET Core assets and `Microsoft.Extensions.*` keep their floors. A range only makes a
+restore warn (NU1608); a host that ignores the warning is stopped at startup by `MartenVersionGuard` (`AddMarten()` and
+`AddMartenDiagnostics()`) and `ConfluentClientGuard` (`AddKafka()`), and a Wolverine 7 beside the adapter lists no cluster and says why in one
+note. Exit: 3.0 moves the Marten and WolverineFx.Kafka bounds with its own floors; the Confluent.Kafka bound stays until a driver for
+Confluent.Kafka 4 exists.

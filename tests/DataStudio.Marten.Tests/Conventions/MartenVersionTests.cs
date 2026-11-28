@@ -49,8 +49,9 @@ public class MartenVersionTests
             .Where(x => x.Name.LocalName == "PackageVersion" && (string?) x.Attribute("Include") == "Marten")
             .Should().ContainSingle().Subject;
 
-        ((string?) marten.Attribute("Version")).Should().Be("$(DataStudioMartenVersion)",
-            "the version must come from the property the build and `-p:` set, or the latest-tested leg tests the floor twice");
+        ((string?) marten.Attribute("Version")).Should().Be("[$(DataStudioMartenVersion), 10.0.0)",
+            "the version must come from the property the build and `-p:` set, or the latest-tested leg tests the floor twice, " +
+            "and the range must end at Marten 10, which this build cannot run on (#103)");
 
         var defaulted = PackagesProps.Value.Descendants()
             .Where(x => x.Name.LocalName == "DataStudioMartenVersion")
