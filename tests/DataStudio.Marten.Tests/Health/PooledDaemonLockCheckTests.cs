@@ -224,6 +224,8 @@ public class PooledDaemonLockCheckTests
     [Fact]
     public async Task C10_does_not_probe_a_multiplexing_data_source_and_says_why()
     {
+        NpgsqlKeywords.SkipUnlessMultiplexingIsKnown();
+
         await using HealthHarness harness = HealthHarness.Create(
             checks: [typeof(PooledDaemonLockProofCheck)],
             store: static options =>
@@ -238,6 +240,23 @@ public class PooledDaemonLockCheckTests
         result.Outcome.Should().Be(HealthCheckOutcome.Unavailable);
         result.Problem!.Reason.Should().Contain("Multiplexing=true");
         result.Statements.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task C10_does_not_call_a_data_source_without_the_keyword_multiplexing()
+    {
+        await using HealthHarness harness = HealthHarness.Create(
+            checks: [typeof(PooledDaemonLockProofCheck)],
+            store: static options =>
+            {
+                options.Connection(HealthHarness.RefusedConnectionString);
+                options.Projections.AsyncMode = DaemonMode.HotCold;
+                options.Events.UseAdvisoryLockTransaction = false;
+            });
+
+        HealthCheckResult result = (await harness.SweepAsync()).Results.Single();
+
+        result.Problem?.Reason.Should().NotContain("Multiplexing=true");
     }
 
     [Fact]

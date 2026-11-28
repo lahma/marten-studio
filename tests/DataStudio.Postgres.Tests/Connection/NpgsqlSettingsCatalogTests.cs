@@ -29,6 +29,9 @@ public sealed class NpgsqlSettingsCatalogTests
     /// <summary>The keywords Npgsql 10 added: the loaded 9.x builder does not have them.</summary>
     private static readonly string[] NewInTen = ["GSS Encryption Mode", "Include Failed Batched Command", "Require Auth"];
 
+    /// <summary>The keywords Npgsql 11.0.0 removed: the catalogue keeps them, because a host on Npgsql 9 or 10 still sets them.</summary>
+    private static readonly string[] GoneInEleven = ["Multiplexing", "Write Coalescing Buffer Threshold Bytes"];
+
     private static List<string> LoadedKeywords() =>
         [.. typeof(NpgsqlConnectionStringBuilder)
             .GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -43,12 +46,16 @@ public sealed class NpgsqlSettingsCatalogTests
     }
 
     [Fact]
-    public void Every_catalogue_keyword_exists_in_the_loaded_builder_but_for_the_three_new_in_Npgsql_10()
+    public void Every_catalogue_keyword_exists_in_the_loaded_builder_but_for_the_three_new_in_Npgsql_10_and_the_two_gone_in_11()
     {
         List<string> loaded = LoadedKeywords();
         string[] missing = [.. NpgsqlSettingsCatalog.Entries.Select(static x => x.Keyword).Where(x => !loaded.Contains(x, StringComparer.OrdinalIgnoreCase))];
 
-        if (NpgsqlSettingsReader.LoadedMajor >= 10)
+        if (NpgsqlSettingsReader.LoadedMajor >= 11)
+        {
+            missing.Should().BeEquivalentTo(GoneInEleven);
+        }
+        else if (NpgsqlSettingsReader.LoadedMajor >= 10)
         {
             missing.Should().BeEmpty();
         }

@@ -154,14 +154,32 @@
     that Npgsql through the ProjectReference, with no diagnostic, and the Marten module on Npgsql 10 is not
     a tested combination.
 
+    Since 2026-11-28 the latest tested is 11.0.0, which removed NpgsqlConnectionStringBuilder.Multiplexing (the studio
+    reads the keyword instead: NpgsqlMultiplexing) and whose net10.0 asset asks for Microsoft.Extensions.* 11.0.0, which
+    the Microsoft.Extensions rows below take in that pass (DataStudioExtensionsVersion).
+
     DataStudioNpgsqlVersion is what those projects restore. Empty means the floor. Pack packs
     The Postgres module at the floor only: the build's Pack target and src/DataStudio.Postgres/DataStudio.Postgres.csproj
     both refuse anything else.
   -->
   <PropertyGroup Label="Postgres module Npgsql version">
     <DataStudioNpgsqlFloor>9.0.4</DataStudioNpgsqlFloor>
-    <DataStudioNpgsqlLatest>10.0.3</DataStudioNpgsqlLatest>
+    <DataStudioNpgsqlLatest>11.0.0</DataStudioNpgsqlLatest>
     <DataStudioNpgsqlVersion Condition="'$(DataStudioNpgsqlVersion)' == ''">$(DataStudioNpgsqlFloor)</DataStudioNpgsqlVersion>
+  </PropertyGroup>
+
+  <!--
+    The version of the Microsoft.Extensions.* rows below. DataStudioExtensionsVersion is what is restored: empty means the
+    floor, 10.0.0, which Pack and every other build use. The latest-Npgsql pass (build/Build.Npgsql.cs) sets it to
+    DataStudioExtensionsLatest whenever it runs an Npgsql other than the floor, because Npgsql 11.0.0's net10.0 asset asks for
+    Logging.Abstractions and DependencyInjection.Abstractions 11.0.0, and a central pin below that either fails restore
+    (NU1109, the worker sample) or silently wins (the engine) - measured 2026-11-28. Only the projects that set
+    DataStudioDiagnosticsPinsExtensions or DataStudioKafkaCorePinsExtensions see the rows, and the pass reaches only the first.
+  -->
+  <PropertyGroup Label="Microsoft.Extensions version">
+    <DataStudioExtensionsFloor>10.0.0</DataStudioExtensionsFloor>
+    <DataStudioExtensionsLatest>11.0.0</DataStudioExtensionsLatest>
+    <DataStudioExtensionsVersion Condition="'$(DataStudioExtensionsVersion)' == ''">$(DataStudioExtensionsFloor)</DataStudioExtensionsVersion>
   </PropertyGroup>
 
   <ItemGroup Label="Postgres-only projects (they set DataStudioPostgresPinsNpgsql)">
@@ -227,11 +245,11 @@
     6.61's own net10.0 minimum and raises nothing.
   -->
   <ItemGroup Label="DataStudio.Postgres.Diagnostics and DataStudio.Kafka.Core (they set DataStudioDiagnosticsPinsExtensions or DataStudioKafkaCorePinsExtensions)" Condition="'$(DataStudioDiagnosticsPinsExtensions)' == 'true' or '$(DataStudioKafkaCorePinsExtensions)' == 'true'">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(DataStudioExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(DataStudioExtensionsVersion)" />
   </ItemGroup>
 
 </Project>

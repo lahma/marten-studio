@@ -52,6 +52,13 @@ partial class Build
     /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the Postgres-only Npgsql version from.</summary>
     const string NpgsqlVersionProperty = "DataStudioNpgsqlVersion";
 
+    /// <summary>
+    /// The MSBuild property the conditional <c>Microsoft.Extensions.*</c> rows take their version from. The second pass sets it to
+    /// <c>DataStudioExtensionsLatest</c>: Npgsql 11's net10.0 asset asks for 11.0.0 of two of them, which a central pin at the
+    /// floor either fails (NU1109) or silently beats.
+    /// </summary>
+    const string ExtensionsVersionProperty = "DataStudioExtensionsVersion";
+
     [Parameter("The Npgsql version the Postgres-only projects (data-studio-postgres.slnf) are tested against: " +
                "'floor' (the default - the version the DataStudio.Postgres package depends on, the only one Pack packs at, " +
                "and the one the whole-solution pass always uses), 'latest' (the newest Npgsql CI tests, pinned in " +
@@ -68,6 +75,9 @@ partial class Build
     /// <summary><c>DataStudioNpgsqlLatest</c> from <c>Directory.Packages.props</c>.</summary>
     string NpgsqlLatest { get; set; }
 
+    /// <summary><c>DataStudioExtensionsLatest</c> from <c>Directory.Packages.props</c>: the Microsoft.Extensions.* the second pass restores.</summary>
+    string ExtensionsLatest { get; set; }
+
     /// <summary>The exact Npgsql the second pass uses; the floor when there is no second pass.</summary>
     string ResolvedNpgsqlVersion { get; set; }
 
@@ -81,6 +91,7 @@ partial class Build
 
         NpgsqlFloor = ReadPackagesProperty(props, "DataStudioNpgsqlFloor");
         NpgsqlLatest = ReadPackagesProperty(props, "DataStudioNpgsqlLatest");
+        ExtensionsLatest = ReadPackagesProperty(props, "DataStudioExtensionsLatest");
 
         var requested = NpgsqlVersion?.Trim();
 
@@ -140,7 +151,8 @@ partial class Build
             DotNetRestore(_ => _
                 .SetProjectFile(PostgresSolutionFilter)
                 .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
-                .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion));
+                .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion)
+                .SetProperty(ExtensionsVersionProperty, ExtensionsLatest));
 
             DotNetBuild(_ => _
                 .SetProjectFile(PostgresSolutionFilter)
@@ -148,7 +160,8 @@ partial class Build
                 .EnableNoRestore()
                 .SetProperty("Version", Version)
                 .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
-                .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion));
+                .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion)
+                .SetProperty(ExtensionsVersionProperty, ExtensionsLatest));
 
             var testProjects = projects.Where(x => x.Name.EndsWith(".Tests", StringComparison.Ordinal)).ToList();
 
@@ -173,6 +186,7 @@ partial class Build
                         .SetProperty("Version", Version)
                         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
                         .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion)
+                        .SetProperty(ExtensionsVersionProperty, ExtensionsLatest)
                         .CombineWith(testProjects, (_, project) => WithBlameHang(_, project)
                             .SetProjectFile(project.Path)
                             .AddLoggers($"trx;LogFileName={project.Name}.npgsql-{ResolvedNpgsqlVersion}.trx")

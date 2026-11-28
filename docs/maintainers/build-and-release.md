@@ -128,7 +128,7 @@ and turn each that leaves state a host may still carry into a health check or a 
 **The Postgres module's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
 `DataStudioNpgsqlFloor` (9.0.4, what the Postgres packages depend on; never above the Npgsql that Marten's
 own packages already require at the Marten floor, which `NpgsqlVersionTests` reads from the Marten module's restore) and
-`DataStudioNpgsqlLatest` (10.0.3) are defined there once, and the `Npgsql` row reads `$(DataStudioNpgsqlVersion)`
+`DataStudioNpgsqlLatest` (11.0.0) are defined there once, and the `Npgsql` row reads `$(DataStudioNpgsqlVersion)`
 only for a project that sets `DataStudioPostgresPinsNpgsql`. `build/Build.Npgsql.cs` resolves `--npgsql-version` (env
 `NPGSQL_VERSION`) - `floor`, the default; `latest`; or an exact version - but the whole-solution Restore, Compile and
 Test always get `-p:DataStudioNpgsqlVersion=<floor>`: handed to the solution, a higher Npgsql reaches the Marten module
@@ -136,8 +136,8 @@ and its tests through the `ProjectReference` with no diagnostic (PS-0), and the 
 combination. Anything but the floor adds `NpgsqlPass`, which `Test` triggers: a separate restore, build and test over
 `data-studio-postgres.slnf`, which holds exactly the projects that set the property and the shell they reference (which has
 no Npgsql to pin), and reaches nothing outside itself (`PostgresSolutionFilterTests`); each test project's TRX is `<project>.npgsql-<version>.trx`, beside the floor
-pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
-latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3` - never the
+pass's; the pass also sets `DataStudioExtensionsVersion` to `DataStudioExtensionsLatest` (11.0.0), because Npgsql 11's net10.0 asset asks for that `Microsoft.Extensions.*`. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: latest`, so one workflow runs both
+latest legs. Without Fallout: `dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=11.0.0 -p:DataStudioExtensionsVersion=11.0.0` - never the
 `.slnx`. A project that sets `DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request.
 
 **The Kafka module's Confluent.Kafka is `Directory.Packages.props`'s too, and needs no pass of its own.**

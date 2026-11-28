@@ -8,6 +8,7 @@ using DataStudio.Marten.Services.Projections;
 using Npgsql;
 
 using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Connection;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
 using DataStudio.Postgres.Services.Server;
@@ -253,7 +254,7 @@ internal sealed class DaemonTimeoutsCheck : HealthCheck<DaemonTimeoutsFacts>
         try
         {
             NpgsqlConnectionStringBuilder builder = new(dataSource.ConnectionString);
-            return builder.KeepAlive > 0 || builder.Multiplexing;
+            return builder.KeepAlive > 0 || NpgsqlMultiplexing.Multiplexes(builder);
         }
         catch (ArgumentException)
         {
